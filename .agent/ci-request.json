@@ -3,6 +3,5 @@
   "ref": "main",
   "event": "push",
   "workflow": "",
-  "token_mode": "workflow",
-  "request_id": "aiko-atax-20261115"
+  "token_mode": "workflow"
 }
