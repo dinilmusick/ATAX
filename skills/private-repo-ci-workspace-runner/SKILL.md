@@ -1,7 +1,7 @@
 ---
 name: "Private Repository CI Workspace Runner"
 slug: private-repo-ci-workspace-runner
-version: 1.3.0
+version: 1.3.1
 source: Supabase Skills Database
 sourceId: 39
 status: active
