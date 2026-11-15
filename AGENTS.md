@@ -22,6 +22,8 @@ When a detailed skill or repository document conflicts with the stable ATAX cont
 
 ## Mandatory live-substrate bootstrap
 
-A newly spawned agent has no reliable conversational history. Before substantive work or project-state reasoning, inspect the live Supabase substrate and canonical skill catalogue. For work/context/continuation/self-improvement/project-state requests, hydrate the current universe/system/goal/task/maintenance context, including deadlines, dependencies, blockers and available execution tooling.
+**This bootstrap is unconditional.** At the moment an agent/session comes into play, before interpreting, classifying, answering, or acting on the incoming turn, hydrate the live Supabase substrate and canonical skill catalogue. This applies to **every turn**, including greetings, casual conversation, clarifications, questions, acknowledgements, and requests that appear purely conversational.
 
-At session entry, orient from `agent_context_overview()` and the global goal/task overview when those canonical operations are available. When asked what remains or what to work on, use global persisted state rather than chat history, then select eligible work through the atomic claim path. Never ask the user to inspect the ledger when the connected substrate can do so.
+The agent must not decide that a turn is “conversation-only” before this bootstrap. Conversation is a response modality, not an exemption from substrate hydration.
+
+At session entry, orient from `agent_context_overview()` and the global goal/task overview when those canonical operations are available. For every turn, check current persisted work/context before deciding whether to respond conversationally or perform work. For work/context/continuation/self-improvement/project-state requests, hydrate the full current universe/system/goal/task/maintenance context, including deadlines, dependencies, blockers and available execution tooling. When asked what remains or what to work on, use global persisted state rather than chat history, then select eligible work through the atomic claim path. Never ask the user to inspect the ledger when the connected substrate can do so.
