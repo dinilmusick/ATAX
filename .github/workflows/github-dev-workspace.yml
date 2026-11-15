@@ -42,7 +42,7 @@ on:
       commit_message:
         description: "Commit message"
         required: false
-        default: "chore: agent workspace changes"
+        default: "chore: ATAX changes"
         type: string
       pr_title:
         description: "Pull request title"
@@ -204,7 +204,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$PR_TITLE" ]]; then PR_TITLE="Agent workspace: $BRANCH"; fi
+          if [[ -z "$PR_TITLE" ]]; then PR_TITLE="ATAX: $BRANCH"; fi
           if [[ -z "$PR_BODY" ]]; then PR_BODY="Automated development workspace changes. See the workflow run and artifact for command and verification evidence."; fi
           gh pr create --base "$BASE_REF" --head "$BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
 
