@@ -15,7 +15,7 @@ concurrency:
 jobs:
   acquire:
     if: >-
-      github.event.repository.full_name == 'dinilmusick/Agent-Workspace-1' &&
+      github.event.repository.full_name == 'dinilmusick/ATAX' &&
       github.event.issue.user.login == 'dinilmusick' &&
       startsWith(github.event.issue.title, '[acquire-repo] ')
     runs-on: ubuntu-latest
@@ -93,7 +93,7 @@ jobs:
               body = f"Acquisition did not complete successfully. No successful acquisition is claimed. Inspect the Actions run for the precise failure.\n\nActions evidence: {run_url}"
           payload = json.dumps({"body": body}).encode()
           request = urllib.request.Request(
-              f"https://api.github.com/repos/dinilmusick/Agent-Workspace-1/issues/{os.environ['ISSUE_NUMBER']}/comments",
+              f"https://api.github.com/repos/dinilmusick/ATAX/issues/{os.environ['ISSUE_NUMBER']}/comments",
               data=payload, method="POST",
               headers={"Accept":"application/vnd.github+json","Authorization":f"Bearer {os.environ['GH_TOKEN']}",
                        "X-GitHub-Api-Version":"2022-11-28","Content-Type":"application/json"})
