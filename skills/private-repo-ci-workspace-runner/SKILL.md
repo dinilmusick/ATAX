@@ -40,29 +40,18 @@ Do not jump directly from a red CI result to editing application code.
 
 ## Execution
 
-**Local runtime is preferred.** This workflow is the fallback when a local container/runtime is unavailable or cannot execute the target reliably.
+**Container/runtime first; ATAX public runner second.**
 
-1. If a local container/runtime is available, first clone ATAX into it and attempt direct target-repository cloning there.
-2. If the private target cannot be cloned directly, use ATAX's GitHub/private-repository tooling to materialize the authorized target under its dedicated `clones/` area, then operate through the public ATAX checkout and its scripts/tools.
-3. Run the target's native install, lint, format, typecheck, test, integration and **custom build scripts** locally whenever possible.
-4. Only when the local runtime is unavailable or insufficient, build a request in `.agent/ci-request.json`:
-   repository, ref, event, workflow, token_mode, request_id.
-5. Trigger `.github/workflows/private-repo-ci.yml`.
-6. The public ATAX runner clones the target into its dedicated `clones/` directory.
-7. Validate target workflow definitions and the requested ref.
-8. Before execution, inspect newly added or modified tests and verify imports against actual target exports; run narrow tests locally when possible.
-9. Execute the selected workflow(s) with the pinned `act` release.
-7. Capture run status, logs, test/typecheck/build output and artifacts.
-8. If any step fails:
-   - classify the failure;
-   - search obstacle memory;
-   - record the occurrence before changing code;
-   - fix the smallest correct layer;
-   - rerun.
-9. Independently verify the result.
-10. Always remove the clone and credentialed remote.
-11. Update the obstacle resolution with final evidence when an obstacle occurred.
+1. Clone ATAX into the container and attempt direct private-target cloning.
+2. If direct cloning fails, use ATAX GitHub tools to provision an **ephemeral public repository** as a compute bridge.
+3. Configure the bridge's encrypted Actions secret with least-privilege private-repository access. The secret is consumed by GitHub Actions at runtime; it is not expected to be visible to the agent's local process.
+4. Clone the public bridge into the container when network access permits and work through it there. Otherwise execute through the bridge's public GitHub-hosted runner.
+5. Validate the target ref/workflows and execute the selected workflow with pinned `act`.
+6. Poll until terminal; capture logs, tests, typecheck/build output and artifacts.
+7. On failure: classify → obstacle-search → record → repair smallest layer → rerun → independently verify.
+8. Remove the private checkout, delete the ephemeral public repository, and independently verify deletion.
 
+Never switch to direct private-repository CI. Never publish private source to the bridge.
 ## Failure classification
 
 Distinguish:
