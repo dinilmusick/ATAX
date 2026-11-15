@@ -1,7 +1,7 @@
 ---
 name: "Persistent Multi-Agent Execution"
 slug: persistent-multi-agent-execution
-version: 1.2.0
+version: 1.3.0
 source: Supabase Skills Database
 sourceId: 46
 status: active
@@ -9,72 +9,34 @@ status: active
 
 # Persistent Multi-Agent Execution
 
-Use for parallel coding execution where ChatGPT worker conversations may pause, lose conversational continuity, or require a bulk resume signal.
+Use for durable execution where ChatGPT agents may pause, disappear, or lose conversational continuity.
 
 ## Canonical boundary
 
-- Supabase: goals, parent tasks, dependencies, leases, non-coding coordination and durable cross-task evidence.
-- GitHub Issue: detailed execution state and worker/orchestrator communication for each coding task.
-- GitHub PR: implementation artifact for that task.
-- GitHub Actions/CI: verification evidence.
+Supabase = durable goals/tasks/dependencies/leases/evidence. GitHub Issue = coding execution state. PR = implementation artifact. CI = verification evidence.
 
-## Orchestrator
+## Transient-agent invariant
 
-1. Create one Issue for each independent coding task.
-2. Put objective, acceptance criteria, dependencies and initial Current Implementation State in the Issue.
-3. Assign/spawn one worker per Issue and one dedicated PR per worker.
-4. Poll active Issues, linked PRs and CI continuously.
-5. When a worker asks a question, answer it in the Issue; never keep the decision only in chat.
-6. Continue polling until all tasks are terminal or have a genuine external blocker.
-7. Reconcile Issues and PRs before finalization.
+Agents are spawned externally by the ChatGPT interface. ATAX does not spawn or schedule agents. An incoming agent reconstructs context from the substrate, executes finite work, persists evidence/state, verifies, then may leave. Continuity comes from persistent state, not resident agents.
 
 ## Worker
 
-Before every action, read the complete Issue and latest comments. Maintain Current Implementation State:
+Load complete task context before acting. Persist status, current work, next action, blockers, evidence and resume point. Claim atomically; heartbeat about every 2 minutes; check ownership about every 5 minutes; stale recovery requires >=5 minutes without heartbeat. If ownership is lost, stop. Never keep essential state only in chat.
 
-Status
-Completed work
-Current work
-Next action
-Blocker
-Question for orchestrator
-Orchestrator response
-Resume point
-Files/tests/evidence
+## Always-Available Work
 
-When blocked: persist the blocker, exact question, attempted resolution and resume point to the Issue, then poll for the orchestrator response. Never disappear with unresolved state.
+When no executable finite ledger task exists, the incoming agent must discover applicable Always-Available Work rather than idle:
+- constraint-enforcement
+- goal-implementation-push
+- system-health-check
+- system-optimization
 
-## Global continuation
+These modalities produce finite work units. Constraint work is detect -> observe -> remediate -> independently verify -> recheck. Goal push measures implementation gap and advances until acceptance is actually satisfied.
 
-"continue" or "proceed" is a global resume signal, not a new task. Every worker rereads its own Issue:
+## Verification
 
-- terminal → no-op; do not invent work
-- active → continue current task
-- blocker resolved → resume from recorded resume point
-- blocker unresolved → remain waiting/polling
-- new orchestrator instruction → follow it
+Completion requires persisted evidence and independent verification. Started/pollable operations must be waited on and verified. If substrate behavior changes, update the canonical Supabase skill and this repository copy.
 
-The user never needs to identify which workers are complete or blocked.
+## Coding
 
-## Safety
-
-No duplicate work. No unrelated changes. Preserve evidence. Never claim completion without verification. User intervention is required only for genuine external decisions, permissions, unavailable capabilities or unrecoverable blockers.
-
-
-## Goal-phase dependency gates
-
-Before dispatching workers for a phase, inspect its parent goal's `goal_dependencies`. A blocking edge means the dependent phase remains locked until its prerequisite goal is completed and all prerequisite descendants are independently verified. Do not dispatch or manually start tasks in a locked phase; the database rejects task transitions to `running` regardless of the claim route. Advisory edges are informational and must not serialize work. Orchestrators must create all blocking edges before worker dispatch and report the exact prerequisite preventing a phase from starting.
-
-
-## SUBSTRATE_PROTOCOL_V3
-All agents are ephemeral workers. Supabase is canonical coordination state; chat is not durable state. Before acting, load the current Task Ledger and the narrowest applicable specialist skill. Persist every meaningful checkpoint: current_step, activity, progress, discoveries, blockers, evidence and next_action.
-WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->independentVerify->finalize. Claims MUST use the atomic ledger claim path. HEARTBEAT~2m->checkpoint+renew lease. OWNERSHIP_CHECK~5m->if fence is lost: append final handoff note, stop immediately, and never overwrite the new owner. Recovery is allowed after heartbeat silence>=5m; the new worker reads the task row, checkpoint and task events before continuing. Use fenced release for queued/blocked/abandoned work.
-LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
-CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
-SKILL TIMING: use this skill for persistent multi-agent execution; workers must re-read their canonical Issue after any material state change and before resuming. Continue/proceed resumes the existing task, not a new task. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
-
-## Durable checkpoint blockers
-
-For bounded-v2 coding work, the Supabase checkpoint blocker is the durable blocker record in addition to the GitHub Issue. Use `report_checkpoint_blocker` when a worker must stop. The RPC deduplicates equivalent blockers and increments global notoriety per distinct agent/task/checkpoint/attempt.
-
-Before resuming, inspect the active blocker list and prioritize the highest-notoriety blocker. Notoriety >5 must be surfaced to the user. Resolve through `resolve_checkpoint_blocker` with concrete evidence, then continue from the persisted checkpoint.
+One independent coding task -> one Issue -> one dedicated PR. Preserve blockers, decisions and resume state in the Issue.
