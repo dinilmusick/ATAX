@@ -28,7 +28,7 @@ Use for substantive software implementation spanning more than a trivial edit.
 4. Search for existing libraries, utilities, patterns, and open-source implementations before inventing replacements. Prefer the repository's established conventions.
 5. Produce a short ordered implementation plan internally. Split work into independently verifiable changes; preserve user changes and avoid unrelated cleanup.
 6. Implement the smallest coherent change. Keep interfaces explicit, errors observable, and behavior deterministic. Do not introduce placeholders, fake data, or silent fallbacks.
-7. Add or update tests at the narrowest useful level. If a local container/runtime is accessible, clone Agent-Workspace-1 into it and use its tools/scripts as the primary execution substrate. Attempt the target repository directly; for private-repository clone failures, use Agent-Workspace-1's private-repository tooling and dedicated `clones/` workspace as the bridge. Run the target's relevant tests, type checks, lint, and **every repository-defined build script/custom build command that participates in the real build** locally before falling back to GitHub Actions.
+7. Add or update tests at the narrowest useful level. If a local container/runtime is accessible, clone ATAX into it and use its tools/scripts as the primary execution substrate. Attempt the target repository directly; for private-repository clone failures, use ATAX's private-repository tooling and dedicated `clones/` workspace as the bridge. Run the target's relevant tests, type checks, lint, and **every repository-defined build script/custom build command that participates in the real build** locally before falling back to GitHub Actions.
 8. Use GitHub Actions as the fallback when no usable local runtime exists, the local environment cannot reproduce the required platform, or remote-runner evidence is explicitly required. Do not skip verification merely because private CI is unavailable; use the Agent-Workspace private-repo CI fallback.
 9. Inspect the actual runtime result when UI, deployment, networking, or integration behavior is involved. Source correctness is not proof of rendered/runtime correctness.
 9. Diagnose failures from logs and reproduction. Fix root causes rather than suppressing errors.
@@ -64,7 +64,7 @@ Coding Workflow is reached through Coding Router. The router and selected specia
 
 ## Private repository CI fallback
 
-For private repositories, use native CI when it is available and useful. If it is unavailable, exhausted, blocked, or unsuitable, activate private-repo-ci-workspace-runner and execute the target workflow through Agent-Workspace-1.
+For private repositories, use native CI when it is available and useful. If it is unavailable, exhausted, blocked, or unsuitable, activate private-repo-ci-workspace-runner and execute the target workflow through ATAX.
 
 Required evidence flow:
 
@@ -84,7 +84,7 @@ The pass must search for and address bugs, stubs, placeholders, TODO-like incomp
 
 ## Deterministic execution bootstrap
 
-For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone Agent-Workspace-1 into that runtime; use its tools/scripts; attempt the target repository directly; if a private target cannot be cloned directly, use the Agent-Workspace-1 private-repository tooling and dedicated clones bridge. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
+For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone ATAX into that runtime; use its tools/scripts; attempt the target repository directly; if a private target cannot be cloned directly, use the ATAX private-repository tooling and dedicated clones bridge. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
 
 The canonical local preflight is `python tools/agent-bootstrap/bootstrap.py plan`; use `prepare` to establish the workspace and target checkout. Never place credentials in source, logs or task metadata.
 
