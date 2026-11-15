@@ -9,4 +9,4 @@ Systems have goals, constraints, state, evidence and work priority. Constraints 
 
 Supabase is the canonical durable state. Do not rely on chat history for durable context.
 
-Do not encode downstream product, repository or ecosystem-specific details here. ATAX should provide that context dynamically from persistent system state.
+Do not encode downstream product, repository or ecosystem details here. ATAX should provide that context dynamically from persistent state.
