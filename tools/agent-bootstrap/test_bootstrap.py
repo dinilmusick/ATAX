@@ -16,6 +16,6 @@ class BootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result=subprocess.run([sys.executable,str(SCRIPT),"plan","--workspace",str(Path(tmp)/"missing")],cwd=tmp,text=True,capture_output=True)
             self.assertEqual(result.returncode,0)
-            self.assertIn("Clone Agent-Workspace-1",result.stdout)
+            self.assertIn("Clone ATAX",result.stdout)
 
 if __name__ == "__main__": unittest.main()
