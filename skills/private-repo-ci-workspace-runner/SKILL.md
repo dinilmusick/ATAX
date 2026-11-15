@@ -116,3 +116,17 @@ WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->indepe
 LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
 CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
 SKILL TIMING: use this skill when its trigger matches; load supporting skills before their required action, not after. Prefer the narrowest specialist skill plus only necessary support skills. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
+
+## Mandatory private-CI routing invariant
+
+This runner is the public-workspace bridge for private repositories. **Never execute CI directly in the private target repository.**
+
+Required lifecycle:
+
+provision ephemeral public workspace → configure least-privilege secret → clone private target at runtime → validate target workflow → execute on public GitHub runner → capture evidence → independently verify → delete workspace → verify deletion
+
+The ephemeral public repository is a temporary **compute bridge**, not a source mirror. The private target source must never be committed or pushed into it, and must not appear in public artifacts or logs.
+
+Use the ATAX disposable-workspace/repository-lifecycle tooling rather than inventing a separate repository lifecycle. Local execution is allowed for reproduction, but when GitHub Actions evidence is requested/required the public-workspace path is mandatory.
+
+If the public-workspace path cannot be provisioned, classify the substrate obstacle and repair the substrate; do not silently switch to direct private-repository CI.
