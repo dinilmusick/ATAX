@@ -28,21 +28,11 @@ Use GitHub itself as the development substrate. This capability does not require
 - Commit and push verified changes when explicitly requested.
 - Preserve logs as workflow artifacts.
 
-## Local Runtime First
+## Execution Substrate
 
-When a local container, shell, or other code-execution runtime is available, **use it as the primary execution environment**. This is preferred over GitHub Actions because it is faster and exposes direct test/build output.
+**Container/runtime first.** Clone ATAX into the container and use its tools/scripts. Attempt direct target cloning. If a private target cannot be cloned directly, use ATAX GitHub tools to provision an **ephemeral public repository as a compute bridge**; clone that bridge into the container when possible. If the container cannot execute the required work, use the bridge's public GitHub runner. The private target is cloned only at runtime and is never published to the bridge.
 
-Before working on a target repository:
-
-1. Clone **ATAX** into the accessible local runtime when it is not already present.
-2. Use the ATAX tools and scripts from that checkout rather than recreating their behavior manually.
-3. Attempt to clone the target repository directly into the local runtime.
-4. If the target is private and direct cloning fails, use ATAX's GitHub/private-repository workspace tooling to materialize the authorized private repository in the workspace's dedicated `clones/` area. Then use the public ATAX checkout as the accessible bridge for running the workspace tooling and scripts against that materialized target.
-5. Prefer local execution for install, lint, format, typecheck, tests, integration checks, build scripts and application validators whenever the runtime permits.
-6. Use GitHub Actions only when the local runtime is unavailable, cannot reproduce the required environment, or the task specifically requires remote-runner evidence.
-
-Never weaken repository access controls to make a private clone work. Never expose repository credentials in source, logs or prompts.
-
+The ChatGPT GitHub connector is for ordinary repository reading/editing/PR operations. It is **not** the provisioning or CI execution path for private-repository work. Never weaken repository access controls or expose credentials.
 ## Mandatory obstacle reflex
 
 Obstacle recording is part of normal repository development, not an optional documentation step.
