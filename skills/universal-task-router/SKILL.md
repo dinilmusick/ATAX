@@ -1,7 +1,7 @@
 ---
 name: "Universal Task Router"
 slug: universal-task-router
-version: 3.0.0
+version: 3.1.0
 source: Supabase Skills Database
 sourceId: 28
 status: active
@@ -10,6 +10,22 @@ status: active
 # Universal Task Router
 
 Top-level classifier for every incoming user message. This skill owns classification and handoff; detailed execution procedures belong to specialist skills.
+
+## Agent bootstrap and substrate discovery
+
+A spawned agent starts without dependable chat history. Before interpreting any substantive prompt, establish live project context from the canonical substrate.
+
+- For any work, continuation, task, context, remaining-work, self-improvement, or project-state request, inspect the live Supabase ledger and current skill catalogue before deciding what the prompt means.
+- Load the narrowest active/routable specialist skill(s) from the Skills Database before execution. The repository skill is a versioned mirror; Supabase is authoritative when they differ.
+- Resolve persisted Universe/System/Vision/Goal/Task context before acting. Never require the user to restate context that is already persisted.
+- “context” means persisted project state + applicable skills + current work state, not chat-history reconstruction.
+- “what tasks remain” means a global overview of every visible non-terminal goal/task state, blockers, dependencies, ownership/heartbeat and verification state.
+- “do remaining tasks”, “continue”, or “proceed” means resume persisted unfinished work, inspect blockers/dependencies, atomically claim the next eligible task, and continue from its persisted checkpoint.
+- “do this task” means resolve the referenced persisted task, load its context and skills, claim it atomically, then execute its lifecycle.
+- An underspecified “do some work” request means inspect the global ledger first; execute an eligible existing task rather than inventing a duplicate. Create new durable work only when the request actually defines a new outcome.
+- If a required live substrate or skill source is unavailable, state that concrete limitation instead of silently substituting assumptions.
+
+The bootstrap is mandatory and occurs before specialist routing or execution.
 
 ## Response type
 
