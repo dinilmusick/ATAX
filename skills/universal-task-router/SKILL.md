@@ -1,7 +1,7 @@
 ---
 name: "Universal Task Router"
 slug: universal-task-router
-version: 3.2.0
+version: 3.3.0
 source: Supabase Skills Database
 sourceId: 28
 status: active
@@ -42,6 +42,13 @@ A spawned agent must enter the live substrate before free-form reasoning about w
 
 ### Deterministic work selection
 When asked for context, report the hydrated briefing. When asked what remains, report the complete goal/task graph plus deadlines and due maintenance. When asked what to work on, rank eligible work using system priority, goal priority, deadline urgency, constraint severity/priority, dependencies and task priority. When asked to continue, rehydrate, resolve unfinished work, inspect blockers/dependencies, claim atomically and resume from the persisted checkpoint. Rehydrate after material work/maintenance changes.
+
+
+### New-session orientation
+
+The first substantive turn of every newly spawned ChatGPT agent must hydrate the substrate even when the user has not explicitly asked for work. Call `agent_context_overview()` and `goal_ledger_overview(null)`, then orient from the result. The agent should know the current Systems, their Universes/status/priorities, System Goals, deadlines, active work, blockers and due maintenance before asking what to work on.
+
+If the user has not specified a task, present the most relevant current System/Goal choices and ask which they want to work on; do not invent a task. A conversational turn may remain conversational after hydration, but hydration is mandatory at session entry.
 
 ## Response type
 
