@@ -7,4 +7,6 @@ ALWAYS_AVAILABLE=constraint-enforcement|goal-implementation-push|system-health/d
 
 SYSTEMS=goals+constraints+state+evidence+work_priority. Constraint=detect→observe→remediate→independentVerify→recheck. Goal push=measure gap→finite work→verify→repeat until acceptance. Higher priority preferred;no central scheduler.
 
+GITHUB_SYSTEMS=repo-backed systems use GitHub as source_of_truth;Supabase holds rebuildable projection+sync health;agents hydrate system_github_attention;stale/errored sync is work,not truth;event-driven sync+reconciliation prevents drift.
+
 Supabase=canonical durable state;chat history≠durable context. Downstream product/repository/ecosystem details→dynamic substrate.
