@@ -1,6 +1,6 @@
 # GitHub Development Tools
 
-These tools turn Agent-Workspace-1 into a GitHub-native development substrate.
+These tools turn ATAX into a GitHub-native development substrate.
 
 ## Capabilities
 
