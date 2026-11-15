@@ -52,19 +52,36 @@ def pages(path: str, bearer: str, per_page: int = 100):
         page += 1
 
 
+def compact_repo(repo: dict) -> dict:
+    return {
+        "full_name": repo["full_name"],
+        "private": repo["private"],
+        "default_branch": repo.get("default_branch"),
+        "archived": repo.get("archived", False),
+        "clone_url": repo["clone_url"],
+        "permissions": repo.get("permissions", {}),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--org", help="Only list repositories in this organization.")
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--org", help="Only inspect this organization.")
     args = parser.parse_args()
 
     bearer = token()
     user = api("/user", bearer)
 
-    if args.org:
-        orgs = [args.org]
-    else:
-        orgs = [item["login"] for item in pages("/user/orgs", bearer)]
+    orgs = [args.org] if args.org else [
+        item["login"] for item in pages("/user/orgs", bearer)
+    ]
+
+    account_repos = [
+        compact_repo(repo)
+        for repo in pages(
+            "/user/repos?affiliation=owner,collaborator,organization_member&visibility=all&sort=full_name",
+            bearer,
+        )
+    ]
 
     result = {
         "account": {
@@ -72,21 +89,19 @@ def main() -> int:
             "id": user.get("id"),
             "name": user.get("name"),
         },
+        "repositories": account_repos,
         "organizations": [],
     }
 
     for org in orgs:
-        repos = []
-        for repo in pages(f"/orgs/{org}/repos?type=all&sort=full_name", bearer):
-            repos.append({
-                "full_name": repo["full_name"],
-                "private": repo["private"],
-                "default_branch": repo.get("default_branch"),
-                "archived": repo.get("archived", False),
-                "clone_url": repo["clone_url"],
-                "permissions": repo.get("permissions", {}),
-            })
-        result["organizations"].append({"login": org, "repositories": repos})
+        repos = [
+            compact_repo(repo)
+            for repo in pages(f"/orgs/{org}/repos?type=all&sort=full_name", bearer)
+        ]
+        result["organizations"].append({
+            "login": org,
+            "repositories": repos,
+        })
 
     print(json.dumps(result, indent=2))
     return 0
