@@ -60,7 +60,7 @@ This is **not** a narrow bug-fix, code-review, or test-only pass. It is a whole-
    - Exercise real runtime behavior where possible.
    - Run browser/API/platform/end-to-end workflows when the system crosses those boundaries.
    - Inspect logs, network behavior, persisted state and rendered output where relevant.
-   - Use Agent-Workspace-1 for broader repository/CI/ecosystem verification when needed.
+   - Use ATAX for broader repository/CI/ecosystem verification when needed.
 
 6. **Repeat**
    Treat the pass as an iterative loop:
