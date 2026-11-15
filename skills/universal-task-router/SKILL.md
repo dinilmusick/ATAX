@@ -1,7 +1,7 @@
 ---
 name: "Universal Task Router"
 slug: universal-task-router
-version: 3.1.0
+version: 3.2.0
 source: Supabase Skills Database
 sourceId: 28
 status: active
@@ -26,6 +26,22 @@ A spawned agent starts without dependable chat history. Before interpreting any 
 - If a required live substrate or skill source is unavailable, state that concrete limitation instead of silently substituting assumptions.
 
 The bootstrap is mandatory and occurs before specialist routing or execution.
+
+
+## Mandatory system-context hydration
+
+A spawned agent must enter the live substrate before free-form reasoning about work. For any work, context, remaining-work, continuation, self-improvement, maintenance, planning, or project-state prompt, hydrate the current briefing and open-work graph from Supabase.
+
+### Context briefing
+- Call `agent_context_overview()` for the current universe/system/goal/task/maintenance briefing.
+- Call `goal_ledger_overview(null)` for the complete open goal/task graph; never use a selected goal as a substitute for global discovery.
+- Treat **Systems** as first-class planning entities. Inspect each relevant system's universe, status, priority, improvement state, System Goals, active constraints and maintenance schedule.
+- A Goal with `system_id` is a **System Goal**: desired outcomes or maintenance objectives for that governed system. A Goal without `system_id` is a general goal. Do not collapse System Goals, Tasks and System Constraints into one abstraction.
+- Goals have explicit `deadline_at`; Tasks have `due_at`. Surface overdue and imminent deadlines before selecting work.
+- Active System Constraints may have `check_interval_minutes`, `last_checked_at` and `next_check_at`. A check is due when `next_check_at` has passed or the interval has elapsed. Due checks are maintenance work and must produce persisted observations/evidence; violations must create/link remediation work.
+
+### Deterministic work selection
+When asked for context, report the hydrated briefing. When asked what remains, report the complete goal/task graph plus deadlines and due maintenance. When asked what to work on, rank eligible work using system priority, goal priority, deadline urgency, constraint severity/priority, dependencies and task priority. When asked to continue, rehydrate, resolve unfinished work, inspect blockers/dependencies, claim atomically and resume from the persisted checkpoint. Rehydrate after material work/maintenance changes.
 
 ## Response type
 
