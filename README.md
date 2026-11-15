@@ -102,3 +102,12 @@ For the complete protocol, start with `AGENTS.md`, `skills/task-ledger/SKILL.md`
 Bounded-v2 checkpoints persist a `blockers` array. Unresolved blockers are normalized and deduplicated globally, with one occurrence recorded per agent/task/checkpoint/attempt. The resulting **notoriety** score measures repeated failure: scores above 5 are surfaced as notorious blockers and become first-class user-attention items.
 
 User-defined goal priority is a separate normalized 0..1 signal. Claim ordering is database-enforced as goal priority → blocker notoriety → task priority. Workers inspect the blocker overview before execution, attempt the highest-notoriety active blocker first, and persist unresolved blockers through the checkpoint blocker RPCs.
+
+
+## Private-repository CI boundary
+
+ATAX's private-repository CI methodology uses **ephemeral public repositories as temporary compute bridges**. A private target is never executed directly by GitHub Actions.
+
+The bridge repository is created with ATAX tooling, receives only the runner/workflow machinery, clones the authorized private target at runtime with a least-privilege secret, executes the target checks on a public GitHub-hosted runner, records evidence, and is then deleted and deletion-verified. Private source is never committed or pushed into the public bridge.
+
+This is a hard execution invariant, not merely a fallback preference.
