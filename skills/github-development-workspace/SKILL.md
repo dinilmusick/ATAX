@@ -97,8 +97,12 @@ create repository
 ## Routing
 
 ```text
-private repo + native CI unavailable
-  -> private-repo-ci-workspace-runner
+private repository + CI/build/test evidence
+  -> ATAX GitHub tools
+  -> ephemeral public bridge
+  -> runtime private clone
+  -> container when usable, otherwise public GitHub runner
+  -> evidence -> independent verification -> delete + verify deletion
 
 any authorized repo + code execution/edit/build/test
   -> github-development-workspace
@@ -107,7 +111,6 @@ new Skipo application
   -> create-skipo-app workflow
   -> github-development-workspace
 ```
-
 ## Supabase independence
 
 Supabase is the canonical persistence layer for goals, tasks, ownership, leases and evidence when available. It is not required for repository development. An agent with GitHub access and this skill can perform the complete repository lifecycle using GitHub repository state, Actions, artifacts and workflow logs.
