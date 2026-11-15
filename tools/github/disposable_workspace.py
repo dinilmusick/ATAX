@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
-"""Create a disposable public repository from an authorized private repository.
+"""Provision an ephemeral public ATAX CI bridge for a private repository.
 
-This intentionally publishes the selected source repository's contents into a
-new public repository. Use only for repositories whose contents are authorized
-to become public for the duration of the disposable workspace.
-
-The source is never modified. The disposable repository is created under the
-authenticated user account and can be deleted with repository_lifecycle.py.
+The private source is never copied into the public repository. The bridge
+contains only a workflow, stores a least-privilege token as an Actions secret,
+clones the private target at runtime, executes its workflow with act, and
+removes the checkout before the job ends.
 """
 from __future__ import annotations
-
-import argparse
-import json
-import os
-import shutil
-import subprocess
-import tempfile
-from pathlib import Path
+import argparse, base64, json, os, shutil, subprocess
 from urllib import error, request
 
 API_ROOT = "https://api.github.com"
@@ -26,6 +17,81 @@ HEADERS = {
     "User-Agent": "atax-disposable-github-workspace",
 }
 
+WORKFLOW = """name: ATAX Private CI Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Private repository owner/name
+        required: true
+        type: string
+      ref:
+        description: Branch, tag, or SHA
+        required: false
+        default: main
+        type: string
+      event:
+        description: act event
+        required: false
+        default: push
+        type: string
+      workflow:
+        description: Optional workflow filename
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  private-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Clone private target at runtime
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+          TARGET_REF: ${{ inputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_REPO_TOKEN"
+          rm -rf target
+          git -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
+            clone --depth 1 --branch "$TARGET_REF" "https://github.com/$TARGET_REPOSITORY.git" target
+
+      - name: Install pinned act
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 6 --retry-delay 4 --retry-all-errors --connect-timeout 20 --max-time 180 \
+            https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz -o /tmp/act.tar.gz
+          echo "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0  /tmp/act.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/act.tar.gz -C /tmp act
+          sudo install -m 0755 /tmp/act /usr/local/bin/act
+
+      - name: Execute target workflow
+        env:
+          TARGET_EVENT: ${{ inputs.event }}
+          TARGET_WORKFLOW: ${{ inputs.workflow }}
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          args=("$TARGET_EVENT" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest" "--artifact-server-path" "/tmp/atax-artifacts" "--secret" "GITHUB_TOKEN=$PRIVATE_REPO_TOKEN")
+          if [[ -n "$TARGET_WORKFLOW" ]]; then
+            args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
+          fi
+          act "${args[@]}"
+
+      - name: Remove private checkout
+        if: always()
+        run: rm -rf target
+"""
 
 def token() -> str:
     value = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -33,18 +99,13 @@ def token() -> str:
         raise SystemExit("Missing GITHUB_TOKEN or GH_TOKEN.")
     return value
 
-
 def api(path: str, bearer: str, method: str = "GET", payload=None):
     body = None if payload is None else json.dumps(payload).encode()
     req = request.Request(
         API_ROOT + path,
         data=body,
         method=method,
-        headers={
-            **HEADERS,
-            "Authorization": f"Bearer {bearer}",
-            "Content-Type": "application/json",
-        },
+        headers={**HEADERS, "Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
     )
     try:
         with request.urlopen(req, timeout=30) as response:
@@ -55,108 +116,69 @@ def api(path: str, bearer: str, method: str = "GET", payload=None):
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"GitHub API {method} {path} failed: {detail}") from exc
 
-
-def run_git(args, cwd=None, env=None):
-    subprocess.run(["git", *args], cwd=cwd, env=env, check=True)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Private source owner/name.")
     parser.add_argument("--target", required=True, help="New public repository name.")
-    parser.add_argument("--source-ref", default="main")
-    parser.add_argument("--description", default="Disposable ATAX development workspace.")
-    parser.add_argument("--no-cleanup", action="store_true")
     args = parser.parse_args()
 
-    if "/" not in args.source or args.source.count("/") != 1:
+    if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
         raise SystemExit("--source must be owner/name.")
     if not args.target or "/" in args.target:
         raise SystemExit("--target must be a repository name.")
 
     bearer = token()
-
-    # Verify source access before creating anything.
     source = api(f"/repos/{args.source}", bearer)
     if not source.get("private", False):
-        raise SystemExit("Source repository is not private; use an explicit public workflow instead.")
-    source_branch = args.source_ref
-    if not source_branch:
-        source_branch = source.get("default_branch") or "main"
+        raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
-    # Create an empty public repository under the authenticated account.
-    created = api(
-        "/user/repos",
-        bearer,
-        "POST",
-        {
-            "name": args.target,
-            "description": args.description,
-            "private": False,
-            "auto_init": False,
-        },
-    )
+    created = api("/user/repos", bearer, "POST", {
+        "name": args.target,
+        "description": "Ephemeral ATAX public CI compute bridge.",
+        "private": False,
+        "auto_init": True,
+    })
     target = created["full_name"]
 
-    temp = Path(tempfile.mkdtemp(prefix="atax-disposable-"))
     try:
-        # Use an authenticated HTTP header instead of embedding the token in a URL.
-        git_env = os.environ.copy()
-        git_env["GIT_CONFIG_COUNT"] = "1"
-        git_env["GIT_CONFIG_KEY_0"] = "http.extraheader"
-        git_env["GIT_CONFIG_VALUE_0"] = (
-            "AUTHORIZATION: basic "
-            + subprocess.check_output(
-                ["python3", "-c",
-                 "import base64,sys; print(base64.b64encode(('x-access-token:'+sys.argv[1]).encode()).decode())",
-                 bearer],
-                text=True,
-            ).strip()
+        api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
+            "message": "chore: add ATAX private CI bridge",
+            "content": base64.b64encode(WORKFLOW.encode()).decode(),
+            "branch": "main",
+        })
+
+        if shutil.which("gh") is None:
+            raise SystemExit("GitHub CLI (gh) is required to configure the encrypted Actions secret.")
+
+        env = os.environ.copy()
+        env["GH_TOKEN"] = bearer
+        subprocess.run(
+            ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target, "--body", bearer],
+            env=env,
+            check=True,
         )
 
-        run_git(
-            ["clone", "--origin", "source", "--branch", source_branch,
-             "--single-branch", source["clone_url"], str(temp / "workspace")],
-            env=git_env,
-        )
-        worktree = temp / "workspace"
-        shutil.rmtree(worktree / ".git")
-
-        run_git(["init", "-b", "main"], cwd=worktree)
-        run_git(["config", "user.name", "ATAX Disposable Workspace"], cwd=worktree)
-        run_git(["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], cwd=worktree)
-        run_git(["remote", "add", "origin", created["clone_url"]], cwd=worktree)
-
-        # Reapply authentication only for the push operation.
-        push_env = os.environ.copy()
-        push_env["GIT_CONFIG_COUNT"] = "1"
-        push_env["GIT_CONFIG_KEY_0"] = "http.extraheader"
-        push_env["GIT_CONFIG_VALUE_0"] = git_env["GIT_CONFIG_VALUE_0"]
-
-        run_git(["add", "-A"], cwd=worktree)
-        run_git(["commit", "-m", f"chore: disposable workspace from {args.source}"], cwd=worktree)
-        run_git(["push", "-u", "origin", "main"], cwd=worktree, env=push_env)
+        verified = api(f"/repos/{target}", bearer)
+        if verified.get("private") is not False:
+            raise SystemExit("Public workspace verification failed.")
 
         print(json.dumps({
             "source": args.source,
-            "source_ref": source_branch,
             "disposable_repository": target,
-            "url": created["html_url"],
+            "url": verified["html_url"],
             "public": True,
-            "source_unchanged": True,
-            "cleanup": "delete with tools/github/repository_lifecycle.py delete --repository " + target,
+            "private_source_published": False,
+            "workflow": "atax-private-ci.yml",
+            "run": f"gh workflow run atax-private-ci.yml --repo {target}",
+            "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
         }, indent=2))
         return 0
     except Exception:
-        if not args.no_cleanup:
-            try:
-                api(f"/repos/{target}", bearer, "DELETE")
-            except Exception:
-                pass
+        try:
+            api(f"/repos/{target}", bearer, "DELETE")
+        except Exception:
+            pass
         raise
-    finally:
-        shutil.rmtree(temp, ignore_errors=True)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
