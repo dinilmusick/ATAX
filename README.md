@@ -1,6 +1,6 @@
-# Agent Workspace
+# ATAX
 
-Agent Workspace provides three distinct capabilities:
+ATAX provides three distinct capabilities:
 
 1. **Goal and task coordination — Supabase PostgreSQL.** Goals, parent tasks, dependencies, leases, loop iterations, parameters, evidence, verification and finalization are persisted and enforced by database RPCs.
 2. **Coding execution — GitHub Issues and PRs.** Each independent coding task gets one Issue as its durable execution state and one dedicated PR as its implementation artifact. Workers persist blockers and resume points in Issues; the orchestrator polls Issues/PRs/CI and writes decisions back to Issues.
@@ -57,7 +57,7 @@ This is a public repository. Never commit credentials, private source or persona
 
 ## GitHub-native development
 
-Agent Workspace can operate as a complete GitHub development substrate without Supabase.
+ATAX can operate as a complete GitHub development substrate without Supabase.
 
 ### Repository lifecycle
 
@@ -76,7 +76,7 @@ Use:
 - `.github/workflows/create-skipo-app.yml` — create a repository and immediately scaffold canonical Skipo.
 - `.github/workflows/github-dev-workspace.yml` — edit/build/lint/test a target repository on GitHub-hosted compute.
 - `.github/workflows/github-public-compute-matrix.yml` — verify across standard Linux, Windows and macOS public runners.
-- `.github/workflows/private-repo-ci.yml` — execute private-repository workflows through Agent Workspace when native private CI is unavailable.
+- `.github/workflows/private-repo-ci.yml` — execute private-repository workflows through ATAX when native private CI is unavailable.
 - `skills/github-development-workspace/SKILL.md` — reusable agent instructions.
 - `tools/github/` — repository creation and Skipo scaffolding tools.
 - `.github/workflows/independent-commercial-acquisition.yml` — owner-triggered private, non-fork source mirror or reference-only acquisition.
@@ -92,7 +92,7 @@ Supabase remains the coordination/state substrate when available, but it is not 
 
 ## Hardened worker model
 
-Agent Workspace is designed for fragile, ephemeral agents. Workers reconstruct context from Supabase and GitHub Issues rather than chat history. Active tasks heartbeat/checkpoint about every 2 minutes and independently check ownership about every 5 minutes; tasks without a heartbeat for at least 5 minutes can be atomically recovered. Claim tokens fence stale workers. Loop contracts are authored by one worker and executed by a different worker, so success parameters cannot be self-authored and self-certified. Every worker persists progress, blockers, evidence and resume state before disappearing, and terminal completion requires independent verification.
+ATAX is designed for fragile, ephemeral agents. Workers reconstruct context from Supabase and GitHub Issues rather than chat history. Active tasks heartbeat/checkpoint about every 2 minutes and independently check ownership about every 5 minutes; tasks without a heartbeat for at least 5 minutes can be atomically recovered. Claim tokens fence stale workers. Loop contracts are authored by one worker and executed by a different worker, so success parameters cannot be self-authored and self-certified. Every worker persists progress, blockers, evidence and resume state before disappearing, and terminal completion requires independent verification.
 
 For the complete protocol, start with `AGENTS.md`, `skills/task-ledger/SKILL.md`, `skills/universal-task-router/SKILL.md`, `skills/coding-task-lifecycle/SKILL.md`, and `skills/persistent-multi-agent-execution/SKILL.md`.
 
