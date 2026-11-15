@@ -29,10 +29,10 @@ When a local container, shell, or other code-execution runtime is available, **u
 
 Before working on a target repository:
 
-1. Clone **Agent-Workspace-1** into the accessible local runtime when it is not already present.
+1. Clone **ATAX** into the accessible local runtime when it is not already present.
 2. Use the Agent-Workspace tools and scripts from that checkout rather than recreating their behavior manually.
 3. Attempt to clone the target repository directly into the local runtime.
-4. If the target is private and direct cloning fails, use Agent-Workspace-1's GitHub/private-repository workspace tooling to materialize the authorized private repository in the workspace's dedicated `clones/` area. Then use the public Agent-Workspace-1 checkout as the accessible bridge for running the workspace tooling and scripts against that materialized target.
+4. If the target is private and direct cloning fails, use ATAX's GitHub/private-repository workspace tooling to materialize the authorized private repository in the workspace's dedicated `clones/` area. Then use the public ATAX checkout as the accessible bridge for running the workspace tooling and scripts against that materialized target.
 5. Prefer local execution for install, lint, format, typecheck, tests, integration checks, build scripts and application validators whenever the runtime permits.
 6. Use GitHub Actions only when the local runtime is unavailable, cannot reproduce the required environment, or the task specifically requires remote-runner evidence.
 
@@ -127,7 +127,7 @@ Supabase is the canonical persistence layer for goals, tasks, ownership, leases 
 
 ## Deterministic execution bootstrap
 
-For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone Agent-Workspace-1 into that runtime; use its tools/scripts; attempt the target repository directly; if a private target cannot be cloned directly, use the Agent-Workspace-1 private-repository tooling and dedicated clones bridge. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
+For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone ATAX into that runtime; use its tools/scripts; attempt the target repository directly; if a private target cannot be cloned directly, use the ATAX private-repository tooling and dedicated clones bridge. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
 
 The canonical local preflight is `python tools/agent-bootstrap/bootstrap.py plan`; use `prepare` to establish the workspace and target checkout. Never place credentials in source, logs or task metadata.
 
@@ -136,7 +136,7 @@ The canonical local preflight is `python tools/agent-bootstrap/bootstrap.py plan
 
 When workflow-dispatch API access is unavailable, use the issue-triggered route in `.github/workflows/github-dev-workspace.yml`:
 
-1. Create an issue in Agent-Workspace-1 titled `[github-dev] <short task>`.
+1. Create an issue in ATAX titled `[github-dev] <short task>`.
 2. Put a JSON request in the issue body with `repository`, `ref`, and `commands`.
 3. For write work, set `push: true`, provide a new `branch`, and optionally set `create_pr: true`.
 4. Only owners, members and collaborators can invoke the route.
