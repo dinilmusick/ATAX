@@ -14,7 +14,7 @@ For private-repository CI/build/test work, use **ATAX GitHub tools**, not the Ch
 **Credential distinction:** an Actions repository secret is consumed by the GitHub runner at runtime; it is not automatically readable by the agent's local process. Do not report an ATAX runner as credential-blocked merely because the local process lacks a token. Verify the ATAX runner path first.
 # Private Repository CI Workspace Runner
 
-Reusable fallback for executing and verifying GitHub Actions for private repositories through ATAX.
+Canonical ATAX path for executing and verifying GitHub Actions for private repositories.
 
 ## When to use
 
