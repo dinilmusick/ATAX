@@ -53,7 +53,7 @@ Agents should use the reusable private-repo-ci-workspace-runner capability exten
 
 privateRepo → inspect native CI → fallback if needed → ATAX → clone → act → evidence → cleanup
 
-Security boundary: PRIVATE_REPO_TOKEN is read-only clone/verification access. CODING_REPO_TOKEN and DEPLOYMENT_TOKEN remain under Agent-Workspace control and are never injected into arbitrary target workflow code.
+Security boundary: PRIVATE_REPO_TOKEN is read-only clone/verification access. CODING_REPO_TOKEN and DEPLOYMENT_TOKEN remain under ATAX control and are never injected into arbitrary target workflow code.
 
 ## Deterministic execution bootstrap
 
