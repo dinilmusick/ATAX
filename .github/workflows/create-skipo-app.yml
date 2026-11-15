@@ -43,7 +43,7 @@ jobs:
       DESCRIPTION: ${{ inputs.description }}
       BRANCH: ${{ inputs.branch }}
     steps:
-      - name: Checkout Agent Workspace
+      - name: Checkout ATAX
         uses: actions/checkout@v4
         with:
           persist-credentials: false
