@@ -70,7 +70,7 @@ The workflow checks supervisor health after browser/API inspection, always invok
 
 ## Local commands
 
-From the Agent Workspace repository, with a target checked out under `workspaces/target`:
+From the ATAX repository, with a target checked out under `workspaces/target`:
 
 ```bash
 python runner/react-project.py start --project-path .
