@@ -4,7 +4,7 @@ The canonical application entry point remains `runner/react-project.py`. It reta
 
 ## Enable multiple services
 
-Add `.agent-workspace/services.json` to the target application repository:
+Add `..atax/services.json` to the target application repository:
 
 ```json
 {
