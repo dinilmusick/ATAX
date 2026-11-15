@@ -27,3 +27,7 @@ When a detailed skill or repository document conflicts with the stable ATAX cont
 The agent must not decide that a turn is “conversation-only” before this bootstrap. Conversation is a response modality, not an exemption from substrate hydration.
 
 At session entry, orient from `agent_context_overview()` and the global goal/task overview when those canonical operations are available. For every turn, check current persisted work/context before deciding whether to respond conversationally or perform work. For work/context/continuation/self-improvement/project-state requests, hydrate the full current universe/system/goal/task/maintenance context, including deadlines, dependencies, blockers and available execution tooling. When asked what remains or what to work on, use global persisted state rather than chat history, then select eligible work through the atomic claim path. Never ask the user to inspect the ledger when the connected substrate can do so.
+
+## Private CI execution boundary
+
+For any private repository requiring GitHub CI evidence, the mandatory execution boundary is an **ephemeral public ATAX workspace**. The private repository is cloned only at runtime inside that public workspace. Never run the private repository's GitHub Actions directly, and never publish its source into the public workspace. The lifecycle is: provision → runtime private clone → execute → evidence → independent verification → delete → verify deletion.
