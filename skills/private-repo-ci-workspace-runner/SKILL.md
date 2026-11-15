@@ -9,7 +9,7 @@ status: active
 
 # Private Repository CI Workspace Runner
 
-Reusable fallback for executing and verifying GitHub Actions for private repositories through Agent-Workspace-1.
+Reusable fallback for executing and verifying GitHub Actions for private repositories through ATAX.
 
 ## When to use
 
@@ -37,8 +37,8 @@ Do not jump directly from a red CI result to editing application code.
 
 **Local runtime is preferred.** This workflow is the fallback when a local container/runtime is unavailable or cannot execute the target reliably.
 
-1. If a local container/runtime is available, first clone Agent-Workspace-1 into it and attempt direct target-repository cloning there.
-2. If the private target cannot be cloned directly, use Agent-Workspace-1's GitHub/private-repository tooling to materialize the authorized target under its dedicated `clones/` area, then operate through the public Agent-Workspace-1 checkout and its scripts/tools.
+1. If a local container/runtime is available, first clone ATAX into it and attempt direct target-repository cloning there.
+2. If the private target cannot be cloned directly, use ATAX's GitHub/private-repository tooling to materialize the authorized target under its dedicated `clones/` area, then operate through the public ATAX checkout and its scripts/tools.
 3. Run the target's native install, lint, format, typecheck, test, integration and **custom build scripts** locally whenever possible.
 4. Only when the local runtime is unavailable or insufficient, build a request in `.agent/ci-request.json`:
    repository, ref, event, workflow, token_mode, request_id.
@@ -75,11 +75,11 @@ The last category is important: when the runner itself caused the failure, impro
 
 ### Luth test-import drift
 
-Agent Workspace run `42039453905` cloned `dinilmusick/Luth@main`, validated workflows, installed dependencies, and passed typecheck, but failed because `tests/canonical-auth-contract.test.ts` imported `getSystemDatabaseUrl` from the wrong module. The canonical resolver lived in `src/backend/types.ts`. The error was `TypeError: getSystemDatabaseUrl is not a function`. The test was corrected and rerun successfully in Agent-Workspace run `42042564939`.
+ATAX run `42039453905` cloned `dinilmusick/Luth@main`, validated workflows, installed dependencies, and passed typecheck, but failed because `tests/canonical-auth-contract.test.ts` imported `getSystemDatabaseUrl` from the wrong module. The canonical resolver lived in `src/backend/types.ts`. The error was `TypeError: getSystemDatabaseUrl is not a function`. The test was corrected and rerun successfully in Agent-Workspace run `42042564939`.
 
 ### Agent-Workspace act bootstrap transient failure
 
-Agent Workspace run `42043556266` failed while installing `act` because a single GitHub release download returned HTTP 504. Clone and target workflow execution were skipped. The substrate was hardened with bounded curl retries/timeouts while retaining SHA256 verification. Subsequent run `42043746694` reached successful act installation, clone, workflow validation, and target-workflow execution.
+ATAX run `42043556266` failed while installing `act` because a single GitHub release download returned HTTP 504. Clone and target workflow execution were skipped. The substrate was hardened with bounded curl retries/timeouts while retaining SHA256 verification. Subsequent run `42043746694` reached successful act installation, clone, workflow validation, and target-workflow execution.
 
 ## Evidence
 
