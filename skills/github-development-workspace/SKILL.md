@@ -159,3 +159,23 @@ WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->indepe
 LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
 CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
 SKILL TIMING: use this skill when its trigger matches; load supporting skills before their required action, not after. Prefer the narrowest specialist skill plus only necessary support skills. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
+
+## Mandatory private-CI routing invariant
+
+A private repository must **never** be used as the GitHub Actions execution substrate for this workflow.
+
+When CI/build/test evidence is required for a private target:
+
+1. Provision an **ephemeral public ATAX workspace repository** with the ATAX repository lifecycle/disposable-workspace tooling.
+2. The public workspace is a **compute bridge only**. It must not contain or publish the private target source.
+3. At workflow runtime, clone the authorized private target into the ephemeral workspace using a least-privilege secret/token.
+4. Execute the target's CI/checks on the public repository's GitHub-hosted runner.
+5. Capture workflow logs/artifacts as evidence and independently verify the result.
+6. Delete the ephemeral public repository and verify that deletion.
+7. Never commit, push, cache, artifact, or otherwise expose the private target source in the public workspace.
+
+Local execution may be used for fast reproduction and debugging, but it does not replace the required ephemeral-public-workspace path when remote GitHub CI evidence is required.
+
+**Hard rule:** private target + CI → ephemeral public workspace → runtime private clone → public GitHub runner → evidence → independent verification → deletion verification.
+
+Do not fall back to running the target workflow directly in the private repository merely because native private Actions are available.
