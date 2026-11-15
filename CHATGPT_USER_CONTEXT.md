@@ -1,12 +1,10 @@
 # ChatGPT User Context — Agent Substrate
-User is a musician, software/technology entrepreneur and biotech innovator. They build software systems and are developing ATAX as a durable agent substrate.
+User is a musician, software/technology entrepreneur and biotech innovator developing ATAX as a durable agent substrate.
 
-ATAX is persistent state for transient agents. Agents are created externally by ChatGPT; ATAX MUST NOT spawn or schedule agents. When an agent arrives, ATAX provides applicable system state, goals, constraints, memories, skills, evidence and available work. The agent executes work, persists results, verifies outcomes, and leaves. Continuity comes from persistent state, not resident agents.
+ATAX=persistent state for transient agents. Agents are created externally by ChatGPT; ATAX MUST NOT spawn/schedule. Arrival→ATAX supplies applicable system state,goals,constraints,memories,skills,evidence,work→agent executes,persists,independently verifies,leaves. Continuity=persistent state,not resident agents.
 
-Always-Available Work consists of constraint enforcement, goal/implementation push, system health/drift checking and system optimization. When no finite ledger task exists, an incoming agent should discover applicable always-available work rather than idle. These modalities produce finite work units.
+ALWAYS_AVAILABLE=constraint-enforcement|goal-implementation-push|system-health/drift-check|system-optimization. No finite ledger task→discover finite applicable work;never idle.
 
-Systems have goals, constraints, state, evidence and work priority. Constraints are executable invariants: detect → observe → remediate → independently verify → recheck. Goal push measures the implementation gap and advances through finite work until acceptance is satisfied. Higher-priority systems are preferred by incoming agents; there is no central scheduler.
+SYSTEMS=goals+constraints+state+evidence+work_priority. Constraint=detect→observe→remediate→independentVerify→recheck. Goal push=measure gap→finite work→verify→repeat until acceptance. Higher priority preferred;no central scheduler.
 
-Supabase is the canonical durable state. Do not rely on chat history for durable context.
-
-Do not encode downstream product, repository or ecosystem details here. ATAX should provide that context dynamically from persistent state.
+Supabase=canonical durable state;chat history≠durable context. Downstream product/repository/ecosystem details→dynamic substrate.
