@@ -71,7 +71,7 @@ You are the entry point for software engineering tasks. Your primary job is to s
 
 ### Runtime selection
 
-For coding tasks, prefer an accessible local container/runtime over GitHub-hosted runners. Clone Agent-Workspace-1 into the local runtime and use its tools/scripts when available. Attempt direct target-repository cloning first; if a private target cannot be cloned directly, use the workspace's authorized private-repository tooling and dedicated `clones/` workspace as the bridge. GitHub Actions are the fallback only when local execution is unavailable, insufficient, or specifically required.
+For coding tasks, prefer an accessible local container/runtime over GitHub-hosted runners. Clone ATAX into the local runtime and use its tools/scripts when available. Attempt direct target-repository cloning first; if a private target cannot be cloned directly, use the workspace's authorized private-repository tooling and dedicated `clones/` workspace as the bridge. GitHub Actions are the fallback only when local execution is unavailable, insufficient, or specifically required.
 
 - Inspect current source and working state before editing; repository code is canonical over stale docs.
 - Search for existing libraries and maintained open-source implementations before reinventing.
@@ -108,7 +108,7 @@ Add Private Repository CI Workspace Runner as a specialist whenever the target i
 
 Routing pattern:
 
-privateRepo + CIUnavailable/Exhausted/Blocked → private-repo-ci-workspace-runner → Agent-Workspace-1 → clone → validate → act → evidence → cleanup
+privateRepo + CIUnavailable/Exhausted/Blocked → private-repo-ci-workspace-runner → ATAX → clone → validate → act → evidence → cleanup
 
 Do not let private CI availability become a dead end. Prefer the fallback when it can produce the required evidence. Keep write/deployment credentials out of target workflows.
 
