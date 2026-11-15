@@ -43,7 +43,7 @@ Do not jump directly from a red CI result to editing application code.
 4. Only when the local runtime is unavailable or insufficient, build a request in `.agent/ci-request.json`:
    repository, ref, event, workflow, token_mode, request_id.
 5. Trigger `.github/workflows/private-repo-ci.yml`.
-6. The public Agent-Workspace runner clones the target into its dedicated `clones/` directory.
+6. The public ATAX runner clones the target into its dedicated `clones/` directory.
 7. Validate target workflow definitions and the requested ref.
 8. Before execution, inspect newly added or modified tests and verify imports against actual target exports; run narrow tests locally when possible.
 9. Execute the selected workflow(s) with the pinned `act` release.
@@ -67,7 +67,7 @@ Distinguish:
 - implementation failure;
 - test-wiring/import failure;
 - environment-dependent runtime failure;
-- Agent-Workspace substrate defect.
+- ATAX substrate defect.
 
 The last category is important: when the runner itself caused the failure, improve the runner/skill/workflow rather than teaching the target repository to work around the defect.
 
@@ -75,16 +75,16 @@ The last category is important: when the runner itself caused the failure, impro
 
 ### Luth test-import drift
 
-ATAX run `42039453905` cloned `dinilmusick/Luth@main`, validated workflows, installed dependencies, and passed typecheck, but failed because `tests/canonical-auth-contract.test.ts` imported `getSystemDatabaseUrl` from the wrong module. The canonical resolver lived in `src/backend/types.ts`. The error was `TypeError: getSystemDatabaseUrl is not a function`. The test was corrected and rerun successfully in Agent-Workspace run `42042564939`.
+ATAX run `42039453905` cloned `dinilmusick/Luth@main`, validated workflows, installed dependencies, and passed typecheck, but failed because `tests/canonical-auth-contract.test.ts` imported `getSystemDatabaseUrl` from the wrong module. The canonical resolver lived in `src/backend/types.ts`. The error was `TypeError: getSystemDatabaseUrl is not a function`. The test was corrected and rerun successfully in ATAX run `42042564939`.
 
-### Agent-Workspace act bootstrap transient failure
+### ATAX act bootstrap transient failure
 
 ATAX run `42043556266` failed while installing `act` because a single GitHub release download returned HTTP 504. Clone and target workflow execution were skipped. The substrate was hardened with bounded curl retries/timeouts while retaining SHA256 verification. Subsequent run `42043746694` reached successful act installation, clone, workflow validation, and target-workflow execution.
 
 ## Evidence
 
 A successful result requires:
-- a real Agent-Workspace Actions run;
+- a real ATAX Actions run;
 - target verification evidence;
 - independent verification where applicable;
 - confirmed clone cleanup;
