@@ -1,7 +1,7 @@
 # ULTRST Software Starter Portfolio — Coverage and Acquisition Manifest
 
 Snapshot: 2026-11-13 (UTC)  
-Vision: [ULTRST Universal Software Portfolio & Ecosystem Absorption](https://github.com/dinilmusick/Agent-Workspace-1/blob/main/docs/template-portfolio-candidates.md)  
+Vision: [ULTRST Universal Software Portfolio & Ecosystem Absorption](https://github.com/dinilmusick/ATAX/blob/main/docs/template-portfolio-candidates.md)  
 Coordination: Supabase vision key `ultrst-universal-software-portfolio-ecosystem-absorption`
 
 This catalog is the working coverage map for the first broad software-starter portfolio. It deliberately includes web applications, backend products, developer infrastructure, data systems, mobile/desktop software, automation, AI products and industry-specific systems. Programming language is not a selection constraint.
@@ -89,7 +89,7 @@ GitHub did not provide a recognized SPDX license identifier for these exact repo
 ## 5. Required next steps
 
 1. Record this catalogue and verify every source's exact branch head.
-2. Use the Agent Workspace private acquisition workflow for each approved full-source research mirror; create reference-only records for the six restricted/uncertain candidates.
+2. Use the ATAX private acquisition workflow for each approved full-source research mirror; create reference-only records for the six restricted/uncertain candidates.
 3. Verify each destination is private, non-fork, has the expected default branch and exact pinned commit, and contains no upstream remote.
 4. Run isolated setup/build/test/smoke checks per project where practical; store the result and any required environment prerequisites.
 5. Only after acquisition verification, begin capability decomposition and absorption into the corresponding language ecosystems.
