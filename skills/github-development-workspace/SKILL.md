@@ -1,7 +1,7 @@
 ---
 name: GitHub Development Workspace
 slug: github-development-workspace
-version: 1.3.0
+version: 1.3.1
 source: Supabase Skills Database
 sourceId: 40
 status: active
