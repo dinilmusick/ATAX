@@ -1,21 +1,11 @@
-# Agent Execution Contract
+# agent-execution-contract.md
 
-Agent Workspace provides a deterministic execution boundary for AgentGPT-compatible agents.
+This document is no longer an independent agent contract.
 
-## Runtime precedence
+The canonical stable entry contract is at the repository root:
+- `AGENT_INSTRUCTIONS.md`
+- `CHATGPT_USER_CONTEXT.md`
 
-local container/runtime -> Agent-Workspace-1 bridge -> GitHub Actions fallback
+Detailed operational procedure is authoritative only in the currently published Supabase skill named `persistent-multi-agent-execution`, mirrored under `skills/`.
 
-A usable local runtime is preferred because it provides direct command output and faster iteration.
-
-## Execution state machine
-
-resolve -> bootstrap -> inspect -> claim -> execute -> evidence -> independent verify -> reconcile -> finalize
-
-Every transition must have an observable result. Failed transitions are classified as obstacles; reusable substrate failures update the corresponding skill, tool or workflow.
-
-## Completion invariant
-
-complete = terminal task state AND acceptance satisfied AND evidence present AND independent verification AND reconciliation complete
-
-A green build alone is not completion. Source presence alone is not completion. A PR alone is not completion.
+Do not use this document to infer current substrate state, agent lifecycle, scheduling, leases, priorities, modalities, systems, goals or tasks. Resolve those from live Supabase state and the current skill version.
