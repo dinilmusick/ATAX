@@ -53,7 +53,7 @@ def plan(args):
     elif not workspace.exists():
         result["next"].append("Clone ATAX into this runtime before repository work.")
     if args.repository:
-        result["next"].append("Attempt a direct target clone; if a private clone fails, use ATAX private-repository tooling.")
+        result["next"].append("Use ATAX private-repository tooling; never run CI directly in the private target.")
     if result["build_commands"]:
         result["next"].append("Run every discovered repository build/quality script before completion.")
     result["next"].append("Capture command output as evidence and independently verify resulting behavior.")
@@ -69,19 +69,9 @@ def prepare(args):
         if result.returncode:
             print(result.stderr, file=sys.stderr); return result.returncode
     if args.repository:
-        target = Path(args.target_path or (workspace / "clones" / args.repository.split("/")[-1])).resolve()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not (target / ".git").exists():
-            clone = run(["git", "clone", "--depth", "1", "--branch", args.ref, args.repository, str(target)])
-            if clone.returncode:
-                print("DIRECT_CLONE_FAILED: use ATAX private-repository tooling for authorized private targets.", file=sys.stderr)
-                print(clone.stderr, file=sys.stderr); return 3
-        else:
-            run(["git", "fetch", "--depth", "1", "origin", args.ref], target)
-            run(["git", "checkout", args.ref], target)
-        print(json.dumps({"workspace":str(workspace),"target":str(target),"ref":args.ref,"build_commands":build_commands(target)}, indent=2))
-    else:
-        print(json.dumps({"workspace":str(workspace),"target":None}, indent=2))
+        print("Private targets must be accessed through ATAX private-repository tooling; direct target cloning is disabled.", file=sys.stderr)
+        return 4
+    print(json.dumps({"workspace":str(workspace),"target":None}, indent=2))
     return 0
 
 def main():
@@ -97,5 +87,5 @@ def main():
     args = parser.parse_args()
     return args.func(args)
 
-if __name__ == "__main__":
+if ( __name__ == "__main__"):
     raise SystemExit(main())
