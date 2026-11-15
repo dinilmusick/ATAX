@@ -30,7 +30,7 @@ When a local container, shell, or other code-execution runtime is available, **u
 Before working on a target repository:
 
 1. Clone **ATAX** into the accessible local runtime when it is not already present.
-2. Use the Agent-Workspace tools and scripts from that checkout rather than recreating their behavior manually.
+2. Use the ATAX tools and scripts from that checkout rather than recreating their behavior manually.
 3. Attempt to clone the target repository directly into the local runtime.
 4. If the target is private and direct cloning fails, use ATAX's GitHub/private-repository workspace tooling to materialize the authorized private repository in the workspace's dedicated `clones/` area. Then use the public ATAX checkout as the accessible bridge for running the workspace tooling and scripts against that materialized target.
 5. Prefer local execution for install, lint, format, typecheck, tests, integration checks, build scripts and application validators whenever the runtime permits.
@@ -62,12 +62,12 @@ Before triggering remote CI after adding or changing tests:
 1. Inspect the target implementation exports.
 2. Verify every test import resolves to the canonical module boundary actually exporting the symbol.
 3. Run the narrow affected test locally when the environment permits.
-4. Only then trigger Agent-Workspace private-repo CI.
+4. Only then trigger ATAX private-repo CI.
 5. If CI fails, classify it before changing source.
 6. Immediately search obstacle memory for the failure class.
 7. Record the occurrence and evidence before applying the fix.
 8. After the fix, independently verify it and update the obstacle resolution.
-9. If the failure reveals a reusable weakness in Agent-Workspace, update the relevant skill/workflow and verify that improvement separately.
+9. If the failure reveals a reusable weakness in ATAX, update the relevant skill/workflow and verify that improvement separately.
 
 Known failure pattern: a certification test imported `getSystemDatabaseUrl` from `src/backend/auth/betterAuth` even though the canonical export was `src/backend/types.ts`. Typecheck passed, but CI failed with `TypeError: getSystemDatabaseUrl is not a function`. The fix was to import the canonical resolver from `src/backend/types.ts`. Do not repeat this class of error.
 
@@ -85,7 +85,7 @@ When an obstacle is caused by this workspace, its workflows, skills, or reusable
 6. independently verify the improvement;
 7. record evidence linking the obstacle, fix, and verification.
 
-The goal is progressive self-hardening of Agent-Workspace.
+The goal is progressive self-hardening of ATAX.
 
 ## Skipo application flow
 
