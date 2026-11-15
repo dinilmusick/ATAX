@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Deterministic Agent Workspace bootstrap and local execution preflight."""
+"""Deterministic ATAX bootstrap and local execution preflight."""
 from __future__ import annotations
 import argparse, json, shutil, subprocess, sys
 from pathlib import Path
 
-WORKSPACE_URL = "https://github.com/dinilmusick/Agent-Workspace-1.git"
+WORKSPACE_URL = "https://github.com/dinilmusick/ATAX.git"
 
 def run(command, cwd=None):
     return subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
@@ -37,7 +37,7 @@ def plan(args):
     root = detected_root or Path.cwd()
     workspace = Path(args.workspace).expanduser().resolve()
     result = {
-        "workspace_repo": "dinilmusick/Agent-Workspace-1",
+        "workspace_repo": "dinilmusick/ATAX",
         "workspace_path": str(workspace),
         "workspace_present": workspace.exists(),
         "current_repository": str(detected_root) if detected_root else None,
@@ -49,11 +49,11 @@ def plan(args):
         "next": []
     }
     if not result["git_available"]:
-        result["next"].append("Install git or use the Agent-Workspace GitHub Actions fallback.")
+        result["next"].append("Install git or use the ATAX GitHub Actions fallback.")
     elif not workspace.exists():
-        result["next"].append("Clone Agent-Workspace-1 into this runtime before repository work.")
+        result["next"].append("Clone ATAX into this runtime before repository work.")
     if args.repository:
-        result["next"].append("Attempt a direct target clone; if a private clone fails, use Agent-Workspace-1 private-repository tooling.")
+        result["next"].append("Attempt a direct target clone; if a private clone fails, use ATAX private-repository tooling.")
     if result["build_commands"]:
         result["next"].append("Run every discovered repository build/quality script before completion.")
     result["next"].append("Capture command output as evidence and independently verify resulting behavior.")
@@ -74,7 +74,7 @@ def prepare(args):
         if not (target / ".git").exists():
             clone = run(["git", "clone", "--depth", "1", "--branch", args.ref, args.repository, str(target)])
             if clone.returncode:
-                print("DIRECT_CLONE_FAILED: use Agent-Workspace private-repository tooling for authorized private targets.", file=sys.stderr)
+                print("DIRECT_CLONE_FAILED: use ATAX private-repository tooling for authorized private targets.", file=sys.stderr)
                 print(clone.stderr, file=sys.stderr); return 3
         else:
             run(["git", "fetch", "--depth", "1", "origin", args.ref], target)
@@ -85,10 +85,10 @@ def prepare(args):
     return 0
 
 def main():
-    parser = argparse.ArgumentParser(description="Bootstrap Agent Workspace for local agent execution.")
+    parser = argparse.ArgumentParser(description="Bootstrap ATAX for local agent execution.")
     sub = parser.add_subparsers(dest="command", required=True)
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--workspace", default=".agent-workspace")
+    common.add_argument("--workspace", default=".atax")
     common.add_argument("--repository")
     common.add_argument("--ref", default="main")
     common.add_argument("--target-path")
