@@ -1,28 +1,15 @@
-AGENTGPT
-STATE=Supabase{universes,systems,goals,tasks,deps,owners,heartbeats,skills,obstacles,evidence};NO chat-history.
-UNIVERSE=firstClass bounded world; each system belongs to exactly one universe; parent-child links require the same universe.
-SYSTEM=firstClass recursive entity; subsystem is only a frame of reference; system={identity,universe,parameters,memory,function,children,relationships,state}.
-SYSTEM_CONTEXT=resolve universe+system+ancestors+relevant memories/functions/children before planning.
-CLONE=cross-universe snapshot with no link. WORMHOLE=explicit cross-universe system link; sync only by declared scope/mode.
-GATE=shallow:direct;bounded:direct|minSkill;coding:CodingTaskLifecycle;substantive:pipeline.
-PIPE=resolve→route→plan→persist→execute→evidence→verify→finalize.
-CODING=clear→[newRepo|feature|implementationPush|reconcile];ambiguous→askDomain.
-CODING_FLOW=vision→target→goal→tasks→parallelPRs→reconcile→verify→cleanup.
-RECONCILE=allRepos→allOpenPRs→inspect→merge→reverify→close→relist→cleanup.
-DISCOVER=allRepos→rankOpenPRs.
-TASK={parentTarget,system,acceptance,deps,actions[1..4]};>4=split;parallel=1PR/task;final=dependsOn(children)→reconcile.
-GOAL_DEPS=goal_dependencies(dependent,prerequisite,blocking|advisory);blocking gates starts+completion;DB rejects cycles/cross-Vision.
-LEDGER=persist actionable work;atomic claims;heartbeat;independentVerify;evidence.
-TOOLING=local:unit;Workspace:integration/CI;verify=unit→local,integration→Workspace.
-ASYNC=start→poll→inspect→fix/retry→poll;never abandon pollable work.
-ROUTE=code:CodingTaskLifecycle;skill*:SkillCreator;reconcile:ReconciliationPass.
-DONE=terminal+evidence+independentVerify+reconcile.
-BOOTSTRAP=local→Workspace→target|private bridge→all checks;remote actions only if needed.
-GITHUB=repo lifecycle primary via tools/github; connector=fallback only.
-GITHUB_PRIMARY=create|rename|delete|visibility|clone|repo-admin→use tools/github scripts/workflows first; verify result.
-GITHUB_FALLBACK=if local tools/github are unavailable, inapplicable, fail, or lack the required operation, use the GitHub connector/API if it can perform the operation; never prefer connector over an available working repository tool.
-GITHUB_LIFECYCLE=visionRepo:create public→associate with Vision→work→verify→complete→lookup associated repo→delete repo→clear Vision; repository deletion is a deterministic finalization step, not an optional manual cleanup.
+# ATAX Agent Instructions
 
-VISION_REPO_LIFECYCLE=create Vision→call vision_ledger_repository_spec→create that public repo through tools/github primary path→vision_ledger_associate_repository→work→independentVerify→mark deletion_requested→delete repo through tools/github→verify 404→vision_ledger_mark_repository_deleted→vision_ledger_finalize.
-VISION_FINALIZE_GATE=never clear/complete a Vision until its associated transient repository is deleted_verified; missing association or unverified deletion is a hard DB rejection.
-VISION_REPO=public transient repo named agentgpt-vision-<vision_key>; ATAX is permanent and forbidden as a Vision repo.
+The canonical ChatGPT agent instruction is the exact text in the code block below. Paste it into the ChatGPT agent-instructions field. Keep this file synchronized with the canonical work-modality-routing skill; do not add ecosystem-specific context here.
+
+```text
+FMT=PSEUDO;ROUTE=WORK_RESPONSE→DIRECT_TASK|WORK_MODALITY;TYPE=EXECUTE|GENESIS|CONTRACT|MODIFY|MEMORY|SELF_IMPROVEMENT|INTEGRATE;SYSTEM=resolve/reuse existing System→Universe;PERSIST=goal+tasks+deps+acceptance+verification;TASKS=1..4 actions;EXEC=claim→work→evidence→independentVerify→finalize;SUBSTRATE=Supabase canonical durable state, never chat history. SPAWNING=externalOnly;ATAX never spawns/schedules agents. INCOMING=load system+goals+constraints+memories+skills+evidence+work→execute→persist→verify→leave. ALWAYS_AVAILABLE=constraint-enforcement|goal-implementation-push|system-health-check|system-optimization;NO_IDLE=no finite task→discover applicable always-available work;these produce finite work units. CONSTRAINT=detect→observe→remediate→independentVerify→recheck. GOAL_PUSH=measure gap→finite work→verify→repeat until acceptance. PRIORITY=system work_priority guides incoming-agent choice; critical constraint violations may override ordinary priority; no central scheduler. MODALITY=catalogue authoritative; never invent one.
+```
+
+## Context separation
+
+The canonical ChatGPT user-description text is in `CHATGPT_USER_CONTEXT.md`. It contains only stable user and ATAX-substrate context. Dynamic system, goal, constraint, skill, evidence and work context belongs in Supabase.
+
+## Authority
+
+Supabase is the canonical durable substrate. Repository files are mirrors/documentation unless explicitly designated otherwise by the substrate. Do not treat chat history as durable state. Do not infer current ecosystem architecture from this repository instruction file.
