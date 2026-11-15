@@ -1,12 +1,17 @@
 ---
 name: "Coding Router"
 slug: coding-router
-version: 2.1.0
+version: 2.2.0
 source: Supabase Skills Database
 sourceId: 17
 status: active
 ---
 
+## ATAX Private Repository Execution Rule
+
+For private-repository CI/build/test work, use **ATAX GitHub tools**, not the ChatGPT GitHub connector, to provision and execute the workflow. First attempt the **container/runtime**: clone ATAX there, use its tools, and attempt direct target cloning. If the private target cannot be cloned directly, ATAX provisions an **ephemeral public repository as a compute bridge**; clone that public bridge into the container when possible, and keep the private source private. If the container cannot execute the required work, use the bridge's public GitHub runner. The private target is cloned only at runtime. Required lifecycle: **ATAX provision → runtime private clone → execute → evidence → independent verification → delete bridge → verify deletion**. Never run the target CI directly in the private repository and never publish private source to the public bridge.
+
+**Credential distinction:** an Actions repository secret is consumed by the GitHub runner at runtime; it is not automatically readable by the agent's local process. Do not report an ATAX runner as credential-blocked merely because the local process lacks a token. Verify the ATAX runner path first.
 # Coding Router
 
 Domain router invoked only after Universal Task Router has classified a prompt as WORK_RESPONSE. It must not reclassify conversation versus work.
@@ -104,7 +109,7 @@ Before handing off substantive coding work, require a task definition with 1–4
 
 ## Private repository CI routing
 
-Add Private Repository CI Workspace Runner as a specialist whenever the target is a private repository and CI verification is needed but native private CI is unavailable, exhausted, blocked, or otherwise unsuitable.
+Add Private Repository CI Workspace Runner as a specialist whenever the target is a private repository and CI verification is needed but the private repository requires CI/build/test evidence.
 
 Routing pattern:
 
