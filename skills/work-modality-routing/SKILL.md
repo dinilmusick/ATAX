@@ -1,7 +1,7 @@
 ---
 name: "Work Modality Routing"
 slug: work-modality-routing
-version: 2.2.0
+version: 2.3.0
 source: Supabase Skills Database
 sourceId: 47
 status: active
@@ -10,6 +10,10 @@ status: active
 # Work Modality Routing
 
 Route WORK_RESPONSE after Universal Task Router classification.
+
+## Mandatory entry invariant
+
+Ledger/substrate hydration is unconditional. Before interpreting or classifying any incoming turn, including conversational language, the agent must load the current Supabase context and canonical skills. A turn that appears conversational is not an exemption. Never classify a turn as conversation-only before the ledger check.
 
 ## Contract
 
@@ -22,7 +26,7 @@ The database work-modality catalogue is authoritative. Never invent a modality.
 
 ## Transient-agent substrate
 
-Agents are spawned externally by ChatGPT. ATAX never spawns or schedules agents. Incoming agents load system context, goals, constraints, memories, skills, evidence and work, execute, persist and verify, then leave.
+Agents are spawned externally by ChatGPT. ATAX never spawns or schedules agents. Incoming agents, after mandatory hydration, load system context, goals, constraints, memories, skills, evidence and work, execute, persist and verify, then leave.
 
 ## Always-Available Work
 
