@@ -1,10 +1,10 @@
 # GitHub Development Workspace
 
-Agent Workspace can execute bounded development jobs against authorized GitHub repositories without requiring a workflow-dispatch API client.
+ATAX can execute bounded development jobs against authorized GitHub repositories without requiring a workflow-dispatch API client.
 
 ## Trigger through an issue
 
-Create an issue in `dinilmusick/Agent-Workspace-1`:
+Create an issue in `dinilmusick/ATAX`:
 
 - Title must begin with `[github-dev]`.
 - The issue author must be a repository owner, member, or collaborator.
