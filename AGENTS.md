@@ -7,6 +7,33 @@
 - **GitHub Actions Agent Compute Workspace** is the sole general-purpose finite code-execution environment.
 - Use connected Supabase PostgreSQL tools directly for all goal/task operations. There is no Edge Function or repository-hosted CLI worker layer in the supported architecture.
 
+## Agent bootstrap / substrate-discovery contract
+
+A spawned agent starts with no usable conversational history. **The repository instructions and live Supabase substrate are the agent's operating context.** Never infer project state, task state, available skills, prior decisions or the meaning of a vague work request from the current chat alone.
+
+### Mandatory bootstrap
+Before answering or acting on any substantive prompt, establish the live substrate context:
+1. Identify the current response mode: conversation vs work.
+2. If the prompt is work, context-seeking, task-seeking, continuation, self-improvement, or otherwise refers to the project/work without fully specifying it, inspect the live Supabase ledger and the canonical skill catalogue before deciding what the user means.
+3. Load the narrowest active specialist skill(s) from the Supabase Skills Database for the requested work, plus required supporting skills. The mirrored `skills/` files are a versioned repository copy; Supabase is authoritative when versions differ.
+4. Resolve the relevant Universe → System → Vision → Goal → Task context from persisted state. Chat history is never a prerequisite for understanding or resuming work.
+5. Only after this bootstrap may the agent classify, plan, claim or execute work.
+
+### Deterministic interpretation of common prompts
+Treat these phrases as substrate operations, not ordinary conversation:
+- **“What is the context?” / “Give me context”** → inspect the live substrate, current skills and relevant persisted work state; summarize the loaded state. Do not ask the user to re-explain the project merely because the chat is new.
+- **“What tasks remain?” / “What is left?”** → call the global goal/task overview, include every visible non-terminal goal and its task/verification/blocker state, then identify actionable work. Never inspect only the previously selected goal.
+- **“Do remaining tasks” / “Continue” / “Proceed”** → load unfinished work from Supabase, inspect dependencies/blockers, select the next eligible task through the atomic claim path, and resume from its persisted checkpoint. Do not create duplicate tasks and do not depend on prior chat context.
+- **“Do this task” / an explicit task request** → resolve the referenced durable task/goal/system, load its persisted context and applicable skills, then claim/execute it through the canonical lifecycle.
+- **“Do some work” / an underspecified work request** → inspect the global ledger and current project context first. If an eligible persisted task exists, choose the highest-priority actionable task according to database ordering and execute it. If no existing task matches, route the request as a work modality and create durable work only when the request actually defines an outcome.
+- **“What skills do you have/use?” or a request whose solution depends on a domain skill** → inspect the live skill catalogue/routing matrix and load the applicable active skill before reasoning from memory.
+
+### Skill authority and routing
+The agent must never assume that a skill is unavailable because it is not present in chat. Discover skills from the live Supabase Skills Database/catalogue, verify that the skill is active/routable, then load its current instructions. Use the repository `skills/<slug>/SKILL.md` copy for local reference and parity verification. When the substrate changes, update both canonical Supabase skill state and the repository mirror, then independently verify parity.
+
+### Context completeness rule
+A response is **not context-complete** merely because the agent knows the user's latest sentence. For work prompts, context is complete only after the agent has inspected the relevant persisted state, applicable skills, dependencies/blockers, current checkpoint/resume state, and available execution tooling. If a required live source cannot be accessed, state that concrete limitation rather than silently substituting chat memory or assumptions.
+
 ## Agent entry contract
 
 Every incoming user message is classified into exactly one response type:
