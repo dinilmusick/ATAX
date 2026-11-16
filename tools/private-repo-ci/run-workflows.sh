@@ -20,7 +20,6 @@ if [[ -n "$ATAX_ROOT" && -f "$ATAX_ROOT/tools/private-repo-ci/act-runner/Dockerf
   fi
 fi
 ACT_PLATFORM="${ACT_PLATFORM:-ubuntu-24.04=$ACT_RUNNER_IMAGE}"
-ACT_PLATFORM="${ACT_PLATFORM:-ubuntu-24.04=ghcr.io/catthehacker/ubuntu:full-24.04}"
 ACT_GITHUB_TOKEN="${ACT_GITHUB_TOKEN:-}"
 ACT_SECRET_ARGS=()
 
