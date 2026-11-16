@@ -7,8 +7,19 @@ EVENT="${CI_EVENT:-push}"
 REF="${TARGET_REF:-}"
 WORKFLOW="${CI_WORKFLOW:-}"
 ACT_BIN="${ACT_BIN:-act}"
-# Loky CI currently targets ubuntu-24.04. Map that GitHub runner label to the full act image. The medium image omits
-# tools used by normal GitHub workflows (notably git), producing false failures. Callers can override this explicitly.
+# Build a small runner image from the act-24.04 base with git installed.
+# The stock medium image omits git, while the full hosted-runner image is ~18GB compressed.
+ATAX_ROOT="${ATAX_ROOT:-${GITHUB_WORKSPACE:-}}"
+ACT_RUNNER_IMAGE="${ACT_RUNNER_IMAGE:-atax/act-runner:ubuntu-24.04}"
+if [[ -n "$ATAX_ROOT" && -f "$ATAX_ROOT/tools/private-repo-ci/act-runner/Dockerfile" ]]; then
+  if ! docker image inspect "$ACT_RUNNER_IMAGE" >/dev/null 2>&1; then
+    docker build --pull \
+      --file "$ATAX_ROOT/tools/private-repo-ci/act-runner/Dockerfile" \
+      --tag "$ACT_RUNNER_IMAGE" \
+      "$ATAX_ROOT/tools/private-repo-ci/act-runner"
+  fi
+fi
+ACT_PLATFORM="${ACT_PLATFORM:-ubuntu-24.04=$ACT_RUNNER_IMAGE}"
 ACT_PLATFORM="${ACT_PLATFORM:-ubuntu-24.04=ghcr.io/catthehacker/ubuntu:full-24.04}"
 ACT_GITHUB_TOKEN="${ACT_GITHUB_TOKEN:-}"
 ACT_SECRET_ARGS=()
