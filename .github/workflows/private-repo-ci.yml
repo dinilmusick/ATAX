@@ -35,9 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      RUN_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}
-      CLONE_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}/clones
-      ARTIFACT_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}/artifacts
+      RUN_ROOT: ${{ github.workspace }}/.private-ci/${{ github.run_id }}-${{ github.run_attempt }}
+      CLONE_ROOT: ${{ github.workspace }}/.private-ci/${{ github.run_id }}-${{ github.run_attempt }}/clones
+      ARTIFACT_ROOT: ${{ github.workspace }}/.private-ci/${{ github.run_id }}-${{ github.run_attempt }}/artifacts
       CI_REQUEST_FILE: .agent/ci-request.json
       ATAX_ROOT: ${{ github.workspace }}
     steps:
