@@ -64,6 +64,7 @@ run_one() {
   local wf="$1"
   echo "::group::CI workflow $wf"
   "$ACT_BIN" "$EVENT" \
+    --pull=false \
     -W "$wf" \
     "${ACT_PLATFORM_ARGS[@]}" \
     --artifact-server-path /tmp/agent-workspace-artifacts \
