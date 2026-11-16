@@ -106,8 +106,18 @@ User-defined goal priority is a separate normalized 0..1 signal. Claim ordering 
 
 ## Private-repository CI boundary
 
-ATAX's private-repository CI methodology uses **ephemeral public repositories as temporary compute bridges**. A private target is never executed directly by GitHub Actions.
+ATAX (dinilmusick/ATAX) is the current private-repository CI execution authority. Agent-Workspace-1 is historical only and must not be used as an execution repository, secret destination, or workflow authority.
 
-The bridge repository is created with ATAX tooling, receives only the runner/workflow machinery, clones the authorized private target at runtime with a least-privilege secret, executes the target checks on a public GitHub-hosted runner, records evidence, and is then deleted and deletion-verified. Private source is never committed or pushed into the public bridge.
+The canonical workflow is .github/workflows/private-repo-ci.yml:
 
-This is a hard execution invariant, not merely a fallback preference.
+- workflow_dispatch uses only the inputs attached to that individual run; it never reads .agent/ci-request.json.
+- push reads .agent/ci-request.json.
+- Every run gets a unique clone and temporary artifact directory keyed by GitHub run ID and attempt.
+- PRIVATE_REPO_TOKEN is available only to the clone step. Target workflows execute in clone-only mode without repository credentials.
+- Clones retain complete history for merge-base and branch comparison checks.
+- The locally built Git-enabled act image is mapped to both ubuntu-latest and ubuntu-24.04.
+- Target workflow definitions execute from the private runtime clone and are never copied into ATAX.
+- ATAX does not configure an artifact server or upload target artifacts/private source.
+- Cleanup is run-scoped and independently verifies an empty clone root.
+
+Regression tests: bash tools/private-repo-ci/tests/test-private-repo-ci.sh. The tests cover concurrent Kloks/KONE dispatch resolution while the request file contains a different repository, push request-file routing, cleanup isolation, clone-only token scope, no target artifact upload, full-history clone configuration, platform mappings, shell syntax, and workflow YAML parsing.
