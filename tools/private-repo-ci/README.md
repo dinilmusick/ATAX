@@ -2,9 +2,9 @@
 
 Purpose:
 - native private-repository GitHub Actions unavailable/exhausted
-- clone target into Agent-Workspace-1's dedicated `clones/` directory
+- clone target into ATAX's dedicated `clones/` directory
 - execute the target repository's own `.github/workflows/*` definitions with `act`
-- collect logs/artifacts in the public Agent-Workspace-1 Actions run
+- collect logs/artifacts in the public ATAX Actions run
 - delete the clone unconditionally
 
 Flow:
@@ -14,7 +14,7 @@ private repo
   -> clone-private-repo.sh
   -> clones/<owner>__<repo>
   -> run-workflows.sh
-  -> public Agent-Workspace-1 GitHub Actions runner
+  -> public ATAX GitHub Actions runner
   -> evidence
   -> cleanup-clone.sh
   -> clones/*
@@ -35,12 +35,12 @@ By default it uses the token from the authenticated `gh` CLI session:
 ```bash
 gh auth token
   -> PRIVATE_REPO_TOKEN
-  -> gh secret set PRIVATE_REPO_TOKEN --repo dinilmusick/Agent-Workspace-1
+  -> gh secret set PRIVATE_REPO_TOKEN --repo dinilmusick/ATAX
 ```
 
 The script never prints the token and never accepts it as a command-line argument. For non-interactive execution, provide `PRIVATE_REPO_TOKEN` through the process environment.
 
-Security rule: the script deliberately refuses to substitute GitHub Actions' built-in `GITHUB_TOKEN`. That token is scoped to Agent-Workspace-1 and cannot be assumed to read the separate private repositories.
+Security rule: the script deliberately refuses to substitute GitHub Actions' built-in `GITHUB_TOKEN`. That token is scoped to ATAX and cannot be assumed to read the separate private repositories.
 
 The configured secret should have only the minimum read access needed by the target private repositories.
 
@@ -51,7 +51,7 @@ The configured secret should have only the minimum read access needed by the tar
 - Use `token_mode=clone-only` when target workflow code must not receive repository authentication.
 - Run target code only from repositories and refs you trust.
 - Cleanup is mandatory and runs through the workflow's exit trap.
-- Private source is never committed to Agent-Workspace-1.
+- Private source is never committed to ATAX.
 
 ## Requirements
 
@@ -59,9 +59,9 @@ The configured secret should have only the minimum read access needed by the tar
 - Docker
 - `act`
 - GitHub CLI (`gh`) for secret bootstrap
-- `PRIVATE_REPO_TOKEN` repository secret on Agent-Workspace-1 for GitHub Actions execution
+- `PRIVATE_REPO_TOKEN` repository secret on ATAX for GitHub Actions execution
 
-Local agents may invoke the scripts directly. Public Agent-Workspace-1 CI uses the same scripts.
+Local agents may invoke the scripts directly. Public ATAX CI uses the same scripts.
 
 The runner intentionally executes the cloned workflow definitions rather than copying them into the workspace repository's workflow directory. This preserves the target workflow logic while using the public repository's runner for compute.
 
@@ -84,5 +84,14 @@ The runner validates the target workflow definitions, clones the requested ref, 
 
 The compatibility issue route is restricted to owner/member/collaborator-authored issues titled `[private-ci] <short task>` with a JSON body containing `repository`, `ref`, and either `workflow` or `command`. Other issue types (including `[github-dev]` and `[acquire-repo]`) are ignored.
 
-The target workflow files are never copied into Agent-Workspace-1's workflow directory.
+The target workflow files are never copied into ATAX's workflow directory.
 
+## Current execution authority
+
+ATAX is the current public execution repository. The former Agent-Workspace-1 name is historical only and must not be used as a repository, secret target, or workflow authority.
+
+Private targets are cloned only beneath the ATAX runner's ephemeral `clones/` directory. The target source is never copied into ATAX commits or artifacts. The cleanup step removes each clone and checks that the clone root is empty.
+
+## act runner image
+
+The runner builds `tools/private-repo-ci/act-runner/Dockerfile` on demand. It derives from the pinned `act-24.04` image and adds Git, which target workflows need for checks such as `git diff --check`. The same image is mapped to both `ubuntu-latest` and `ubuntu-24.04`; this avoids act's lightweight default mapping for `ubuntu-latest`, which lacks Git. Set `ACT_PLATFORM` as a comma-separated list of explicit mappings only when a target requires a different runner image.
