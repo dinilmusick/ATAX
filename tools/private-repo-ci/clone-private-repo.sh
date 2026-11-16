@@ -23,6 +23,7 @@ auth="$(printf 'x-access-token:%s' "$PRIVATE_REPO_TOKEN" | base64 | tr -d '\n')"
   export GIT_CONFIG_COUNT=1
   export GIT_CONFIG_KEY_0=http.extraheader
   export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+  unset PRIVATE_REPO_TOKEN
   git clone --no-single-branch "https://github.com/$TARGET_REPOSITORY.git" "$DEST"
   if [[ -n "${TARGET_REF:-}" ]]; then
     git -C "$DEST" fetch --no-tags origin "$TARGET_REF"
