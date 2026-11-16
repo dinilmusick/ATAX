@@ -8,7 +8,7 @@ ATAX (dinilmusick/ATAX) is the active private-repository CI execution repository
 - workflow_dispatch always resolves only that run's explicit inputs.
 - push resolves .agent/ci-request.json.
 - Dispatch never reads or edits the shared request file.
-- Each Actions run uses runner.temp/atax-private-ci/<run_id>-<run_attempt> for its clone and temporary artifact directories.
+- Each Actions run uses github.workspace/.private-ci/<run_id>-<run_attempt> for its clone and temporary artifact directories.
 - The clone is full-history and isolated to that run.
 - PRIVATE_REPO_TOKEN exists only in the clone step and is removed from the clone process after use.
 - Target workflows run with no repository token. The default and only supported credential policy is clone-only.
