@@ -49,7 +49,7 @@ if [[ -n "$REF" ]]; then
 fi
 
 if ! command -v "$ACT_BIN" >/dev/null 2>&1; then
-  echo "act is required. Install it on local agents or use the public Agent-Workspace CI workflow." >&2
+  echo "act is required. Install it on local agents or use the public ATAX CI workflow." >&2
   exit 127
 fi
 
