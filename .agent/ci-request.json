@@ -1,8 +1,8 @@
 {
-  "repository": "dinilmusick/Kloks",
-  "ref": "fix/canonical-storage-runtime-contracts-2026-11-16",
+  "repository": "dinilmusick/Floks",
+  "ref": "fix/canonical-b2-workspace-storage-flow-2026-11-16",
   "event": "pull_request",
   "workflow": "ci.yml",
   "token_mode": "clone-only",
-  "request_id": "kloks-storage-playwright-loader-readonly-key-rerun-2026-11-16"
+  "request_id": "floks-canonical-b2-google-storage-ui-rerun-2026-11-16"
 }
