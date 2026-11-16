@@ -19,7 +19,18 @@ if [[ -n "$ATAX_ROOT" && -f "$ATAX_ROOT/tools/private-repo-ci/act-runner/Dockerf
       "$ATAX_ROOT/tools/private-repo-ci/act-runner"
   fi
 fi
-ACT_PLATFORM="${ACT_PLATFORM:-ubuntu-24.04=$ACT_RUNNER_IMAGE}"
+ACT_PLATFORM_ARGS=()
+if [[ -n "${ACT_PLATFORM:-}" ]]; then
+  IFS=',' read -r -a platform_overrides <<< "$ACT_PLATFORM"
+  for platform in "${platform_overrides[@]}"; do
+    [[ -n "$platform" ]] && ACT_PLATFORM_ARGS+=(--platform "$platform")
+  done
+else
+  # GitHub-hosted workflows commonly use ubuntu-latest; act otherwise maps
+  # that label to node:16-buster-slim, which omits git and diverges from Actions.
+  ACT_PLATFORM_ARGS+=(--platform "ubuntu-latest=$ACT_RUNNER_IMAGE")
+  ACT_PLATFORM_ARGS+=(--platform "ubuntu-24.04=$ACT_RUNNER_IMAGE")
+fi
 ACT_GITHUB_TOKEN="${ACT_GITHUB_TOKEN:-}"
 ACT_SECRET_ARGS=()
 
@@ -54,7 +65,7 @@ run_one() {
   echo "::group::CI workflow $wf"
   "$ACT_BIN" "$EVENT" \
     -W "$wf" \
-    --platform "$ACT_PLATFORM" \
+    "${ACT_PLATFORM_ARGS[@]}" \
     --artifact-server-path /tmp/agent-workspace-artifacts \
     "${ACT_SECRET_ARGS[@]}"
   echo "::endgroup::"
