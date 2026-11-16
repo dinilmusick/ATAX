@@ -3,6 +3,5 @@
   "ref": "fix/fetch-native-entrypoint-env-2026-11-16",
   "event": "pull_request",
   "workflow": "",
-  "token_mode": "clone-only",
-  "request_id": "srkl-pr24-agent-e-ci-2026-11-17"
+  "request_id": "srkl-pr24-agent-e-ci-retry-2026-11-17"
 }
