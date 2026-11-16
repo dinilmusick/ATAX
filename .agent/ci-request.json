@@ -1,7 +1,7 @@
 {
-  "repository": "dinilmusick/Kone",
-  "ref": "main",
-  "event": "push",
-  "workflow": "",
-  "token_mode": "workflow"
+  "repository": "dinilmusick/Kloks",
+  "ref": "fix/canonical-storage-runtime-contracts-2026-11-16",
+  "event": "pull_request",
+  "workflow": "ci.yml",
+  "token_mode": "clone-only"
 }
