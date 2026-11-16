@@ -4,15 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: "Private GitHub repository owner/name or URL"
+        description: "Private GitHub repository owner/name"
         required: true
         type: string
       ref:
-        description: "Branch, tag, or SHA; blank uses the default branch"
+        description: "Branch, tag, or SHA; blank uses the repository default branch"
         required: false
+        default: ""
         type: string
       event:
-        description: "act event used to execute the target workflows"
+        description: "act event used to execute target workflows"
         required: false
         default: push
         type: string
@@ -21,14 +22,6 @@ on:
         required: false
         default: ""
         type: string
-      token_mode:
-        description: "Expose the read-only repository token to target workflows"
-        required: true
-        default: workflow
-        type: choice
-        options:
-          - workflow
-          - clone-only
 
   push:
     paths:
@@ -42,98 +35,89 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      CLONE_ROOT: ${{ github.workspace }}/clones
-      PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      RUN_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}
+      CLONE_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}/clones
+      ARTIFACT_ROOT: ${{ runner.temp }}/atax-private-ci/${{ github.run_id }}-${{ github.run_attempt }}/artifacts
+      CI_REQUEST_FILE: .agent/ci-request.json
+      ATAX_ROOT: ${{ github.workspace }}
     steps:
       - name: Checkout ATAX
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
-      - name: Load CI request
+      - name: Resolve this run's request
         shell: bash
         env:
-          REQUEST_REPOSITORY: ${{ inputs.repository }}
-          REQUEST_REF: ${{ inputs.ref }}
-          REQUEST_EVENT: ${{ inputs.event }}
-          REQUEST_WORKFLOW: ${{ inputs.workflow }}
-          REQUEST_TOKEN_MODE: ${{ inputs.token_mode }}
+          CI_TRIGGER: ${{ github.event_name }}
+          INPUT_REPOSITORY: ${{ inputs.repository }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_EVENT: ${{ inputs.event }}
+          INPUT_WORKFLOW: ${{ inputs.workflow }}
+        run: bash tools/private-repo-ci/resolve-request.sh
+
+      - name: Create isolated run directories
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ -f ".agent/ci-request.json" ]]; then
-            request=".agent/ci-request.json"
-            test -f "$request"
-            repository="$(jq -er '.repository' "$request")"
-            ref="$(jq -er '.ref // ""' "$request")"
-            event="$(jq -er '.event // "push"' "$request")"
-            workflow="$(jq -er '.workflow // ""' "$request")"
-            token_mode="$(jq -er '.token_mode // "clone-only"' "$request")"
-          else
-            repository="$REQUEST_REPOSITORY"
-            ref="$REQUEST_REF"
-            event="$REQUEST_EVENT"
-            workflow="$REQUEST_WORKFLOW"
-            token_mode="$REQUEST_TOKEN_MODE"
-          fi
-          case "$repository" in
-            */*|https://github.com/*|git@github.com:*) ;;
-            *) echo "Invalid repository: $repository" >&2; exit 2 ;;
-          esac
-          case "$token_mode" in
-            clone-only|workflow) ;;
-            *) echo "Invalid token_mode: $token_mode" >&2; exit 2 ;;
-          esac
+          mkdir -p "$CLONE_ROOT" "$ARTIFACT_ROOT"
           {
-            echo "TARGET_REPOSITORY=$repository"
-            echo "TARGET_REF=$ref"
-            echo "CI_EVENT=$event"
-            echo "CI_WORKFLOW=$workflow"
-            echo "TOKEN_MODE=$token_mode"
-          } >> "$GITHUB_ENV"
+            echo "ATAX private CI run: $GITHUB_RUN_ID (attempt $GITHUB_RUN_ATTEMPT)"
+            echo "Request: $TARGET_REPOSITORY @ ${TARGET_REF:-default branch}"
+            echo "Trigger: $CI_TRIGGER"
+            echo "Token policy: clone-only"
+            echo "Run root: $RUN_ROOT"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install act
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 6 --retry-delay 4 --retry-all-errors --connect-timeout 20 --max-time 180 https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz -o /tmp/act.tar.gz
-          echo "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0  /tmp/act.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/act.tar.gz -C /tmp act
-          sudo install -m 0755 /tmp/act /usr/local/bin/act
+          curl -fsSL --retry 8 --retry-delay 5 --retry-all-errors --connect-timeout 20 --max-time 240 https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz -o "$RUN_ROOT/act.tar.gz"
+          echo "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0  $RUN_ROOT/act.tar.gz" | sha256sum -c -
+          tar -xzf "$RUN_ROOT/act.tar.gz" -C "$RUN_ROOT" act
+          sudo install -m 0755 "$RUN_ROOT/act" /usr/local/bin/act
           act --version
 
-      - name: Clone private repository
+      - name: Clone private repository (token available only in this step)
+        shell: bash
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: bash tools/private-repo-ci/clone-private-repo.sh
 
       - name: Validate target workflows
-        run: |
-          set -euo pipefail
-          repo="${TARGET_REPOSITORY#https://github.com/}"
-          repo="${repo#git@github.com:}"
-          repo="${repo%.git}"
-          owner="${repo%%/*}"
-          name="${repo#*/}"
-          export CLONED_REPO="${CLONE_ROOT}/${owner}__${name}"
-          bash tools/private-repo-ci/validate-workflows.sh
+        shell: bash
+        run: bash tools/private-repo-ci/validate-workflows.sh
 
-      - name: Execute target repository workflows
+      - name: Execute target workflows without repository credentials
+        shell: bash
+        run: bash tools/private-repo-ci/run-workflows.sh
+
+      - name: Cleanup private clone and verify empty clone root
+        if: always()
+        shell: bash
+        run: bash tools/private-repo-ci/cleanup-clone.sh
+
+      - name: Record run and cleanup evidence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          repo="${TARGET_REPOSITORY#https://github.com/}"
-          repo="${repo#git@github.com:}"
-          repo="${repo%.git}"
-          owner="${repo%%/*}"
-          name="${repo#*/}"
-          export CLONED_REPO="${CLONE_ROOT}/${owner}__${name}"
-          if [[ "$TOKEN_MODE" == "workflow" ]]; then
-            export ACT_GITHUB_TOKEN="$PRIVATE_REPO_TOKEN"
-          else
-            unset ACT_GITHUB_TOKEN || true
-          fi
-          bash tools/private-repo-ci/run-workflows.sh
-
-      - name: Cleanup cloned repository
-        if: always()
-        run: |
-          bash tools/private-repo-ci/cleanup-clone.sh
-          test -z "$(find "$CLONE_ROOT" -mindepth 1 -maxdepth 1 ! -name .gitkeep -print -quit)"
+          {
+            echo ""
+            echo "## Private CI evidence"
+            echo "- Run ID: $GITHUB_RUN_ID"
+            echo "- Run attempt: $GITHUB_RUN_ATTEMPT"
+            echo "- Target: ${TARGET_REPOSITORY:-unresolved}"
+            echo "- Ref: ${TARGET_REF:-default branch}"
+            echo "- Workflow selection: ${CI_WORKFLOW:-all workflows}"
+            echo "- Token mode: clone-only"
+            if [[ -d "$CLONE_ROOT" ]] && [[ -z "$(find "$CLONE_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+              echo "- Clone cleanup: verified empty"
+            else
+              echo "- Clone cleanup: FAILED"
+              exit 1
+            fi
+            echo "- Private source artifacts: none uploaded by ATAX"
+            echo "- Run-specific artifact directory: $ARTIFACT_ROOT (not uploaded)"
+          } >> "$GITHUB_STEP_SUMMARY"
