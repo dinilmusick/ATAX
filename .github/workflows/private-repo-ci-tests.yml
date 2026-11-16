@@ -1,0 +1,28 @@
+name: Private CI Infrastructure Tests
+
+on:
+  push:
+    paths:
+      - ".github/workflows/private-repo-ci.yml"
+      - ".github/workflows/private-repo-ci-tests.yml"
+      - "tools/private-repo-ci/**"
+      - "README.md"
+      - "AGENT_INSTRUCTIONS.md"
+      - "skills/private-repo-ci-workspace-runner/SKILL.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-ci-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout ATAX
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Run private CI regression suite
+        shell: bash
+        run: bash tools/private-repo-ci/tests/test-private-repo-ci.sh
