@@ -1,8 +1,8 @@
 {
-  "repository": "dinilmusick/Floks",
-  "ref": "fix/canonical-b2-workspace-storage-flow-2026-11-16",
+  "repository": "dinilmusick/Kloks",
+  "ref": "fix/canonical-storage-runtime-contracts-2026-11-16",
   "event": "pull_request",
   "workflow": "ci.yml",
   "token_mode": "clone-only",
-  "request_id": "floks-atx-final-head-9612962-2026-11-16"
+  "request_id": "kloks-atx-final-head-fd2cc7-2026-11-16"
 }
