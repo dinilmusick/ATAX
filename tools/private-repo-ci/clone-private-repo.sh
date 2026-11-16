@@ -1,40 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-: "${PRIVATE_REPO_TOKEN:?PRIVATE_REPO_TOKEN is required}"
-: "${TARGET_REPOSITORY:?TARGET_REPOSITORY must be owner/name or a GitHub URL}"
-
-ROOT="${CLONE_ROOT:-${GITHUB_WORKSPACE}/clones}"
-REF="${TARGET_REF:-}"
-mkdir -p "$ROOT"
-
-repo="$TARGET_REPOSITORY"
-repo="${repo#https://github.com/}"
-repo="${repo#git@github.com:}"
-repo="${repo%.git}"
-repo="${repo%%/*}/${repo#*/}"
-owner="${repo%%/*}"
-name="${repo#*/}"
-slug="${owner}__${name}"
-
-if [[ -z "$owner" || -z "$name" || "$owner" == "$name" ]]; then
-  echo "Invalid TARGET_REPOSITORY: $TARGET_REPOSITORY" >&2
-  exit 2
+: "${PRIVATE_REPO_TOKEN:?PRIVATE_REPO_TOKEN is required for cloning only}"
+: "${TARGET_REPOSITORY:?TARGET_REPOSITORY is required}"
+: "${CLONE_ROOT:?CLONE_ROOT must be run-specific}"
+: "${RUN_ROOT:?RUN_ROOT must be run-specific}"
+if [[ ! "$TARGET_REPOSITORY" =~ ^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$ ]]; then
+  echo "Invalid target repository: $TARGET_REPOSITORY" >&2; exit 2
 fi
+owner="${BASH_REMATCH[1]}"; name="${BASH_REMATCH[2]}"
+mkdir -p "$CLONE_ROOT"
+DEST="$CLONE_ROOT/${owner}__${name}"
+[[ ! -e "$DEST" ]] || { echo "Clone destination already exists: $DEST" >&2; exit 2; }
 
-DEST="$ROOT/$slug"
-rm -rf "$DEST"
+# Publish the cleanup target before clone starts so an interrupted/failed clone is removable.
+{
+  echo "CLONED_REPO=$DEST"
+  echo "CLONED_REPOSITORY=$TARGET_REPOSITORY"
+} >> "${GITHUB_ENV:?GITHUB_ENV is required}"
 
-URL="https://x-access-token:${PRIVATE_REPO_TOKEN}@github.com/$owner/$name.git"
-if [[ -n "$REF" ]]; then
-  git clone --no-single-branch --branch "$REF" "$URL" "$DEST"
-else
-  git clone --no-single-branch "$URL" "$DEST"
+auth="$(printf 'x-access-token:%s' "$PRIVATE_REPO_TOKEN" | base64 | tr -d '\n')"
+(
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0=http.extraheader
+  export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+  git clone --no-single-branch "https://github.com/$TARGET_REPOSITORY.git" "$DEST"
+)
+unset auth PRIVATE_REPO_TOKEN
+
+git -C "$DEST" remote set-url origin "https://github.com/$TARGET_REPOSITORY.git"
+git -C "$DEST" remote set-url --push origin "https://github.com/$TARGET_REPOSITORY.git"
+if [[ -n "${TARGET_REF:-}" ]]; then
+  git -C "$DEST" fetch --no-tags origin "$TARGET_REF"
+  git -C "$DEST" checkout --detach FETCH_HEAD
 fi
-
-# Keep the complete target history and remote base refs available for checks such as
-# git merge-base origin/main HEAD; never leave the access token in git config.
-git -C "$DEST" remote set-url origin "https://github.com/$owner/$name.git"
-git -C "$DEST" remote set-url --push origin "https://github.com/$owner/$name.git"
-
-printf '%s\n' "$DEST"
+if git -C "$DEST" config --local --get-regexp 'http\..*extraheader' >/dev/null 2>&1; then
+  echo "Credential residue detected in clone git configuration" >&2; exit 3
+fi
