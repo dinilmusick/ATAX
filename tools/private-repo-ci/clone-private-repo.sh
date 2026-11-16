@@ -27,12 +27,13 @@ rm -rf "$DEST"
 
 URL="https://x-access-token:${PRIVATE_REPO_TOKEN}@github.com/$owner/$name.git"
 if [[ -n "$REF" ]]; then
-  git clone --depth 1 --branch "$REF" "$URL" "$DEST"
+  git clone --no-single-branch --branch "$REF" "$URL" "$DEST"
 else
-  git clone --depth 1 "$URL" "$DEST"
+  git clone --no-single-branch "$URL" "$DEST"
 fi
 
-# Never leave the access token in the cloned repository's git config.
+# Keep the complete target history and remote base refs available for checks such as
+# git merge-base origin/main HEAD; never leave the access token in git config.
 git -C "$DEST" remote set-url origin "https://github.com/$owner/$name.git"
 git -C "$DEST" remote set-url --push origin "https://github.com/$owner/$name.git"
 
