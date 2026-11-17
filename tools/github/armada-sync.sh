@@ -26,6 +26,18 @@ sync_one() {
   upstream_sha="$(git -C "$tmp/$name" rev-parse HEAD)"
   local base_sha
   base_sha="$(git rev-parse origin/main)"
+  local upstream_tree armada_tree
+  upstream_tree="$(git -C "$tmp/$name" rev-parse 'HEAD^{tree}')"
+  if ! armada_tree="$(git rev-parse "${base_sha}:${prefix}" 2>/dev/null)"; then
+    echo "::error::Missing canonical Armada prefix $prefix for $name" >&2
+    return 1
+  fi
+  # Identical source trees need no synthetic subtree split, empty PR, or merge.
+  if [[ "$armada_tree" == "$upstream_tree" ]]; then
+    echo "Inbound current: $name"
+    echo "Outbound current: $name"
+    return 0
+  fi
   local inbranch="armada-in-${name,,}-${upstream_sha:0:12}"
   git checkout -q -B "$inbranch" "$base_sha"
   if git subtree pull --prefix="$prefix" "$tmp/$name" HEAD --squash >/dev/null 2>"$tmp/inbound-error"; then
@@ -52,7 +64,9 @@ sync_one() {
     echo "::warning::Outbound split failed: $name"
     return 0
   fi
-  if [[ "$split_sha" == "$upstream_sha" ]]; then
+  local split_tree
+  split_tree="$(git rev-parse "${split_sha}^{tree}")"
+  if [[ "$split_tree" == "$upstream_tree" ]]; then
     echo "Outbound current: $name"
     return 0
   fi
@@ -72,39 +86,34 @@ sync_one() {
   fi
   echo "Outbound PR: $name ${split_sha:0:12}"
 }
-# Resolve old and new locations during the short migration window; once
-# migrated, the new locations are authoritative. Never duplicate copies.
-sync_moved() {
-  local name="$1" old="$2" new="$3" source="$4"
-  if [[ -d "$new" ]]; then
-    sync_one "$name" "$new" "$source"
-  elif [[ -d "$old" ]]; then
-    sync_one "$name" "$old" "$source"
-  else
-    echo "::error::Missing Armada component $name at both $old and $new"
-    return 1
-  fi
-}
-sync_new() {
-  local name="$1" prefix="$2" source="$3"
-  if [[ -d "$prefix" ]]; then
-    sync_one "$name" "$prefix" "$source"
-  else
-    echo "Pending migration: $name ($prefix)"
-  fi
-}
-sync_moved GutTS libraries/GutTS libraries/TypeScript-React/GutTS GutTS
-sync_moved KrnlTS libraries/KrnlTS libraries/TypeScript-React/KrnlTS KrnlTS
-sync_moved FrnlTS libraries/FrnlTS libraries/TypeScript-React/FrnlTS FrnlTS
-sync_moved Kloks libraries/Kloks libraries/TypeScript-React/Kloks Kloks
-sync_moved Floks libraries/Floks libraries/TypeScript-React/Floks Floks
-sync_moved Skipo scaffold/Skipo framework/Skipo Skipo
-sync_new GutWP libraries/PHP-WordPress/GutWP GutWP
-sync_new KrnlWP libraries/PHP-WordPress/KrnlWP KrnlWP
-sync_new FrnlWP libraries/PHP-WordPress/FrnlWP FrnlWP
-sync_new KloksWP libraries/PHP-WordPress/KloksWP KloksWP
-sync_new FloksWP libraries/PHP-WordPress/FloksWP FloksWP
-sync_new SkipoWP framework/SkipoWP SkipoWP
+# Canonical final locations only: a missing prefix is a hard error.
+for prefix in \
+  libraries/TypeScript-React/GutTS \
+  libraries/TypeScript-React/KrnlTS \
+  libraries/TypeScript-React/FrnlTS \
+  libraries/TypeScript-React/Kloks \
+  libraries/TypeScript-React/Floks \
+  libraries/PHP-WordPress/GutWP \
+  libraries/PHP-WordPress/KrnlWP \
+  libraries/PHP-WordPress/FrnlWP \
+  libraries/PHP-WordPress/KloksWP \
+  libraries/PHP-WordPress/FloksWP \
+  framework/Skipo framework/SkipoWP \
+  apps/Aiko apps/SRKL apps/Kone; do
+  [[ -d "$prefix" ]] || { echo "::error::Missing canonical prefix $prefix" >&2; exit 1; }
+done
+sync_one GutTS libraries/TypeScript-React/GutTS GutTS
+sync_one KrnlTS libraries/TypeScript-React/KrnlTS KrnlTS
+sync_one FrnlTS libraries/TypeScript-React/FrnlTS FrnlTS
+sync_one Kloks libraries/TypeScript-React/Kloks Kloks
+sync_one Floks libraries/TypeScript-React/Floks Floks
+sync_one GutWP libraries/PHP-WordPress/GutWP GutWP
+sync_one KrnlWP libraries/PHP-WordPress/KrnlWP KrnlWP
+sync_one FrnlWP libraries/PHP-WordPress/FrnlWP FrnlWP
+sync_one KloksWP libraries/PHP-WordPress/KloksWP KloksWP
+sync_one FloksWP libraries/PHP-WordPress/FloksWP FloksWP
+sync_one Skipo framework/Skipo Skipo
+sync_one SkipoWP framework/SkipoWP SkipoWP
 sync_one Aiko apps/Aiko Aiko
 sync_one SRKL apps/SRKL Srkl-Engine
 sync_one Kone apps/Kone Kone
