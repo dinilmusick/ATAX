@@ -1,7 +1,7 @@
 ---
 name: "DevOps, CI/CD and Release Engineering"
 slug: devops-ci-release
-version: 1.0.0
+version: 1.0.9
 source: Supabase Skills Database
 sourceId: 9
 status: active
@@ -50,7 +50,7 @@ Do not deploy, promote, roll back, or modify production configuration without au
 
 ## Private repository CI fallback
 
-When a private repository cannot provide usable native CI because runners/credits are unavailable, exhausted, blocked, or unsuitable:
+Whenever remote CI is requested for a private repository (independent of whether private Actions is currently available):
 
 1. Activate private-repo-ci-workspace-runner.
 2. Use ATAX's .github/workflows/private-repo-ci.yml strictly as a FMRL provisioning/polling/deletion controller; never as the target runner.
