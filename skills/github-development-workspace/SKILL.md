@@ -1,7 +1,7 @@
 ---
 name: GitHub Development Workspace
 slug: github-development-workspace
-version: 1.3.1
+version: 1.4.0
 source: Supabase Skills Database
 sourceId: 40
 status: active
@@ -80,7 +80,7 @@ create repository
   -> install dependencies
   -> validate
   -> commit/push
-  -> continue coding in github-development-workspace
+  -> continue coding in the agent container or disposable FMRL runner
 ```
 
 ## Routing
@@ -94,7 +94,7 @@ private repository + CI/build/test evidence
   -> evidence -> independent verification -> delete + verify deletion
 
 any authorized repo + code execution/edit/build/test
-  -> github-development-workspace
+  -> agent container first; FMRL disposable public runner as fallback
 
 new Skipo application
   -> create-skipo-app workflow
