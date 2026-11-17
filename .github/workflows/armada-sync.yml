@@ -1,115 +1,13 @@
-name: ULTRST Armada Synchronization
+name: Legacy Armada Snapshot Sync (retired)
 on:
   workflow_dispatch:
-    inputs:
-      direction:
-        description: import or export
-        required: true
-        default: import
-        type: choice
-        options: [import, export]
-  issues:
-    types: [opened]
 permissions:
   contents: read
-  issues: write
-concurrency:
-  group: ultrst-armada-sync
-  cancel-in-progress: false
 jobs:
-  sync:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issues' &&
-       github.event.issue.author_association == 'OWNER' &&
-       startsWith(github.event.issue.title, '[armada-sync]'))
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     steps:
-      - name: Validate request
-        id: request
-        env:
-          EVENT: ${{ github.event_name }}
-          TITLE: ${{ github.event.issue.title }}
-          BODY: ${{ github.event.issue.body }}
-          DIRECTION: ${{ inputs.direction }}
+      - name: Prevent incompatible rsync snapshot sync
         run: |
-          python3 - <<'PY'
-          import os,json
-          if os.environ['EVENT']=='issues':
-              req=json.loads(os.environ['BODY'])
-              assert isinstance(req,dict) and set(req)=={'direction'}
-              direction=req['direction']
-              assert os.environ['TITLE']=='[armada-sync] '+direction
-          else: direction=os.environ['DIRECTION']
-          assert direction in ('import','export')
-          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('direction='+direction+'\n')
-          PY
-      - name: Authenticate and safely synchronize
-        env:
-          TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
-          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
-          DIRECTION: ${{ steps.request.outputs.direction }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$TOKEN"
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git config --global --add http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
-          trap 'git config --global --unset-all http.https://github.com/.extraheader || true; rm -rf "$RUNNER_TEMP/armada-work"' EXIT
-          mkdir -p "$RUNNER_TEMP/armada-work"
-          cd "$RUNNER_TEMP/armada-work"
-          git clone --quiet https://github.com/dinilmusick/ULTRST-Armada.git armada
-          repos=(GutTS KrnlTS FrnlTS Kloks Floks Skipo Aiko Srkl-Engine Kone)
-          dirs=(GutTS KrnlTS FrnlTS Kloks Floks Skipo Aiko Srkl Kone)
-          for i in "${!repos[@]}"; do
-            repo="${repos[$i]}"
-            folder="${dirs[$i]}"
-            prefix="libraries/$folder"
-            case "$repo" in
-              Skipo) prefix="scaffold/Skipo" ;;
-              Aiko|Srkl-Engine|Kone) prefix="apps/$folder" ;;
-            esac
-            git clone --quiet --depth 1 --branch main "https://github.com/dinilmusick/$repo.git" "source-$i"
-            if [[ "$DIRECTION" == import ]]; then
-              mkdir -p "armada/$prefix"
-              rsync -a --delete --exclude='.git/' "source-$i/" "armada/$prefix/"
-            else
-              test -d "armada/$prefix" || { echo "::error::Missing $prefix"; exit 1; }
-              rsync -a --delete --exclude='.git/' "armada/$prefix/" "source-$i/"
-              pushd "source-$i" >/dev/null
-              if [[ -n "$(git status --porcelain)" ]]; then
-                branch="sync/armada-$GITHUB_RUN_ID"
-                git switch -q -c "$branch"
-                git add -A
-                git commit -qm "sync: import changes from Armada"
-                git push -q origin "HEAD:$branch"
-                gh pr create --repo "dinilmusick/$repo" --base main --head "$branch" --title "sync: export Armada updates" --body "Changes from private ULTRST Armada snapshot. Review before merging. No automatic upstream default-branch writes."
-              else
-                echo "Unchanged: $repo"
-              fi
-              popd >/dev/null
-            fi
-          done
-          if [[ "$DIRECTION" == import ]]; then
-            cd armada
-            if [[ -n "$(git status --porcelain)" ]]; then
-              branch="sync/import-$GITHUB_RUN_ID"
-              git switch -q -c "$branch"
-              git add -A
-              git commit -qm "sync: import source repository snapshots"
-              git push -q origin "HEAD:$branch"
-              gh pr create --repo dinilmusick/ULTRST-Armada --base main --head "$branch" --title "sync: refresh integrated source repositories" --body "Updates from authoritative standalone repositories. Review before merging. Directory mappings: libraries/{GutTS,KrnlTS,FrnlTS,Kloks,Floks}, scaffold/Skipo, apps/{Aiko,Srkl,Kone}. Source repositories preserved."
-            else
-              echo 'All repository snapshots already current.'
-            fi
-          fi
-      - name: Report status
-        if: always() && github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ github.event.issue.number }}
-          STATUS: ${{ job.status }}
-        run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" -f body="Armada $STATUS. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "::warning::Legacy rsync sync is retired: it did not preserve Git subtree provenance."
+          echo "Use .github/workflows/armada-subtree-sync.yml for PR-only bidirectional reconciliation."
