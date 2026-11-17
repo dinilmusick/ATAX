@@ -14,3 +14,15 @@ Execution priority:
 A new permanent repository (plain or Skipo) is a different lifecycle from disposable FMRL compute. Keep the two workflows separate.
 
 Local preflight: `python3 tools/agent-bootstrap/bootstrap.py plan --repository owner/name`. Local preparation should check out the **target**, not ATAX. The remote ATAX fallback is a **control-plane** workflow only: `.github/workflows/private-repo-ci.yml`, which provisions and monitors `FMRL-*` and deletes it in an unconditional cleanup step. The prior `[github-dev]` and `[private-ci]` issue-based code execution workflows are retired. Do not create issues with those prefixes.
+
+## ATAX FMRL credential boundaries
+
+Store all three values as **GitHub Actions repository secrets on dinilmusick/ATAX** (Settings → Secrets and variables → Actions):
+
+- `CODING_REPO_TOKEN`: existing lifecycle credential; creates the disposable public `FMRL-*` repository, writes the bridge workflow, dispatches and monitors CI, and deletes the repository.
+- `FMRL_SECRETS_TOKEN`: **new, separate** credential used only to set the encrypted `PRIVATE_REPO_TOKEN` Actions secret on the disposable repository. For a fine-grained personal access token, select the `dinilmusick` owner, **All repositories** (including newly created FMRL repositories), and repository **Secrets: Read and write**. GitHub adds Metadata: Read automatically. Do not reuse the lifecycle or private-read credentials.
+- `PRIVATE_REPO_TOKEN`: existing read-only credential to clone the authorized private target; never pass it as a workflow input or commit it to FMRL.
+
+`FMRL_SECRETS_TOKEN` is required; provisioning fails **before creating** a disposable repository if it is missing. The tool does not fall back to `CODING_REPO_TOKEN` on a missing secret or HTTP 403. A permission failure after repository creation triggers the existing cleanup and independent deletion check.
+
+After adding `FMRL_SECRETS_TOKEN` to ATAX, run the `FMRL CI controller (no target code in ATAX)` workflow with an authorized private repository, inspect its result, and verify that its temporary repository was deleted. Do not put token values in issues, workflow inputs, logs, or chat messages.
