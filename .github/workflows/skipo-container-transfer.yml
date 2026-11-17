@@ -1,0 +1,69 @@
+name: Stage Skipo and app checkouts for container development
+on:
+  push:
+    branches: [ops/skipo-downstream-migration-20261117]
+    paths: [.github/workflows/skipo-container-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context=atax-container-transfer -f "target_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
+  snapshot:
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: [Skipo, Aiko, Srkl-Engine, Kone]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: dinilmusick/${{ matrix.repository }}
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - name: Encrypt the tracked checkout for the development container
+        run: |
+          set -euo pipefail
+          cat >"$RUNNER_TEMP/recipient.pem" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIEJzCCAo+gAwIBAgIUd5sRTD9MTAFz6X2cO8ulZrtYN6gwDQYJKoZIhvcNAQEL
+          BQAwIzEhMB8GA1UEAwwYU2tpcG8tY29udGFpbmVyLXRyYW5zZmVyMB4XDTI2MTEx
+          NzA2MzA0NFoXDTI2MTExOTA2MzA0NFowIzEhMB8GA1UEAwwYU2tpcG8tY29udGFp
+          bmVyLXRyYW5zZmVyMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAqlk8
+          6Kam+0k/Rz08diKaxAM/iQxKVQtdgLKOWYV6vzTMEYkiI6YPy9QY0JdRRKGGOJaR
+          pAPY5l81zuQYK7isQb6E4R5YCm7P2i4fSUBO5fh6a4l19jqFkHB07sFwXvpnDYpo
+          +i8BS2wdr4JCW+KqoMIc42s5Sruaxnsrw2p7qpCf8xPrZdnUTIjyXPEAgE50BvVL
+          7c9YzEqvptnIJK7JlgSFX5ceVspW4+yChEHoXXK4HLF+YhKQasVlsNdtUiw7Phcj
+          PATfRIejBt0qfJrqTR6nr53ZqkULvqho9BDx+Ep7P3jk3hhj3O7qxKbEmb3EDk6Y
+          A2aRSw1RaMPb8n6NTqzrMTY82tLFEj4L6FyhTWgLTZ4XugD0+WHal/9gz62cRLP0
+          PQNm4gHGhbGBSGE/rqBOH7w8/5CpWXFh+FZ8zwKKBDGGIcH+jeMs1k4TpGPt7KbU
+          QypzEtoqZCzZPCkOHt7Npx55ZXUGgNohUlnrFJUcIRWYNMtMB6tXWajU27xVAgMB
+          AAGjUzBRMB0GA1UdDgQWBBSrEGrEXm936dFaXNowo9uXwBKWejAfBgNVHSMEGDAW
+          gBSrEGrEXm936dFaXNowo9uXwBKWejAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
+          DQEBCwUAA4IBgQASHtX0FWRF+RtE6nw0hQdjuejKKdcwQlmHTBpiwxPsJf23Qumn
+          IKW0B2jGwBBv1dQ8wm5/dhUbxcL2BUUtQTBGKsEiVzQGv9usq4vxlbyO+RmQWtdP
+          cNbrlkUrxeKR6s5ZCmbEmfHrsocRdA3jjF4L1DtJsDJ/lm4C3lYsGUMpfCfC+7zc
+          QS9WHTMqsdiG1XvxxrdZ8xicZ6+lTc5hKL01o0YVBxttTdHWaVAw/zQaPsaxZiEU
+          v5aqBx1R5WKlx2++w4Li5B+xHsFJSVncrF6zoLm3utZXsN7f118aRDgzbFGJ8F0N
+          qw3hFRLH2JxV+apzD568T9rp63IEPR925O+ZRPZcyMsv8L+v3AVC8OxRfdXOMjx0
+          A0mubqMndp1vmeM7kVYQ7d8v/FE6cqf47/aw7vTJowkHOgcNou9/G4+QkKrbnp0D
+          bbmWNI2fE95HIOyVmrseOt7gTZ9AMqRKt0gpqSgiN9SuB7FpP+NTr5cAqoTAbQlv
+          3H0WTKBGshc9ADg=
+          -----END CERTIFICATE-----
+          CERT
+          git rev-parse HEAD >"$RUNNER_TEMP/revision"
+          git archive --format=tar HEAD | gzip -1 | openssl cms -encrypt -binary -aes-256-gcm -outform DER "$RUNNER_TEMP/recipient.pem" >"$RUNNER_TEMP/checkout.der"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: checkout-${{ matrix.repository }}
+          path: |
+            ${{ runner.temp }}/checkout.der
+            ${{ runner.temp }}/revision
+          retention-days: 1
+          compression-level: 0
