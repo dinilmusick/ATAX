@@ -37,6 +37,8 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("trap 'rm -f", clone)
         self.assertNotIn('AUTHORIZATION: bearer', clone)
         self.assertNotIn('https://x-access-token:', clone)
+        self.assertIn('"--bind" "--directory" "$PWD"', execute)
+        self.assertIn("test -d .git", execute)
         self.assertNotIn("PRIVATE_REPO_TOKEN", execute)
         self.assertNotIn("--secret", execute)
         self.assertNotIn("upload-artifact", workflow)
