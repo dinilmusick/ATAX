@@ -129,6 +129,22 @@ def api(path: str, bearer: str, method: str = "GET", payload=None):
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"GitHub API {method} {path} failed: {detail}") from exc
 
+def verify_deleted_public_bridge(repository: str) -> None:
+    """Check public repository absence without reusing the provisioning token."""
+    req = request.Request(API_ROOT + f"/repos/{repository}", headers=HEADERS)
+    for attempt in range(5):
+        try:
+            with request.urlopen(req, timeout=20):
+                pass
+        except error.HTTPError as exc:
+            if exc.code == 404:
+                return
+            raise RuntimeError(f"Independent FMRL deletion check failed: HTTP {exc.code}") from None
+        if attempt < 4:
+            time.sleep(2)
+    raise RuntimeError(f"FMRL deletion not confirmed by anonymous GitHub GET: {repository}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Private source owner/name.")
@@ -189,6 +205,12 @@ def main() -> int:
                 # encryption public key. Surface the actual failure safely.
                 diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
                 diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]")
+                if "Resource not accessible by personal access token" in diagnostic:
+                    raise RuntimeError(
+                        "FMRL requires CODING_REPO_TOKEN with repository Secrets: write "
+                        "access to newly created disposable repositories (GitHub HTTP 403). "
+                        "Reauthorize its scope; never expose clone credentials in public workflow inputs."
+                    ) from None
                 if attempt == 3:
                     raise RuntimeError(
                         "Cannot install clone-only secret on FMRL after 4 attempts: " + diagnostic[:500]
@@ -212,7 +234,13 @@ def main() -> int:
         }, indent=2))
         return 0
     except Exception:
-        api(f"/repos/{target}", bearer, "DELETE")
+        try:
+            api(f"/repos/{target}", bearer, "DELETE")
+            verify_deleted_public_bridge(target)
+        except Exception as cleanup_error:
+            raise RuntimeError(
+                f"FMRL provisioning failed and cleanup is unverified for {target}: {cleanup_error}"
+            ) from None
         raise
 
 if __name__ == "__main__":
