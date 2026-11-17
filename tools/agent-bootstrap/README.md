@@ -1,13 +1,10 @@
-# Agent Workspace Bootstrap
+# ATAX container-first target bootstrap
 
-The bootstrap tool is the deterministic local-runtime entry point for AgentGPT-compatible agents.
+ATAX is a control plane and source of reusable tools. It must never be cloned or used as the **target workspace**.
 
-## Contract
+1. Run `python3 tools/agent-bootstrap/bootstrap.py plan --repository owner/name` to inspect the agent's container.
+2. Run `prepare --repository owner/name` to clone the TARGET directly into the container. Run build/lint/typecheck/tests there.
+3. If unavailable, insufficient, or public CI evidence is needed, use ATAX's FMRL provisioning tool or control-plane workflow. The runner executes only inside the newly provisioned disposable **FMRL-*** public repo.
+4. Independently verify the result and delete FMRL; confirm deletion (404). A failed cleanup is a blocker.
 
-local container/runtime -> Agent-Workspace-1 bridge -> GitHub Actions fallback
-
-- plan: inspect the runtime and target without executing target code.
-- prepare: ensure the public Agent-Workspace-1 checkout exists, attempt the target clone, and discover repository-defined build/quality scripts.
-- If a private target cannot be cloned directly, use Agent-Workspace-1's authorized private-repository tooling.
-- Run every discovered build, test, typecheck, lint and custom build command that participates in the real build.
-- Use GitHub Actions only when no usable local runtime exists or local execution cannot reproduce the required environment.
+Never substitute historical ATAX-native runner workflows or private target Actions. Private checkout tokens belong only to the FMRL clone step.
