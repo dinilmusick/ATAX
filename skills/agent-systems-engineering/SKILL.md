@@ -1,7 +1,7 @@
 ---
 name: "AI Agent and Tooling Engineering"
 slug: agent-systems-engineering
-version: 2.3.0
+version: 2.3.1
 source: Supabase Skills Database
 sourceId: 23
 status: active
@@ -54,9 +54,9 @@ Do not grant an agent capabilities merely because a prompt requests them.
 
 ## Private repository execution capability
 
-Agents should use the reusable private-repo-ci-workspace-runner capability extensively. It turns ATAX into a public CI execution bridge for private repositories when native private CI is unavailable or exhausted.
+Agents should use the disposable FMRL public runner capability whenever remote CI is needed for private targets. ATAX only provisions, observes, and deletes that runner.
 
-privateRepo → inspect native CI → fallback if needed → ATAX → clone → act → evidence → cleanup
+privateRepo → container-target-clone → FMRL-public-runner-if-needed → runtime private clone → verify → delete FMRL → verify 404
 
 Security boundary: PRIVATE_REPO_TOKEN is read-only clone/verification access. CODING_REPO_TOKEN and DEPLOYMENT_TOKEN remain under ATAX control and are never injected into arbitrary target workflow code.
 
