@@ -38,6 +38,24 @@ jobs:
           python3 -m unittest discover -s tools/agent-bootstrap -p test_bootstrap.py -v
       - name: Enforce ATAX control-plane boundary
         run: |
-          test ! -f .github/workflows/private-repo-ci-issue.yml
-          test ! -f .github/workflows/github-dev-workspace.yml
+          for retired in \
+            .github/workflows/private-repo-ci-issue.yml \
+            .github/workflows/github-dev-workspace.yml \
+            .github/workflows/agent-compute.yml \
+            .github/workflows/github-public-compute-matrix.yml \
+            .github/workflows/ecosystem-native-verification.yml \
+            .github/workflows/ecosystem-boundary-runner.yml \
+            .github/workflows/inspect-react.yml \
+            .github/workflows/browser-boundary-implementation.yml \
+            .github/workflows/browser-boundary-refactor.yml \
+            .github/workflows/browser-e2e-wasm.yml \
+            .github/workflows/floks-boundary-release-verification.yml \
+            .github/workflows/frnlts-boundary-verification.yml \
+            tools/private-repo-ci/act-runner/Dockerfile \
+            runner/private-repo-native-ci.sh \
+            .agent/ci-request.json \
+            .agent/private-repo-ci-request.json; do
+            test ! -e "$retired" || { echo "Legacy ATAX runtime revived: $retired" >&2; exit 1; }
+          done
           ! grep -Eq '(git clone .*target|--secret.*GITHUB_TOKEN=)' .github/workflows/private-repo-ci.yml
+          grep -q 'FMRL-' .github/workflows/private-repo-ci.yml
