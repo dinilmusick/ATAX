@@ -67,7 +67,10 @@ jobs:
           test -n "$PRIVATE_REPO_TOKEN"
           rm -rf target
           git -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
-            clone --branch "$TARGET_REF" "https://github.com/$TARGET_REPOSITORY.git" target
+            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target
+          git -C target -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
+            fetch --no-tags origin "$TARGET_REF"
+          git -C target checkout --detach FETCH_HEAD
 
       - name: Install pinned act
         shell: bash
@@ -89,6 +92,8 @@ jobs:
           cd target
           args=("$TARGET_EVENT" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
           if [[ -n "$TARGET_WORKFLOW" ]]; then
+            [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
+            test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
           act "${args[@]}"
