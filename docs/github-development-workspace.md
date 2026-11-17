@@ -1,58 +1,16 @@
-# GitHub Development Workspace
+# Container-first development and FMRL remote execution
 
-ATAX can execute bounded development jobs against authorized GitHub repositories without requiring a workflow-dispatch API client.
+## Mandatory FMRL execution boundary
 
-## Trigger through an issue
+ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.
 
-Create an issue in `dinilmusick/ATAX`:
+Execution priority:
+1. Use the agent's own container/runtime; clone the **target repository** directly there (if authorized), edit and test locally. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
+2. If local execution is unavailable, inaccessible, insufficient, or remote public Actions evidence is required, provision an **FMRL-prefixed, one-job disposable public repository** through `tools/github/disposable_workspace.py` or ATAX's control-plane workflow. This is the **only** remote GitHub compute location for private targets.
+3. The FMRL public repository contains only bridge workflow code. Authorized private source is checked out **only inside its transient runner** and never pushed, artifacted, cached, or committed to the public repository. The checkout token is used only by the clone step; target commands receive no repository token.
+4. Run and inspect checks, record evidence, obtain independent verification, **delete FMRL**, and independently confirm the repository returns 404. Deletion is mandatory on failure as well as success; failed cleanup is a blocker, not completion.
+5. If FMRL cannot be provisioned, report the blocker and preserve work in the ledger. **Never fall back to ATAX or private-repository Actions execution.**
 
-- Title must begin with `[github-dev]`.
-- The issue author must be a repository owner, member, or collaborator.
-- The body must be a JSON object following this contract:
+A new permanent repository (plain or Skipo) is a different lifecycle from disposable FMRL compute. Keep the two workflows separate.
 
-```json
-{
-  "repository": "dinilmusick/Aiko",
-  "ref": "main",
-  "source_repository": "dinilmusick/Fod-Engine",
-  "source_ref": "main",
-  "commands": [
-    "npm ci",
-    "npm run typecheck",
-    "npm test",
-    "npm run build"
-  ],
-  "push": true,
-  "branch": "agent/aiko-verification",
-  "create_pr": true,
-  "commit_message": "chore: verify Aiko implementation",
-  "pr_title": "chore: verify Aiko implementation",
-  "pr_body": "Summary and verification evidence."
-}
-```
-
-The minimum request is `repository`, `ref`, and non-empty `commands`. Optional `source_repository` and `source_ref` check out a private source repository into `$GITHUB_WORKSPACE/source` using the workspace credential in a dedicated checkout action. The credential is not passed to command execution and checkout credential persistence is disabled. Commands may be a string or an array of strings. A maximum of 100 command lines and 20,000 characters is enforced.
-
-Set `push` to false (or omit it) to run checks without writing to the target repository. To push changes, set `push: true` and provide a new `branch`; the runner creates a commit and pushes that branch. Set `create_pr: true` to open a pull request against `ref` after the push. PR creation requires push.
-
-## Security boundaries
-
-- Only issue requests from repository owners, members, or collaborators are accepted.
-- The target and optional source repositories are checked out with `CODING_REPO_TOKEN`, with credential persistence disabled.
-- Target commands do not receive repository, deployment, or workflow secrets.
-- The write token is only exposed to the isolated push/PR steps after command execution.
-- The workflow's own `GITHUB_TOKEN` has read-only contents/issue permissions.
-- Run arbitrary commands only against trusted repositories. The authorized issue route is a code-execution capability, not a public sandbox.
-- Each run uploads its command log as a seven-day artifact.
-
-## Workflow-dispatch route
-
-The same workflow retains its `workflow_dispatch` interface for callers that can dispatch Actions directly. Both routes use the same request validator.
-
-## Local request validation tests
-
-Run:
-
-```bash
-python3 -m unittest runner/test_resolve_development_request.py
-```
+Local preflight: `python3 tools/agent-bootstrap/bootstrap.py plan --repository owner/name`. Local preparation should check out the **target**, not ATAX. The remote ATAX fallback is a **control-plane** workflow only: `.github/workflows/private-repo-ci.yml`, which provisions and monitors `FMRL-*` and deletes it in an unconditional cleanup step. The prior `[github-dev]` and `[private-ci]` issue-based code execution workflows are retired. Do not create issues with those prefixes.
