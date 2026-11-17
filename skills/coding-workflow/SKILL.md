@@ -1,7 +1,7 @@
 ---
 name: "Coding Workflow"
 slug: coding-workflow
-version: 2.1.0
+version: 2.1.1
 source: Supabase Skills Database
 sourceId: 20
 status: active
@@ -69,7 +69,7 @@ Coding Workflow is reached through Coding Router. The router and selected specia
 
 ## Private repository CI fallback
 
-For private repositories, use native CI when it is available and useful. If it is unavailable, exhausted, blocked, or unsuitable, activate private-repo-ci-workspace-runner and execute the target workflow through ATAX.
+For private repositories, use the agent container first and always use a disposable FMRL public runner for remote CI. The ATAX repository is control plane only, never the target execution workspace.
 
 Required evidence flow:
 
