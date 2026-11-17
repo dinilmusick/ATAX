@@ -100,7 +100,7 @@ jobs:
           ref: ${{ steps.request.outputs.source_ref }}
           token: ${{ secrets.CODING_REPO_TOKEN }}
           path: source
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout target repository
