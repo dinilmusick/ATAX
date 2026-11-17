@@ -118,5 +118,53 @@ class FmrlTests(unittest.TestCase):
         sleep.assert_called_once_with(3)
 
 
+    def test_permanent_secret_permission_error_fails_fast_and_verifies_cleanup(self):
+        def fake_api(path, bearer, method="GET", payload=None):
+            if path == "/repos/dinilmusick/KONE":
+                return {"private": True, "default_branch": "main"}
+            if path == "/user/repos":
+                return {"full_name": "dinilmusick/FMRL-unit-test"}
+            if path == "/repos/dinilmusick/FMRL-unit-test":
+                return {"private": False, "html_url": "https://github.com/dinilmusick/FMRL-unit-test"}
+            return None
+
+        forbidden = MODULE.subprocess.CalledProcessError(
+            1, ["gh", "secret", "set"],
+            stderr="HTTP 403: Resource not accessible by personal access token"
+        )
+        with (
+            mock.patch.object(MODULE, "api", side_effect=fake_api) as api,
+            mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(MODULE.subprocess, "run", side_effect=forbidden) as run,
+            mock.patch.object(MODULE, "verify_deleted_public_bridge") as verified,
+            mock.patch.object(MODULE.time, "sleep") as sleep,
+            mock.patch.dict(MODULE.os.environ, {
+                "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+            }),
+            mock.patch.object(sys, "argv", ["disposable_workspace.py",
+                                           "--source", "dinilmusick/KONE",
+                                           "--target", "FMRL-unit-test"]),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Secrets: write"):
+                MODULE.main()
+        self.assertEqual(run.call_count, 1)
+        sleep.assert_not_called()
+        verified.assert_called_once_with("dinilmusick/FMRL-unit-test")
+        self.assertTrue(any(
+            call.args[:3] == ("/repos/dinilmusick/FMRL-unit-test", "management", "DELETE")
+            for call in api.call_args_list
+        ))
+
+    def test_absence_check_is_anonymous_and_requires_404(self):
+        import urllib.error
+        not_found = urllib.error.HTTPError(
+            "https://api.github.com/repos/dinilmusick/FMRL-unit-test", 404,
+            "Not Found", {}, None,
+        )
+        with mock.patch.object(MODULE.request, "urlopen", side_effect=not_found) as fetch:
+            MODULE.verify_deleted_public_bridge("dinilmusick/FMRL-unit-test")
+        self.assertNotIn("Authorization", fetch.call_args.args[0].headers)
+
+
 if __name__ == "__main__":
     unittest.main()
