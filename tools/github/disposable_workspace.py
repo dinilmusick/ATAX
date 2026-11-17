@@ -173,14 +173,20 @@ def main() -> int:
 
         env = os.environ.copy()
         env["GH_TOKEN"] = bearer
-        subprocess.run(
-            ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
-            input=clone_token,
-            text=True,
-            env=env,
-            capture_output=True,
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
+                input=clone_token,
+                text=True,
+                env=env,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            # Preserve a safe diagnostic without ever logging either credential.
+            diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
+            diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]")
+            raise RuntimeError("Cannot install clone-only secret on FMRL: " + diagnostic[:500]) from None
 
         verified = api(f"/repos/{target}", bearer)
         if verified.get("private") is not False:
