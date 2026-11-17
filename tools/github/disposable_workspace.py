@@ -104,7 +104,10 @@ jobs:
         run: |
           set -euo pipefail
           cd target
-          args=("$TARGET_EVENT" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
+          test -d .git
+          # Nested act on GitHub-hosted runners must mount the checked-out private worktree.
+          # This mount exists only inside the ephemeral runner; no source is committed to FMRL.
+          args=("$TARGET_EVENT" "--bind" "--directory" "$PWD" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
           if [[ -n "$TARGET_WORKFLOW" ]]; then
             [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
             test -f ".github/workflows/$TARGET_WORKFLOW"
