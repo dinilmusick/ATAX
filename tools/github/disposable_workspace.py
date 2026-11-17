@@ -7,7 +7,7 @@ clones the private target at runtime, executes its workflow with act, and
 removes the checkout before the job ends.
 """
 from __future__ import annotations
-import argparse, base64, json, os, re, shutil, subprocess, uuid
+import argparse, base64, json, os, re, shutil, subprocess, time, uuid
 from urllib import error, request
 
 API_ROOT = "https://api.github.com"
@@ -173,20 +173,27 @@ def main() -> int:
 
         env = os.environ.copy()
         env["GH_TOKEN"] = bearer
-        try:
-            subprocess.run(
-                ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
-                input=clone_token,
-                text=True,
-                env=env,
-                capture_output=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            # Preserve a safe diagnostic without ever logging either credential.
-            diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
-            diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]")
-            raise RuntimeError("Cannot install clone-only secret on FMRL: " + diagnostic[:500]) from None
+        for attempt in range(4):
+            try:
+                subprocess.run(
+                    ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
+                    input=clone_token,
+                    text=True,
+                    env=env,
+                    capture_output=True,
+                    check=True,
+                )
+                break
+            except subprocess.CalledProcessError as exc:
+                # A newly provisioned repo may not yet expose its Actions
+                # encryption public key. Surface the actual failure safely.
+                diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
+                diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]")
+                if attempt == 3:
+                    raise RuntimeError(
+                        "Cannot install clone-only secret on FMRL after 4 attempts: " + diagnostic[:500]
+                    ) from None
+                time.sleep(3 * (attempt + 1))
 
         verified = api(f"/repos/{target}", bearer)
         if verified.get("private") is not False:
