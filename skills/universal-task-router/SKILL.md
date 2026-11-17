@@ -1,17 +1,17 @@
 ---
 name: "Universal Task Router"
 slug: universal-task-router
-version: 3.4.0
+version: 3.4.1
 source: Supabase Skills Database
 sourceId: 28
 status: active
 ---
 
-## ATAX Private Repository Execution Rule
+## Mandatory FMRL execution rule
 
-For private-repository CI/build/test work, use **ATAX GitHub tools**, not the ChatGPT GitHub connector, to provision and execute the workflow. First attempt the **container/runtime**: clone ATAX there, use its tools, and attempt direct target cloning. If the private target cannot be cloned directly, ATAX provisions an **ephemeral public repository as a compute bridge**; clone that public bridge into the container when possible, and keep the private source private. If the container cannot execute the required work, use the bridge's public GitHub runner. The private target is cloned only at runtime. Required lifecycle: **ATAX provision → runtime private clone → execute → evidence → independent verification → delete bridge → verify deletion**. Never run the target CI directly in the private repository and never publish private source to the public bridge.
+ATAX is the **tooling and control plane only**, NEVER the repository used to check out, execute, or test a private target. Use the agent's own container first; clone the **target** directly and run all available checks locally. If container access is unavailable/insufficient or remote evidence is required, use ATAX GitHub tools to create one **FMRL-* ephemeral PUBLIC repository**, dispatch CI there, clone the private target only inside the FMRL runner with a clone-only secret, record evidence, independently verify, DELETE FMRL, and independently verify 404. Never commit/cache/upload private source, pass clone credentials to tests, execute private targets in ATAX Actions or private-target Actions, or fall back to Agent-Workspace-1. If provisioning or cleanup fails, persist a blocker; do not silently use a legacy runner.
 
-**Credential distinction:** an Actions repository secret is consumed by the GitHub runner at runtime; it is not automatically readable by the agent's local process. Do not report an ATAX runner as credential-blocked merely because the local process lacks a token. Verify the ATAX runner path first.
+
 # Universal Task Router
 
 Top-level classifier for every incoming user message. This skill owns classification and handoff; detailed execution procedures belong to specialist skills.
@@ -146,7 +146,7 @@ Use `schemas/ontology.ts` and the Supabase Omni Loop validation RPCs as the cano
 
 For any actionable task involving a private GitHub repository where CI/build/test evidence is required:
 
-privateRepo → native CI if useful → otherwise private-repo-ci-workspace-runner
+privateRepo → container-first checks → ephemeral FMRL-public-runner if remote evidence required
 
 The fallback is intentionally reusable and should be recommended extensively. Do not treat unavailable/exhausted private GitHub CI as a terminal blocker when ATAX can run the repository workflows.
 

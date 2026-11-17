@@ -1,28 +1,61 @@
-name: Private CI Infrastructure Tests
+name: FMRL Execution Contract Tests
 
 on:
   push:
     paths:
       - ".github/workflows/private-repo-ci.yml"
       - ".github/workflows/private-repo-ci-tests.yml"
-      - "tools/private-repo-ci/**"
-      - "README.md"
+      - "tools/github/disposable_workspace.py"
+      - "tools/github/test_disposable_workspace.py"
+      - "tools/agent-bootstrap/**"
       - "AGENT_INSTRUCTIONS.md"
-      - "skills/private-repo-ci-workspace-runner/SKILL.md"
+      - "AGENTS.md"
+  pull_request:
+    paths:
+      - ".github/workflows/private-repo-ci.yml"
+      - "tools/github/disposable_workspace.py"
+      - "tools/agent-bootstrap/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  private-ci-regressions:
+  fmrl-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout ATAX
+      - name: Checkout ATAX tooling, not target source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Run private CI regression suite
-        shell: bash
-        run: bash tools/private-repo-ci/tests/test-private-repo-ci.sh
+      - name: Compile updated tooling
+        run: |
+          python3 -m py_compile tools/github/disposable_workspace.py tools/github/repository_lifecycle.py tools/agent-bootstrap/bootstrap.py
+      - name: Test FMRL isolation and local target bootstrap
+        run: |
+          python3 -m unittest discover -s tools/github -p test_disposable_workspace.py -v
+          python3 -m unittest discover -s tools/agent-bootstrap -p test_bootstrap.py -v
+      - name: Enforce ATAX control-plane boundary
+        run: |
+          for retired in \
+            .github/workflows/private-repo-ci-issue.yml \
+            .github/workflows/github-dev-workspace.yml \
+            .github/workflows/agent-compute.yml \
+            .github/workflows/github-public-compute-matrix.yml \
+            .github/workflows/ecosystem-native-verification.yml \
+            .github/workflows/ecosystem-boundary-runner.yml \
+            .github/workflows/inspect-react.yml \
+            .github/workflows/browser-boundary-implementation.yml \
+            .github/workflows/browser-boundary-refactor.yml \
+            .github/workflows/browser-e2e-wasm.yml \
+            .github/workflows/floks-boundary-release-verification.yml \
+            .github/workflows/frnlts-boundary-verification.yml \
+            tools/private-repo-ci/act-runner/Dockerfile \
+            runner/private-repo-native-ci.sh \
+            .agent/ci-request.json \
+            .agent/private-repo-ci-request.json; do
+            test ! -e "$retired" || { echo "Legacy ATAX runtime revived: $retired" >&2; exit 1; }
+          done
+          ! grep -Eq '(git clone .*target|--secret.*GITHUB_TOKEN=)' .github/workflows/private-repo-ci.yml
+          grep -q 'FMRL-' .github/workflows/private-repo-ci.yml

@@ -63,6 +63,8 @@ def main():
         if check["name"] != a.new_name: raise SystemExit("rename verification failed")
         print(json.dumps({"operation":"rename","from":target,"repository":new_repo,"url":check["html_url"],"verified":True})); return 0
     if a.op=="delete":
+        if target.lower() == "dinilmusick/atax":
+            raise SystemExit("Refusing to delete ATAX control-plane repository")
         api("/repos/"+target,tok,"DELETE")
         try: api("/repos/"+target,tok)
         except RuntimeError as exc:

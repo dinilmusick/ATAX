@@ -1,44 +1,24 @@
 ---
-name: ATAX Private Repository CI Runner
+name: FMRL Private Repository CI Runner
 slug: private-repo-ci-workspace-runner
-version: 1.4.0
+version: 2.0.0
 source: ATAX repository
 status: active
 ---
 
-# Canonical execution authority
+## Mandatory FMRL execution boundary
 
-ATAX (dinilmusick/ATAX) is the active private-repository CI execution repository. Agent-Workspace-1 is historical only. Never dispatch its old workflow or configure it as an execution target.
+ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.
 
-## Request routing
+Execution priority:
+1. Use the agent's own container/runtime; clone the **target repository** directly there (if authorized), edit and test locally. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
+2. If local execution is unavailable, inaccessible, insufficient, or remote public Actions evidence is required, provision an **FMRL-prefixed, one-job disposable public repository** through `tools/github/disposable_workspace.py` or ATAX's control-plane workflow. This is the **only** remote GitHub compute location for private targets.
+3. The FMRL public repository contains only bridge workflow code. Authorized private source is checked out **only inside its transient runner** and never pushed, artifacted, cached, or committed to the public repository. The checkout token is used only by the clone step; target commands receive no repository token.
+4. Run and inspect checks, record evidence, obtain independent verification, **delete FMRL**, and independently confirm the repository returns 404. Deletion is mandatory on failure as well as success; failed cleanup is a blocker, not completion.
+5. If FMRL cannot be provisioned, report the blocker and preserve work in the ledger. **Never fall back to ATAX or private-repository Actions execution.**
 
-- For workflow_dispatch, resolve only the inputs supplied to that specific workflow run. The existence or content of .agent/ci-request.json must have no effect.
-- For push, resolve .agent/ci-request.json.
-- Do not edit the shared request file to coordinate independent agents.
-- Each run is isolated by github.run_id and github.run_attempt.
+A new permanent repository (plain or Skipo) is a different lifecycle from disposable FMRL compute. Keep the two workflows separate.
 
-## Security invariants
+## Tooling
 
-- Clone private source only into the current run's ephemeral clone root.
-- PRIVATE_REPO_TOKEN is available only to the clone step, used for Git authentication, and never passed to act or target workflow processes.
-- The only supported token mode is clone-only.
-- Never persist credentials in remote URLs or Git config.
-- Never commit, cache, or upload private source. Do not configure an act artifact server or upload target workflow artifacts.
-- Target workflow definitions execute from the runtime clone; do not copy them into ATAX.
-- Cleanup is unconditional, run-scoped, and independently verifies the current clone root is empty.
-
-## Runtime
-
-ATAX installs pinned act v0.2.89 with SHA256 verification, builds the local Git-enabled image from tools/private-repo-ci/act-runner/Dockerfile, and maps both ubuntu-latest and ubuntu-24.04 to that image. Cloning is full-history so merge-base checks can inspect target history.
-
-## Regression tests
-
-Run bash tools/private-repo-ci/tests/test-private-repo-ci.sh. The suite tests concurrent Kloks/KONE request resolution against a conflicting request file, push request-file routing, run-scoped cleanup and empty-root verification, clone-only token scope, no target artifact upload, complete history clone, platform mappings, shell syntax and workflow YAML parsing.
-
-## Evidence
-
-Persist the ATAX Actions run ID/attempt, resolved target/ref, test results, and cleanup verification in the run summary and canonical Supabase task evidence. Never put private source or credentials in task evidence. GitHub Actions run logs are independent per run.
-
-## Failure handling
-
-Classify failures as request-resolution, token/clone, workflow-validation, act/runtime, target-workflow, or cleanup failures. Repair the ATAX substrate when the runner caused the failure. Rerun and independently verify cleanup before declaring success.
+Use `tools/github/disposable_workspace.py`, the ATAX FMRL control-plane workflow, and `tools/github/repository_lifecycle.py` for verified cleanup. Do not use the legacy direct ATAX `private-repo-ci` job. Any retired script is archival reference, not an execution entry point.

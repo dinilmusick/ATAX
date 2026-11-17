@@ -1,17 +1,17 @@
 ---
 name: "Coding Workflow"
 slug: coding-workflow
-version: 2.1.0
+version: 2.1.1
 source: Supabase Skills Database
 sourceId: 20
 status: active
 ---
 
-## ATAX Private Repository Execution Rule
+## Mandatory FMRL execution rule
 
-For private-repository CI/build/test work, use **ATAX GitHub tools**, not the ChatGPT GitHub connector, to provision and execute the workflow. First attempt the **container/runtime**: clone ATAX there, use its tools, and attempt direct target cloning. If the private target cannot be cloned directly, ATAX provisions an **ephemeral public repository as a compute bridge**; clone that public bridge into the container when possible, and keep the private source private. If the container cannot execute the required work, use the bridge's public GitHub runner. The private target is cloned only at runtime. Required lifecycle: **ATAX provision → runtime private clone → execute → evidence → independent verification → delete bridge → verify deletion**. Never run the target CI directly in the private repository and never publish private source to the public bridge.
+ATAX is the **tooling and control plane only**, NEVER the repository used to check out, execute, or test a private target. Use the agent's own container first; clone the **target** directly and run all available checks locally. If container access is unavailable/insufficient or remote evidence is required, use ATAX GitHub tools to create one **FMRL-* ephemeral PUBLIC repository**, dispatch CI there, clone the private target only inside the FMRL runner with a clone-only secret, record evidence, independently verify, DELETE FMRL, and independently verify 404. Never commit/cache/upload private source, pass clone credentials to tests, execute private targets in ATAX Actions or private-target Actions, or fall back to Agent-Workspace-1. If provisioning or cleanup fails, persist a blocker; do not silently use a legacy runner.
 
-**Credential distinction:** an Actions repository secret is consumed by the GitHub runner at runtime; it is not automatically readable by the agent's local process. Do not report an ATAX runner as credential-blocked merely because the local process lacks a token. Verify the ATAX runner path first.
+
 # Coding Workflow
 
 A disciplined end-to-end workflow for implementing software changes with explicit requirements, small steps, verification, and completion evidence.
@@ -33,7 +33,7 @@ Use for substantive software implementation spanning more than a trivial edit.
 4. Search for existing libraries, utilities, patterns, and open-source implementations before inventing replacements. Prefer the repository's established conventions.
 5. Produce a short ordered implementation plan internally. Split work into independently verifiable changes; preserve user changes and avoid unrelated cleanup.
 6. Implement the smallest coherent change. Keep interfaces explicit, errors observable, and behavior deterministic. Do not introduce placeholders, fake data, or silent fallbacks.
-7. Add or update tests at the narrowest useful level. If a local container/runtime is accessible, clone ATAX into it and use its tools/scripts as the primary execution substrate. Attempt the target repository directly; for private-repository clone failures, use ATAX's private-repository tooling and dedicated `clones/` workspace as the bridge. Run the target's relevant tests, type checks, lint, and **every repository-defined build script/custom build command that participates in the real build** locally before falling back to GitHub Actions.
+7. Add or update tests at the narrowest useful level. If a local container/runtime is accessible, clone the target directly and use local tools/scripts. For inaccessible private checkouts or required remote CI, create a disposable FMRL public runner through ATAX tooling. Run the target's relevant tests, type checks, lint, and **every repository-defined build script/custom build command that participates in the real build** locally before falling back to GitHub Actions.
 8. Use GitHub Actions as the fallback when no usable local runtime exists, the local environment cannot reproduce the required platform, or remote-runner evidence is explicitly required. Do not skip verification merely because private CI is unavailable; use the ATAX private-repo CI fallback.
 9. Inspect the actual runtime result when UI, deployment, networking, or integration behavior is involved. Source correctness is not proof of rendered/runtime correctness.
 9. Diagnose failures from logs and reproduction. Fix root causes rather than suppressing errors.
@@ -69,7 +69,7 @@ Coding Workflow is reached through Coding Router. The router and selected specia
 
 ## Private repository CI fallback
 
-For private repositories, use native CI when it is available and useful. If it is unavailable, exhausted, blocked, or unsuitable, activate private-repo-ci-workspace-runner and execute the target workflow through ATAX.
+For private repositories, use the agent container first and always use a disposable FMRL public runner for remote CI. The ATAX repository is control plane only, never the target execution workspace.
 
 Required evidence flow:
 
@@ -89,7 +89,7 @@ The pass must search for and address bugs, stubs, placeholders, TODO-like incomp
 
 ## Deterministic execution bootstrap
 
-For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone ATAX into that runtime; use its tools/scripts; attempt the target repository directly; if a private target cannot be cloned directly, use the ATAX private-repository tooling and dedicated clones bridge. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
+For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone the target directly; if local execution cannot satisfy the request, provision and run a disposable FMRL public repository through ATAX tools. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
 
 The canonical local preflight is `python tools/agent-bootstrap/bootstrap.py plan`; use `prepare` to establish the workspace and target checkout. Never place credentials in source, logs or task metadata.
 

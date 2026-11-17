@@ -1,8 +1,0 @@
-{
-  "repository": "dinilmusick/Kone",
-  "ref": "main",
-  "event": "push",
-  "workflow": "",
-  "token_mode": "workflow",
-  "request_id": "kone-implementation-push-2026-11-09-1"
-}

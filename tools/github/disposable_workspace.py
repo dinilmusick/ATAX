@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision an ephemeral public ATAX CI bridge for a private repository.
+"""Provision a disposable FMRL public bridge for private CI (ATAX is control-plane only).
 
 The private source is never copied into the public repository. The bridge
 contains only a workflow, stores a least-privilege token as an Actions secret,
@@ -7,7 +7,7 @@ clones the private target at runtime, executes its workflow with act, and
 removes the checkout before the job ends.
 """
 from __future__ import annotations
-import argparse, base64, json, os, shutil, subprocess
+import argparse, base64, json, os, re, shutil, subprocess, uuid
 from urllib import error, request
 
 API_ROOT = "https://api.github.com"
@@ -17,7 +17,7 @@ HEADERS = {
     "User-Agent": "atax-disposable-github-workspace",
 }
 
-WORKFLOW = """name: ATAX Private CI Bridge
+WORKFLOW = """name: Disposable FMRL Private CI
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ on:
       ref:
         description: Branch, tag, or SHA
         required: false
-        default: main
+        default: "%%DEFAULT_REF%%"
         type: string
       event:
         description: act event
@@ -50,6 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Refuse any target other than the provisioned private repository
+        env:
+          REQUESTED_REPOSITORY: ${{ inputs.repository }}
+        shell: bash
+        run: test "$REQUESTED_REPOSITORY" = "%%TARGET_SOURCE%%"
+
       - name: Clone private target at runtime
         env:
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -61,7 +67,10 @@ jobs:
           test -n "$PRIVATE_REPO_TOKEN"
           rm -rf target
           git -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
-            clone --depth 1 --branch "$TARGET_REF" "https://github.com/$TARGET_REPOSITORY.git" target
+            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target
+          git -C target -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
+            fetch --no-tags origin "$TARGET_REF"
+          git -C target checkout --detach FETCH_HEAD
 
       - name: Install pinned act
         shell: bash
@@ -77,26 +86,30 @@ jobs:
         env:
           TARGET_EVENT: ${{ inputs.event }}
           TARGET_WORKFLOW: ${{ inputs.workflow }}
-          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           cd target
-          args=("$TARGET_EVENT" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest" "--artifact-server-path" "/tmp/atax-artifacts" "--secret" "GITHUB_TOKEN=$PRIVATE_REPO_TOKEN")
+          args=("$TARGET_EVENT" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
           if [[ -n "$TARGET_WORKFLOW" ]]; then
+            [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
+            test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
           act "${args[@]}"
 
       - name: Remove private checkout
         if: always()
-        run: rm -rf target
+        run: |
+          set -euo pipefail
+          rm -rf -- target
+          test ! -e target
 """
 
 def token() -> str:
-    value = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    value = os.environ.get("CODING_REPO_TOKEN")
     if not value:
-        raise SystemExit("Missing GITHUB_TOKEN or GH_TOKEN.")
+        raise SystemExit("Missing CODING_REPO_TOKEN for repository provisioning.")
     return value
 
 def api(path: str, bearer: str, method: str = "GET", payload=None):
@@ -119,22 +132,30 @@ def api(path: str, bearer: str, method: str = "GET", payload=None):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Private source owner/name.")
-    parser.add_argument("--target", required=True, help="New public repository name.")
+    parser.add_argument("--target", default=None, help="FMRL-prefixed temporary public repo name.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
         raise SystemExit("--source must be owner/name.")
-    if not args.target or "/" in args.target:
-        raise SystemExit("--target must be a repository name.")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.source):
+        raise SystemExit("--source must be a safe owner/name.")
+    target_name = args.target or ("FMRL-" + uuid.uuid4().hex[:12])
+    if not re.fullmatch(r"FMRL-[A-Za-z0-9-]+", target_name):
+        raise SystemExit("--target must be an FMRL-prefixed repository name.")
+    if args.source.lower() == "dinilmusick/atax":
+        raise SystemExit("ATAX is control plane, never target checkout or runner.")
 
     bearer = token()
-    source = api(f"/repos/{args.source}", bearer)
+    clone_token = os.environ.get("PRIVATE_REPO_TOKEN")
+    if not clone_token:
+        raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
+    source = api(f"/repos/{args.source}", clone_token)
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
     created = api("/user/repos", bearer, "POST", {
-        "name": args.target,
-        "description": "Ephemeral ATAX public CI compute bridge.",
+        "name": target_name,
+        "description": "Ephemeral FMRL public CI bridge, no source code.",
         "private": False,
         "auto_init": True,
     })
@@ -143,7 +164,7 @@ def main() -> int:
     try:
         api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
             "message": "chore: add ATAX private CI bridge",
-            "content": base64.b64encode(WORKFLOW.encode()).decode(),
+            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source).replace("%%DEFAULT_REF%%", source["default_branch"]).encode()).decode(),
             "branch": "main",
         })
 
@@ -153,8 +174,11 @@ def main() -> int:
         env = os.environ.copy()
         env["GH_TOKEN"] = bearer
         subprocess.run(
-            ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target, "--body", bearer],
+            ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
+            input=clone_token,
+            text=True,
             env=env,
+            capture_output=True,
             check=True,
         )
 
@@ -168,16 +192,14 @@ def main() -> int:
             "url": verified["html_url"],
             "public": True,
             "private_source_published": False,
+            "default_ref": source["default_branch"],
             "workflow": "atax-private-ci.yml",
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
         }, indent=2))
         return 0
     except Exception:
-        try:
-            api(f"/repos/{target}", bearer, "DELETE")
-        except Exception:
-            pass
+        api(f"/repos/{target}", bearer, "DELETE")
         raise
 
 if __name__ == "__main__":
