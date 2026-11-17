@@ -72,12 +72,39 @@ sync_one() {
   fi
   echo "Outbound PR: $name ${split_sha:0:12}"
 }
-sync_one GutTS libraries/GutTS GutTS
-sync_one KrnlTS libraries/KrnlTS KrnlTS
-sync_one FrnlTS libraries/FrnlTS FrnlTS
-sync_one Kloks libraries/Kloks Kloks
-sync_one Floks libraries/Floks Floks
-sync_one Skipo scaffold/Skipo Skipo
+# Resolve old and new locations during the short migration window; once
+# migrated, the new locations are authoritative. Never duplicate copies.
+sync_moved() {
+  local name="$1" old="$2" new="$3" source="$4"
+  if [[ -d "$new" ]]; then
+    sync_one "$name" "$new" "$source"
+  elif [[ -d "$old" ]]; then
+    sync_one "$name" "$old" "$source"
+  else
+    echo "::error::Missing Armada component $name at both $old and $new"
+    return 1
+  fi
+}
+sync_new() {
+  local name="$1" prefix="$2" source="$3"
+  if [[ -d "$prefix" ]]; then
+    sync_one "$name" "$prefix" "$source"
+  else
+    echo "Pending migration: $name ($prefix)"
+  fi
+}
+sync_moved GutTS libraries/GutTS libraries/TypeScript-React/GutTS GutTS
+sync_moved KrnlTS libraries/KrnlTS libraries/TypeScript-React/KrnlTS KrnlTS
+sync_moved FrnlTS libraries/FrnlTS libraries/TypeScript-React/FrnlTS FrnlTS
+sync_moved Kloks libraries/Kloks libraries/TypeScript-React/Kloks Kloks
+sync_moved Floks libraries/Floks libraries/TypeScript-React/Floks Floks
+sync_moved Skipo scaffold/Skipo framework/Skipo Skipo
+sync_new GutWP libraries/PHP-WordPress/GutWP GutWP
+sync_new KrnlWP libraries/PHP-WordPress/KrnlWP KrnlWP
+sync_new FrnlWP libraries/PHP-WordPress/FrnlWP FrnlWP
+sync_new KloksWP libraries/PHP-WordPress/KloksWP KloksWP
+sync_new FloksWP libraries/PHP-WordPress/FloksWP FloksWP
+sync_new SkipoWP framework/SkipoWP SkipoWP
 sync_one Aiko apps/Aiko Aiko
 sync_one SRKL apps/SRKL Srkl-Engine
 sync_one Kone apps/Kone Kone
