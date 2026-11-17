@@ -70,6 +70,9 @@ class FmrlTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], "source-read")
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "secret-writer")
         self.assertNotEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "management")
+        self.assertNotIn("CODING_REPO_TOKEN", run.call_args.kwargs["env"])
+        self.assertNotIn("PRIVATE_REPO_TOKEN", run.call_args.kwargs["env"])
+        self.assertNotIn("FMRL_SECRETS_TOKEN", run.call_args.kwargs["env"])
         self.assertNotIn("--body", run.call_args.args[0])
 
     def test_missing_dedicated_secrets_token_fails_before_creating_repository(self):
