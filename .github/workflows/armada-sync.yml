@@ -1,0 +1,140 @@
+name: ULTRST Armada Repository Synchronization
+on:
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: import or export
+        required: true
+        default: import
+        type: choice
+        options: [import, export]
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: ultrst-armada-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       github.event.issue.author_association == 'OWNER' &&
+       startsWith(github.event.issue.title, '[armada-sync]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Validate requested direction
+        id: request
+        env:
+          EVENT: ${{ github.event_name }}
+          TITLE: ${{ github.event.issue.title }}
+          BODY: ${{ github.event.issue.body }}
+          DIRECTION: ${{ inputs.direction }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,json
+          if os.environ['EVENT']=='issues':
+              request=json.loads(os.environ['BODY'])
+              assert isinstance(request,dict) and set(request)=={'direction'}
+              direction=request['direction']
+              assert os.environ['TITLE']=='[armada-sync] '+direction
+          else:
+              direction=os.environ['DIRECTION']
+          assert direction in ('import','export')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('direction='+direction+'\n')
+          PY
+      - name: Configure Git and credential isolation
+        env:
+          TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config --global credential.helper ''
+          git config --global --add http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git config --global advice.detachedHead false
+          git config --global init.defaultBranch main
+      - name: Synchronize and open pull requests
+        env:
+          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          DIRECTION: ${{ steps.request.outputs.direction }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/dinilmusick/ULTRST-Armada.git armada
+          cd armada
+          git fetch --quiet origin main
+          git checkout -q main
+          # Explicit mapping: directories must match the named authoritative repositories.
+          repos=(GutTS KrnlTS FrnlTS Kloks Floks Skipo Aiko Srkl-Engine Kone)
+          names=(GutTS KrnlTS FrnlTS Kloks Floks Skipo Aiko Srkl Kone)
+          mkdir -p /tmp/armada-sync
+          if [[ "$DIRECTION" == import ]]; then
+            branch="sync/import-$GITHUB_RUN_ID"
+            git switch -q -c "$branch"
+            for i in "${!repos[@]}"; do
+              repo="${repos[$i]}"
+              folder="${names[$i]}"
+              prefix="libraries/$folder"
+              case "$repo" in
+                Skipo) prefix="scaffold/Skipo" ;;
+                Aiko|Srkl-Engine|Kone) prefix="apps/$folder" ;;
+              esac
+              git remote add "source-$i" "https://github.com/dinilmusick/$repo.git"
+              git fetch --quiet --no-tags "source-$i" main
+              if [[ -d "$prefix" ]]; then
+                git subtree pull --prefix="$prefix" "source-$i" main -m "sync: import $repo" || {
+                  echo "::error::Conflict importing $repo; refusing partial synchronization"
+                  exit 1
+                }
+              else
+                git subtree add --prefix="$prefix" "source-$i" main -m "sync: initialize $repo"
+              fi
+              git remote remove "source-$i"
+            done
+            if git diff --quiet origin/main HEAD; then
+              echo "No import changes"
+            else
+              git push -q origin "HEAD:refs/heads/$branch"
+              gh pr create --repo dinilmusick/ULTRST-Armada --base main --head "$branch" --title "sync: import latest standalone repositories" --body "ATAX bidirectional subtree import. Review integration before merge. Every import is a history-preserving Git subtree operation."
+            fi
+          else
+            for i in "${!repos[@]}"; do
+              repo="${repos[$i]}"
+              folder="${names[$i]}"
+              prefix="libraries/$folder"
+              case "$repo" in
+                Skipo) prefix="scaffold/Skipo" ;;
+                Aiko|Srkl-Engine|Kone) prefix="apps/$folder" ;;
+              esac
+              [[ -d "$prefix" ]] || { echo "::error::Missing $prefix; import first"; exit 1; }
+              split_sha="$(git subtree split --prefix="$prefix" main)"
+              git ls-remote --exit-code "https://github.com/dinilmusick/$repo.git" refs/heads/main >/dev/null
+              branch="sync/armada-$GITHUB_RUN_ID"
+              git push -q "https://github.com/dinilmusick/$repo.git" "$split_sha:refs/heads/$branch"
+              gh pr create --repo "dinilmusick/$repo" --base main --head "$branch" --title "sync: export Armada updates" --body "ATAX subtree split from private ULTRST-Armada main. Review before merge. A clean PR may be empty if there were no changes since the last import." || echo "PR not opened for $repo; inspect branch $branch"
+            done
+          fi
+      - name: Remove credentials and working trees
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          git config --global --unset-all http.https://github.com/.extraheader
+          rm -rf armada /tmp/armada-sync
+          test ! -e armada
+      - name: Report issue result
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" -f body="Armada $STATUS. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
