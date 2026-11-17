@@ -119,7 +119,9 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          rm -rf -- target
+          # Nested act containers can create root-owned files in a bind-mounted checkout.
+          # Use the host runner sudo to remove the checkout even after a failing target job.
+          sudo rm -rf -- target
           test ! -e target
 """
 
