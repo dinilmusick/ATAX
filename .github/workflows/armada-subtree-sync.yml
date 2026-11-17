@@ -1,0 +1,38 @@
+name: Armada Bidirectional Subtree Reconciliation
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+  issues:
+    types: [opened]
+concurrency:
+  group: armada-subtree-sync
+  cancel-in-progress: false
+permissions:
+  contents: read
+  issues: write
+jobs:
+  sync:
+    if: >-
+      github.event_name != 'issues' ||
+      (github.event.issue.author_association == 'OWNER' &&
+       github.event.issue.title == '[armada-sync] Reconcile all sources')
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout trusted ATAX sync tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Reconcile components without publishing source artifacts
+        env:
+          CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+        run: bash tools/github/armada-sync.sh
+      - name: Report result on owner request
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          STATUS: ${{ job.status }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "Armada sync scan: $STATUS. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
