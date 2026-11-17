@@ -44,6 +44,9 @@ class FmrlTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", workflow)
         self.assertIn("%%TARGET_SOURCE%%", workflow)
         self.assertIn("test ! -e target", workflow)
+        cleanup = workflow.split("      - name: Remove private checkout")[1]
+        self.assertIn("sudo rm -rf -- target", cleanup)
+        self.assertIn("if: always()", cleanup)
 
     def test_provision_uses_separate_private_read_token_and_fmrl_prefix(self):
         calls = []
