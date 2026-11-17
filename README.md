@@ -5,7 +5,7 @@ ATAX provides three distinct capabilities:
 1. **Goal and task coordination — Supabase PostgreSQL.** Goals, parent tasks, dependencies, leases, loop iterations, parameters, evidence, verification and finalization are persisted and enforced by database RPCs.
 2. **Coding execution — GitHub Issues and PRs.** Each independent coding task gets one Issue as its durable execution state and one dedicated PR as its implementation artifact. Workers persist blockers and resume points in Issues; the orchestrator polls Issues/PRs/CI and writes decisions back to Issues.
 3. **Reasoning and orchestration — ChatGPT conversations.** The user opens the orchestrator and worker chats. Chats load and update shared state directly through the connected Supabase tools.
-4. **Finite compute — GitHub Actions.** The Agent Compute Workspace runs source files from a selected repository revision on an ephemeral GitHub-hosted runner and returns an artifact.
+4. **Finite compute — local container, then disposable FMRL runners.** ATAX provides only provisioning and governance; target execution occurs in the agent container or an isolated FMRL public repository that is deleted after verification.
 
 ## Resume or create work
 
