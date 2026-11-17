@@ -1,28 +1,43 @@
-name: Private CI Infrastructure Tests
+name: FMRL Execution Contract Tests
 
 on:
   push:
     paths:
       - ".github/workflows/private-repo-ci.yml"
       - ".github/workflows/private-repo-ci-tests.yml"
-      - "tools/private-repo-ci/**"
-      - "README.md"
+      - "tools/github/disposable_workspace.py"
+      - "tools/github/test_disposable_workspace.py"
+      - "tools/agent-bootstrap/**"
       - "AGENT_INSTRUCTIONS.md"
-      - "skills/private-repo-ci-workspace-runner/SKILL.md"
+      - "AGENTS.md"
+  pull_request:
+    paths:
+      - ".github/workflows/private-repo-ci.yml"
+      - "tools/github/disposable_workspace.py"
+      - "tools/agent-bootstrap/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  private-ci-regressions:
+  fmrl-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout ATAX
+      - name: Checkout ATAX tooling, not target source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Run private CI regression suite
-        shell: bash
-        run: bash tools/private-repo-ci/tests/test-private-repo-ci.sh
+      - name: Compile updated tooling
+        run: |
+          python3 -m py_compile tools/github/disposable_workspace.py tools/github/repository_lifecycle.py tools/agent-bootstrap/bootstrap.py
+      - name: Test FMRL isolation and local target bootstrap
+        run: |
+          python3 -m unittest discover -s tools/github -p test_disposable_workspace.py -v
+          python3 -m unittest discover -s tools/agent-bootstrap -p test_bootstrap.py -v
+      - name: Enforce ATAX control-plane boundary
+        run: |
+          test ! -f .github/workflows/private-repo-ci-issue.yml
+          test ! -f .github/workflows/github-dev-workspace.yml
+          ! grep -Eq '(git clone .*target|--secret.*GITHUB_TOKEN=)' .github/workflows/private-repo-ci.yml
