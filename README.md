@@ -15,12 +15,20 @@ For a new objective, describe the outcome normally. The orchestrator creates a t
 
 ## Run code
 
-Use [GitHub Development Workspace](docs/github-development-workspace.md) to execute commands against an authorized repository through either a `[github-dev]` issue or workflow dispatch. It can run checks, push a new branch, and open a PR. Use [Agent Compute Workspace](.github/workflows/agent-compute.yml) for finite source-file execution. It supports Python, Node.js, TypeScript, Bash, Go, Rust, Java, C, C++, C#, Ruby, PHP, Perl, R and PowerShell.
+## Mandatory FMRL execution boundary
 
-- Dispatch the workflow with a source file, runtime, arguments and timeout; or
-- Create an issue titled `[agent-compute] <goal-key> <runtime>` with a JSON body containing `ref`, `runtime`, `source_file`, `arguments` (string array) and `timeout_seconds`. The issue route accepts repository owners, members and collaborators.
+ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.
 
-The runner is ephemeral, has read-only repository permissions, does not persist checkout credentials and receives no application secrets. Retrieve the completed run's artifact for outputs and evidence.
+Execution priority:
+1. Use the agent's own container/runtime; clone the **target repository** directly there (if authorized), edit and test locally. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
+2. If local execution is unavailable, inaccessible, insufficient, or remote public Actions evidence is required, provision an **FMRL-prefixed, one-job disposable public repository** through `tools/github/disposable_workspace.py` or ATAX's control-plane workflow. This is the **only** remote GitHub compute location for private targets.
+3. The FMRL public repository contains only bridge workflow code. Authorized private source is checked out **only inside its transient runner** and never pushed, artifacted, cached, or committed to the public repository. The checkout token is used only by the clone step; target commands receive no repository token.
+4. Run and inspect checks, record evidence, obtain independent verification, **delete FMRL**, and independently confirm the repository returns 404. Deletion is mandatory on failure as well as success; failed cleanup is a blocker, not completion.
+5. If FMRL cannot be provisioned, report the blocker and preserve work in the ledger. **Never fall back to ATAX or private-repository Actions execution.**
+
+A new permanent repository (plain or Skipo) is a different lifecycle from disposable FMRL compute. Keep the two workflows separate.
+
+Container-first execution does not require ATAX to host target code. FMRL is a disposable public compute bridge for private target CI; it is deleted after verification. Use `tools/github/disposable_workspace.py` and `.github/workflows/private-repo-ci.yml` only as the provisioning/control-plane entry points.
 
 ## Architecture
 
@@ -57,38 +65,7 @@ This is a public repository. Never commit credentials, private source or persona
 
 ## GitHub-native development
 
-ATAX can operate as a complete GitHub development substrate without Supabase.
-
-### Repository lifecycle
-
-```text
-create repository
-  -> Skipo scaffold
-  -> GitHub-hosted development workspace
-  -> edit/install/lint/typecheck/test/build
-  -> commit/push
-  -> GitHub Actions verification
-  -> artifacts/evidence
-```
-
-Use:
-
-- `.github/workflows/create-skipo-app.yml` — create a repository and immediately scaffold canonical Skipo.
-- `.github/workflows/github-dev-workspace.yml` — edit/build/lint/test a target repository on GitHub-hosted compute.
-- `.github/workflows/github-public-compute-matrix.yml` — verify across standard Linux, Windows and macOS public runners.
-- `.github/workflows/private-repo-ci.yml` — execute private-repository workflows through ATAX when native private CI is unavailable.
-- `skills/github-development-workspace/SKILL.md` — reusable agent instructions.
-- `tools/github/` — repository creation and Skipo scaffolding tools.
-- `.github/workflows/independent-commercial-acquisition.yml` — owner-triggered private, non-fork source mirror or reference-only acquisition.
-- `docs/commercial-acquisition-policy.md` — mandatory separation of private research acquisition and commercial-use clearance.
-
-GitHub Actions standard runners for public repositories are currently free and unlimited. Standard runner labels include Linux `ubuntu-latest`, Windows `windows-latest`, and macOS `macos-latest`; concurrency and runner-specific limits still apply.
-
-Supabase remains the coordination/state substrate when available, but it is not required for source development. An agent with GitHub access can perform repository creation, Skipo scaffolding, coding, verification and commits using GitHub alone.
-
-
-<!-- import-forge trigger marker -->
-
+Create permanent applications with the repository creation / Skipo tools. For executing work use the agent's container first; if remote execution is necessary, use a disposable FMRL public runner. **Never use ATAX's own Actions workspace for target code.**
 
 ## Hardened worker model
 
@@ -106,18 +83,17 @@ User-defined goal priority is a separate normalized 0..1 signal. Claim ordering 
 
 ## Private-repository CI boundary
 
-ATAX (dinilmusick/ATAX) is the current private-repository CI execution authority. Agent-Workspace-1 is historical only and must not be used as an execution repository, secret destination, or workflow authority.
+## Mandatory FMRL execution boundary
 
-The canonical workflow is .github/workflows/private-repo-ci.yml:
+ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.
 
-- workflow_dispatch uses only the inputs attached to that individual run; it never reads .agent/ci-request.json.
-- push reads .agent/ci-request.json.
-- Every run gets a unique clone and temporary artifact directory keyed by GitHub run ID and attempt.
-- PRIVATE_REPO_TOKEN is available only to the clone step. Target workflows execute in clone-only mode without repository credentials.
-- Clones retain complete history for merge-base and branch comparison checks.
-- The locally built Git-enabled act image is mapped to both ubuntu-latest and ubuntu-24.04.
-- Target workflow definitions execute from the private runtime clone and are never copied into ATAX.
-- ATAX does not configure an artifact server or upload target artifacts/private source.
-- Cleanup is run-scoped and independently verifies an empty clone root.
+Execution priority:
+1. Use the agent's own container/runtime; clone the **target repository** directly there (if authorized), edit and test locally. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
+2. If local execution is unavailable, inaccessible, insufficient, or remote public Actions evidence is required, provision an **FMRL-prefixed, one-job disposable public repository** through `tools/github/disposable_workspace.py` or ATAX's control-plane workflow. This is the **only** remote GitHub compute location for private targets.
+3. The FMRL public repository contains only bridge workflow code. Authorized private source is checked out **only inside its transient runner** and never pushed, artifacted, cached, or committed to the public repository. The checkout token is used only by the clone step; target commands receive no repository token.
+4. Run and inspect checks, record evidence, obtain independent verification, **delete FMRL**, and independently confirm the repository returns 404. Deletion is mandatory on failure as well as success; failed cleanup is a blocker, not completion.
+5. If FMRL cannot be provisioned, report the blocker and preserve work in the ledger. **Never fall back to ATAX or private-repository Actions execution.**
 
-Regression tests: bash tools/private-repo-ci/tests/test-private-repo-ci.sh. The tests cover concurrent Kloks/KONE dispatch resolution while the request file contains a different repository, push request-file routing, cleanup isolation, clone-only token scope, no target artifact upload, full-history clone configuration, platform mappings, shell syntax, and workflow YAML parsing.
+A new permanent repository (plain or Skipo) is a different lifecycle from disposable FMRL compute. Keep the two workflows separate.
+
+The former direct ATAX CI implementation and issue-triggered development runner are retired. Any legacy reference to ATAX as the execution repository is superseded by this rule.
