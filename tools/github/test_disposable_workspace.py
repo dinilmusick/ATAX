@@ -46,6 +46,7 @@ class FmrlTests(unittest.TestCase):
              mock.patch.object(MODULE.subprocess, "run") as run, \
              mock.patch.dict(MODULE.os.environ, {
                  "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
              }), \
              mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                                "--source", "dinilmusick/KONE",
@@ -67,12 +68,41 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('default: "develop"', workflow)
         self.assertNotIn("%%TARGET_SOURCE%%", workflow)
         self.assertEqual(run.call_args.kwargs["input"], "source-read")
+        self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "secret-writer")
+        self.assertNotEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "management")
+        self.assertNotIn("CODING_REPO_TOKEN", run.call_args.kwargs["env"])
+        self.assertNotIn("PRIVATE_REPO_TOKEN", run.call_args.kwargs["env"])
+        self.assertNotIn("FMRL_SECRETS_TOKEN", run.call_args.kwargs["env"])
         self.assertNotIn("--body", run.call_args.args[0])
+
+    def test_missing_dedicated_secrets_token_fails_before_creating_repository(self):
+        with mock.patch.object(MODULE, "api") as api, \
+             mock.patch.dict(MODULE.os.environ, {
+                 "CODING_REPO_TOKEN": "management",
+                 "PRIVATE_REPO_TOKEN": "source-read",
+             }, clear=True), \
+             mock.patch.object(sys, "argv", [
+                 "disposable_workspace.py",
+                 "--source", "dinilmusick/KONE",
+                 "--target", "FMRL-unit-test",
+             ]):
+            with self.assertRaisesRegex(SystemExit, "Missing FMRL_SECRETS_TOKEN"):
+                MODULE.main()
+            api.assert_not_called()
+
+    def test_secrets_token_is_not_confused_with_repo_management_token(self):
+        with mock.patch.dict(MODULE.os.environ, {
+            "CODING_REPO_TOKEN": "management",
+            "FMRL_SECRETS_TOKEN": "secret-writer",
+        }, clear=True):
+            self.assertEqual(MODULE.token(), "management")
+            self.assertEqual(MODULE.secrets_token(), "secret-writer")
 
     def test_rejects_atax_as_target_without_creating_repository(self):
         with mock.patch.object(MODULE, "api") as api, \
              mock.patch.dict(MODULE.os.environ, {
                  "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
              }), mock.patch.object(sys, "argv", [
                  "disposable_workspace.py", "--source", "dinilmusick/ATAX"]):
             with self.assertRaises(SystemExit):
@@ -82,6 +112,7 @@ class FmrlTests(unittest.TestCase):
     def test_rejects_non_fmrl_repository_name(self):
         with mock.patch.dict(MODULE.os.environ, {
             "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
         }), mock.patch.object(sys, "argv", [
             "disposable_workspace.py", "--source", "dinilmusick/KONE",
             "--target", "ATAX-as-runner"]):
@@ -108,6 +139,7 @@ class FmrlTests(unittest.TestCase):
              mock.patch.object(MODULE.time, "sleep") as sleep, \
              mock.patch.dict(MODULE.os.environ, {
                  "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
              }), \
              mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                             "--source", "dinilmusick/KONE",
@@ -140,6 +172,7 @@ class FmrlTests(unittest.TestCase):
             mock.patch.object(MODULE.time, "sleep") as sleep,
             mock.patch.dict(MODULE.os.environ, {
                 "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
             }),
             mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                            "--source", "dinilmusick/KONE",

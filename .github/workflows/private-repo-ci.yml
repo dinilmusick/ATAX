@@ -79,6 +79,7 @@ jobs:
         id: bridge
         env:
           CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          FMRL_SECRETS_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           TARGET: ${{ steps.request.outputs.repository }}
         shell: bash

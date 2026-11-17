@@ -112,6 +112,13 @@ def token() -> str:
         raise SystemExit("Missing CODING_REPO_TOKEN for repository provisioning.")
     return value
 
+def secrets_token() -> str:
+    """Use a separate Secrets:write credential; never fall back to the provisioning token."""
+    value = os.environ.get("FMRL_SECRETS_TOKEN")
+    if not value:
+        raise SystemExit("Missing FMRL_SECRETS_TOKEN for disposable repository Actions secret creation.")
+    return value
+
 def api(path: str, bearer: str, method: str = "GET", payload=None):
     body = None if payload is None else json.dumps(payload).encode()
     req = request.Request(
@@ -165,6 +172,7 @@ def main() -> int:
     clone_token = os.environ.get("PRIVATE_REPO_TOKEN")
     if not clone_token:
         raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
+    secret_writer = secrets_token()
     source = api(f"/repos/{args.source}", clone_token)
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
@@ -188,7 +196,10 @@ def main() -> int:
             raise SystemExit("GitHub CLI (gh) is required to configure the encrypted Actions secret.")
 
         env = os.environ.copy()
-        env["GH_TOKEN"] = bearer
+        # The gh subprocess needs only its secret-writer token; source access is passed via stdin.
+        for credential in ("CODING_REPO_TOKEN", "PRIVATE_REPO_TOKEN", "FMRL_SECRETS_TOKEN", "GITHUB_TOKEN"):
+            env.pop(credential, None)
+        env["GH_TOKEN"] = secret_writer
         for attempt in range(4):
             try:
                 subprocess.run(
@@ -204,10 +215,10 @@ def main() -> int:
                 # A newly provisioned repo may not yet expose its Actions
                 # encryption public key. Surface the actual failure safely.
                 diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
-                diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]")
+                diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]").replace(secret_writer, "[redacted]")
                 if "Resource not accessible by personal access token" in diagnostic:
                     raise RuntimeError(
-                        "FMRL requires CODING_REPO_TOKEN with repository Secrets: write "
+                        "FMRL requires FMRL_SECRETS_TOKEN with repository Secrets: write "
                         "access to newly created disposable repositories (GitHub HTTP 403). "
                         "Reauthorize its scope; never expose clone credentials in public workflow inputs."
                     ) from None
