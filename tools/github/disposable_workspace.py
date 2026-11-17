@@ -196,6 +196,9 @@ def main() -> int:
             raise SystemExit("GitHub CLI (gh) is required to configure the encrypted Actions secret.")
 
         env = os.environ.copy()
+        # The gh subprocess needs only its secret-writer token; source access is passed via stdin.
+        for credential in ("CODING_REPO_TOKEN", "PRIVATE_REPO_TOKEN", "FMRL_SECRETS_TOKEN", "GITHUB_TOKEN"):
+            env.pop(credential, None)
         env["GH_TOKEN"] = secret_writer
         for attempt in range(4):
             try:
