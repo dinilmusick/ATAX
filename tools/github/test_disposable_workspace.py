@@ -102,16 +102,16 @@ class FmrlTests(unittest.TestCase):
         transient = MODULE.subprocess.CalledProcessError(
             1, ["gh", "secret", "set"], stderr="secret endpoint not ready"
         )
-        with mock.patch.object(MODULE, "api", side_effect=fake_api), \\
-             mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \\
-             mock.patch.object(MODULE.subprocess, "run", side_effect=[transient, mock.Mock(returncode=0)]) as run, \\
-             mock.patch.object(MODULE.time, "sleep") as sleep, \\
+        with mock.patch.object(MODULE, "api", side_effect=fake_api), \
+             mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(MODULE.subprocess, "run", side_effect=[transient, mock.Mock(returncode=0)]) as run, \
+             mock.patch.object(MODULE.time, "sleep") as sleep, \
              mock.patch.dict(MODULE.os.environ, {
                  "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
-             }), \\
+             }), \
              mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                             "--source", "dinilmusick/KONE",
-                                            "--target", "FMRL-unit-test"]), \\
+                                            "--target", "FMRL-unit-test"]), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(MODULE.main(), 0)
         self.assertEqual(run.call_count, 2)
