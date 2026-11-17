@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision an ephemeral public ATAX CI bridge for a private repository.
+"""Provision a disposable FMRL public bridge for private CI (ATAX is control-plane only).
 
 The private source is never copied into the public repository. The bridge
 contains only a workflow, stores a least-privilege token as an Actions secret,
@@ -17,7 +17,7 @@ HEADERS = {
     "User-Agent": "atax-disposable-github-workspace",
 }
 
-WORKFLOW = """name: ATAX Private CI Bridge
+WORKFLOW = """name: Disposable FMRL Private CI
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ on:
       ref:
         description: Branch, tag, or SHA
         required: false
-        default: main
+        default: "%%DEFAULT_REF%%"
         type: string
       event:
         description: act event
@@ -159,7 +159,7 @@ def main() -> int:
     try:
         api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
             "message": "chore: add ATAX private CI bridge",
-            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source).encode()).decode(),
+            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source).replace("%%DEFAULT_REF%%", source["default_branch"]).encode()).decode(),
             "branch": "main",
         })
 
@@ -187,6 +187,7 @@ def main() -> int:
             "url": verified["html_url"],
             "public": True,
             "private_source_published": False,
+            "default_ref": source["default_branch"],
             "workflow": "atax-private-ci.yml",
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
