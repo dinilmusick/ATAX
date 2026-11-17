@@ -89,5 +89,34 @@ class FmrlTests(unittest.TestCase):
                 MODULE.main()
 
 
+    def test_transient_secret_provision_failure_retries_without_leaking_token(self):
+        def fake_api(path, bearer, method="GET", payload=None):
+            if path == "/repos/dinilmusick/KONE":
+                return {"private": True, "default_branch": "main"}
+            if path == "/user/repos":
+                return {"full_name": "dinilmusick/FMRL-unit-test"}
+            if path == "/repos/dinilmusick/FMRL-unit-test":
+                return {"private": False, "html_url": "https://github.com/dinilmusick/FMRL-unit-test"}
+            return None
+
+        transient = MODULE.subprocess.CalledProcessError(
+            1, ["gh", "secret", "set"], stderr="secret endpoint not ready"
+        )
+        with mock.patch.object(MODULE, "api", side_effect=fake_api), \\
+             mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \\
+             mock.patch.object(MODULE.subprocess, "run", side_effect=[transient, mock.Mock(returncode=0)]) as run, \\
+             mock.patch.object(MODULE.time, "sleep") as sleep, \\
+             mock.patch.dict(MODULE.os.environ, {
+                 "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+             }), \\
+             mock.patch.object(sys, "argv", ["disposable_workspace.py",
+                                            "--source", "dinilmusick/KONE",
+                                            "--target", "FMRL-unit-test"]), \\
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(MODULE.main(), 0)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(3)
+
+
 if __name__ == "__main__":
     unittest.main()
