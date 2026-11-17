@@ -31,6 +31,12 @@ class FmrlTests(unittest.TestCase):
         execute = workflow.split("      - name: Execute target workflow")[1].split(
             "      - name: Remove private checkout")[0]
         self.assertIn("PRIVATE_REPO_TOKEN", clone)
+        self.assertIn("GIT_ASKPASS", clone)
+        self.assertIn("x-access-token", clone)
+        self.assertIn("credential.helper=", clone)
+        self.assertIn("trap 'rm -f", clone)
+        self.assertNotIn('AUTHORIZATION: bearer', clone)
+        self.assertNotIn('https://x-access-token:', clone)
         self.assertNotIn("PRIVATE_REPO_TOKEN", execute)
         self.assertNotIn("--secret", execute)
         self.assertNotIn("upload-artifact", workflow)

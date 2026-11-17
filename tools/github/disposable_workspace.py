@@ -66,9 +66,23 @@ jobs:
           set -euo pipefail
           test -n "$PRIVATE_REPO_TOKEN"
           rm -rf target
-          git -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
+          # GitHub Git-over-HTTPS uses username/token credentials, not a REST API Bearer header.
+          # Credentials are supplied only to this checkout step, never stored in a remote URL.
+          askpass="$(mktemp)"
+          trap 'rm -f "$askpass"' EXIT
+          cat > "$askpass" <<'ASKPASS'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf %s 'x-access-token' ;;
+            *Password*) printf %s "$PRIVATE_REPO_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
+          git -c credential.helper= \
             clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target
-          git -C target -c http.extraheader="AUTHORIZATION: bearer $PRIVATE_REPO_TOKEN" \
+          git -C target -c credential.helper= \
             fetch --no-tags origin "$TARGET_REF"
           git -C target checkout --detach FETCH_HEAD
 
