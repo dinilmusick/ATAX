@@ -125,6 +125,11 @@ jobs:
               if [[ "$status" == completed ]]; then
                 completed=1
                 echo "FMRL run: $url; conclusion: $conclusion" >> "$GITHUB_STEP_SUMMARY"
+                # Preserve failure step names before the disposable repository is deleted.
+                # Do not retain private-source artifacts or raw logs.
+                gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
+                  --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' \
+                  >> "$GITHUB_STEP_SUMMARY" || echo "FMRL job-step detail unavailable." >> "$GITHUB_STEP_SUMMARY"
                 [[ "$conclusion" == success ]] || exit 1
                 break
               fi

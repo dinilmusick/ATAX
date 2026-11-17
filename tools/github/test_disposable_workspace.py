@@ -15,6 +15,15 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FmrlTests(unittest.TestCase):
+    def test_controller_preserves_failure_step_names_before_disposable_cleanup(self):
+        controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
+        failure_step = 'select(.conclusion == "failure")'
+        self.assertIn('actions/runs/$run_id/jobs?per_page=100', controller)
+        self.assertIn(failure_step, controller)
+        self.assertIn('"Failed step: "', controller)
+        self.assertLess(controller.index('actions/runs/$run_id/jobs?per_page=100'),
+                        controller.index('name: ALWAYS delete FMRL and verify absence'))
+
     def test_runner_only_uses_clone_token_in_clone_step(self):
         workflow = MODULE.WORKFLOW
         clone = workflow.split("      - name: Clone private target at runtime")[1].split(
