@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from health_audit import analyse, observation_key
+from health_audit import analyse, observation_key, constraint_outcomes
 from cloudflare_builds import account_choices, build_failed, failure_category
 
 NOW = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
@@ -54,6 +54,16 @@ class AuditTests(unittest.TestCase):
         snapshot["tasks"][0]["claim_expires_at"] = "bad"
         with self.assertRaises(ValueError):
             analyse(snapshot, NOW)
+
+    def test_constraint_observations_fail_closed_without_external_proof(self):
+        snapshot = self.sample()
+        findings = analyse(snapshot, NOW)
+        result = constraint_outcomes(findings)
+        self.assertEqual(result["verified-task-completion"][0], "violated")
+        self.assertEqual(result["valid-running-claim"][0], "violated")
+        self.assertEqual(result["goal-context-freshness"][0], "violated")
+        self.assertEqual(result["control-plane-build-evidence"][0], "unknown")
+        self.assertEqual(result["fmrl-secret-and-cleanup-boundary"][0], "unknown")
 
     def test_finding_key_deterministic(self):
         self.assertEqual(observation_key("x"), observation_key("x"))
