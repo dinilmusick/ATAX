@@ -124,7 +124,7 @@ jobs:
 
       - name: Set up Node for Skipo
         if: inputs.skipo_action != ''
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
 
