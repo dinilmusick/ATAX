@@ -1,0 +1,68 @@
+name: ATAX Substrate Health (control plane only)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/substrate/**'
+      - '.github/workflows/substrate-health.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atax-control-plane-health
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test ATAX's own control-plane code only
+        run: python3 -m unittest discover -s tools/substrate -p 'test_*.py' -v
+
+  observe:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ATAX_SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+      ATAX_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+      CLOUDFLARE_BUILD_ACCOUNTS_JSON: ${{ secrets.CLOUDFLARE_BUILD_ACCOUNTS_JSON }}
+      ATAX_PUBLISH_OBSERVATIONS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require backend configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$ATAX_SUPABASE_URL" || -z "$ATAX_SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "::error::ATAX Supabase secret configuration is incomplete"
+            exit 2
+          fi
+      - name: Audit canonical ATAX ledger
+        shell: bash
+        run: python3 tools/substrate/health_audit.py > substrate-health.json
+      - name: Observe Cloudflare Workers builds
+        if: env.CLOUDFLARE_BUILD_ACCOUNTS_JSON != ''
+        shell: bash
+        run: python3 tools/substrate/cloudflare_builds.py > cloudflare-builds.json
+      - name: Upload sanitized control-plane evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atax-observations-${{ github.run_id }}
+          path: |
+            substrate-health.json
+            cloudflare-builds.json
+          if-no-files-found: ignore
+          retention-days: 14
