@@ -112,7 +112,7 @@ jobs:
           for i in $(seq 1 12); do
             if dispatch_error="$(gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" \
               -f ref=main -f "inputs[repository]=$SOURCE" -f "inputs[ref]=$ref" \
-              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" >/dev/null 2>&1)"; then
+              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" 2>&1 >/dev/null)"; then
               dispatched=1
               break
             fi
@@ -121,7 +121,7 @@ jobs:
               # controller token and bound the output. Never print inputs,
               # source contents, private logs, or clone credentials.
               dispatch_error="${dispatch_error//"$GH_TOKEN"/[redacted]}"
-              diagnostic="$(printf '%s' "$dispatch_error" | tr '\\r\\n' ' ' | cut -c1-500)"
+              diagnostic="$(printf '%s' "$dispatch_error" | tr '\r\n' ' ' | cut -c1-500)"
               echo "FMRL dispatch failed after 12 attempts: ${diagnostic:-no GitHub API diagnostic returned}" | tee -a "$GITHUB_STEP_SUMMARY" >&2
               exit 1
             fi
@@ -144,7 +144,7 @@ jobs:
                 if [[ -n "$failure_details" ]]; then
                   # Print only job and failed-step names. Do not persist raw
                   # private-source logs or upload any source-bearing artifacts.
-                  printf '%s\\n' "$failure_details" | tee -a "$GITHUB_STEP_SUMMARY"
+                  printf '%s\n' "$failure_details" | tee -a "$GITHUB_STEP_SUMMARY"
                 else
                   echo "FMRL job-step detail unavailable." | tee -a "$GITHUB_STEP_SUMMARY"
                 fi
