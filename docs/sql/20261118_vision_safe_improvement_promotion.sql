@@ -37,8 +37,8 @@ begin
   end if;
 
   target_value := coalesce(def->'target',c.target);
-  select coalesce(array_agg(value),'{}'::text[]) into tags_value
-  from jsonb_array_elements_text(coalesce(def->'tags','[]'::jsonb)) as value;
+  select coalesce(array_agg(tag_text),'{}'::text[]) into tags_value
+  from jsonb_array_elements_text(coalesce(def->'tags','[]'::jsonb)) as tag(tag_text);
 
   -- This RPC enforces valid Vision, tldraw board, matching target, Omni loop,
   -- acceptance predicates and task definitions before writing any goal/task.
