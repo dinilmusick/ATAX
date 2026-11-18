@@ -10,7 +10,8 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -140,6 +141,61 @@ def publish(db, system_id, findings, observed_at):
             db.request("system_memories", method="PATCH", params={"id": "eq." + row["id"]},
                        data={"status": "superseded"}, prefer="return=minimal")
 
+def constraint_outcomes(findings):
+    """Do not certify an external boundary from absence of a local warning."""
+    counts = {row["rule"]: row["count"] for row in findings}
+    missing = counts.get("running_without_claim", 0)
+    expired = counts.get("running_with_expired_claim", 0)
+    return {
+        "verified-task-completion": (
+            "violated" if counts.get("completed_without_verification", 0) else "satisfied",
+            "Completed task independent verification"),
+        "valid-running-claim": (
+            "violated" if missing else "unknown" if expired else "satisfied",
+            "Missing claim tokens or leases requiring independent heartbeat inspection"),
+        "goal-context-freshness": (
+            "violated" if counts.get("stale_goal_context", 0) else "satisfied",
+            "Nonterminal task context versus latest goal"),
+        "control-plane-build-evidence": (
+            "unknown", "Current GitHub/Cloudflare commit SHA and CI are not independently certified by this sweep"),
+        "fmrl-secret-and-cleanup-boundary": (
+            "unknown", "A real FMRL run and independent deletion proof are needed"),
+    }
+
+def publish_constraints(db, system_id, findings):
+    outcomes = constraint_outcomes(findings)
+    now = utcnow()
+    run = os.getenv("GITHUB_RUN_ID", "manual-" + now.strftime("%Y%m%d%H%M"))
+    constraints = db.request("system_constraints", params={
+        "select": "id,system_id,owner_user_id,constraint_key",
+        "system_id": "eq." + system_id, "active": "eq.true"})
+    for entry in constraints:
+        status, description = outcomes.get(
+            entry["constraint_key"], ("unknown", "Not evaluated by current audit"))
+        evidence = {"checks": [f for f in findings if f["rule"] in (
+            "completed_without_verification", "running_without_claim",
+            "running_with_expired_claim", "stale_goal_context",
+            "github_not_synchronised", "missing_github_check_projection",
+            "missing_github_event_projection")],
+            "source": "canonical_supabase", "observed_at": now.isoformat()}
+        obs_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "atax-constraint:" + run + ":" + entry["id"]))
+        record = {
+            "id": obs_id, "constraint_id": entry["id"],
+            "system_id": entry["system_id"], "owner_user_id": entry["owner_user_id"],
+            "status": status, "observed_at": now.isoformat(),
+            "checked_by_agent_id": "github-actions-health-audit",
+            "check_run_key": run, "violation_summary": description,
+            "evidence": evidence, "metadata": {"auditor": "tools/substrate/health_audit.py"},
+        }
+        db.request("constraint_observations", method="POST",
+                   params={"on_conflict": "id"}, data=record,
+                   prefer="resolution=merge-duplicates,return=minimal")
+        db.request("system_constraints", method="PATCH",
+                   params={"id": "eq." + entry["id"]},
+                   data={"last_checked_at": now.isoformat(),
+                         "next_check_at": (now + timedelta(minutes=15)).isoformat()},
+                   prefer="return=minimal")
+
 def main():
     db = Postgrest(os.environ["ATAX_SUPABASE_URL"], os.environ["ATAX_SUPABASE_SERVICE_ROLE_KEY"])
     data = {name: db.all(name, fields) for name, fields in TABLE_FIELDS.items()}
@@ -151,6 +207,7 @@ def main():
         if len(system) != 1:
             raise RuntimeError("ATAX system missing; refusing to publish observations")
         publish(db, system[0]["id"], result, now)
+        publish_constraints(db, system[0]["id"], result)
     return 0
 
 if __name__ == "__main__":
