@@ -24,6 +24,14 @@ class FmrlTests(unittest.TestCase):
         self.assertLess(controller.index('actions/runs/$run_id/jobs?per_page=100'),
                         controller.index('name: ALWAYS delete FMRL and verify absence'))
 
+    def test_controller_dispatch_uses_actions_write_credential(self):
+        controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
+        dispatch = controller.split(
+            "      - name: Dispatch FMRL runner and independently inspect result"
+        )[1].split("      - name: ALWAYS delete FMRL and verify absence")[0]
+        self.assertIn("GH_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}", dispatch)
+        self.assertNotIn("GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}", dispatch)
+
     def test_runner_only_uses_clone_token_in_clone_step(self):
         workflow = MODULE.WORKFLOW
         clone = workflow.split("      - name: Clone private target at runtime")[1].split(
