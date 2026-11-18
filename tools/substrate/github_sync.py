@@ -101,6 +101,15 @@ def reconcile(db, token, mapping):
         raise RuntimeError("GitHub returned no canonical branch SHA")
     checks = paged(token, "/repos/" + repo + "/commits/" + sha + "/check-runs", "check_runs")
     prs = paged(token, "/repos/" + repo + "/pulls?state=open")
+    # An open-only PR poll cannot tell whether an old open PR was merged or
+    # closed. Resolve previously open entries that disappeared before syncing.
+    previously_open = db.request("github_work_items", params={
+        "select": "github_id,number,state", "system_id": "eq." + system_id,
+        "item_type": "eq.pull_request", "state": "eq.open"})
+    seen = {p.get("id") for p in prs}
+    for prior in previously_open:
+        if prior.get("github_id") not in seen:
+            prs.append(gh_get(token, "/repos/" + repo + "/pulls/" + str(prior["number"])))
     now = utcnow().isoformat()
     checks = [normalise_check(x, system_id, sha, branch, now) for x in checks]
     prs = [normalise_pr(x, system_id, now) for x in prs]
