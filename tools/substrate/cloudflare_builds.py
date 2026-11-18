@@ -61,7 +61,7 @@ def account_choices(candidates, minimum_minutes=20):
     """
     eligible = []
     for item in candidates:
-        if item.get("usage_source") != "verified":
+        if item.get("usage_source") != "verified" or item.get("limit_reached") is not False:
             continue
         budget, used = item.get("monthly_budget_minutes"), item.get("monthly_used_minutes")
         if not isinstance(budget, (int, float)) or not isinstance(used, (int, float)):
@@ -105,6 +105,33 @@ def upsert_build_observation(db, account, worker, build, system_id, category):
                prefer="resolution=merge-duplicates,return=minimal")
     return payload
 
+def upsert_account_limits(db, account, atax_system_id, limits):
+    reached = limits.get("has_reached_build_minutes_limit")
+    # The API returns a *boolean exhausted flag*, not minutes remaining.
+    if not isinstance(reached, bool):
+        reached = None
+    observed = {"provider": "cloudflare", "account_id": account["account_id"],
+                "has_reached_build_minutes_limit": reached,
+                "build_minutes_refresh_on": limits.get("build_minutes_refresh_on"),
+                "exact_minutes_remaining": None, "observed_at": utcnow().isoformat()}
+    db.request("system_memories", method="POST",
+               params={"on_conflict": "system_id,memory_key"},
+               data={
+                   "system_id": atax_system_id,
+                   "memory_key": "cloudflare-account-limit-" + account["account_id"],
+                   "title": "Cloudflare account build-minute availability",
+                   "content": json.dumps(observed, sort_keys=True),
+                   "memory_type": "warning" if reached is True or reached is None else "observation",
+                   "importance": 5 if reached is True else 4,
+                   "status": "active", "source_type": "cloudflare-build-limits",
+                   "source_id": account["account_id"],
+                   "metadata": {"origin": "github-actions-cloudflare-poller",
+                                "limit_exhausted": reached,
+                                "quota_unknown": True,
+                                "refresh_on": limits.get("build_minutes_refresh_on")}
+               }, prefer="resolution=merge-duplicates,return=minimal")
+    return observed
+
 def main():
     accounts = json.loads(os.environ["CLOUDFLARE_BUILD_ACCOUNTS_JSON"])
     if not isinstance(accounts, list) or not accounts:
@@ -113,9 +140,16 @@ def main():
                    os.environ["ATAX_SUPABASE_SERVICE_ROLE_KEY"])
     systems = {r["system_key"]: r["id"] for r in db.all("systems", "id,system_key")}
     observations = []
+    account_limits = []
+    if "atax" not in systems:
+        raise RuntimeError("ATAX system must exist before polling account limits")
     for account in accounts:
         if not account.get("account_id") or not account.get("api_token"):
             raise ValueError("Account is missing ID or token")
+        limits = cloudflare_get(account, "/builds/account/limits")
+        if not isinstance(limits, dict):
+            raise RuntimeError("Unexpected Cloudflare account limits response")
+        account_limits.append(upsert_account_limits(db, account, systems["atax"], limits))
         for worker in account.get("workers", []):
             if not worker.get("tag") or worker.get("system_key") not in systems:
                 raise ValueError("Missing worker tag or unregistered target system")
@@ -136,7 +170,7 @@ def main():
             category = failure_category(newest, logs)
             observations.append(upsert_build_observation(
                 db, account, worker, newest, systems[worker["system_key"]], category))
-    print(json.dumps({"observed_builds": len(observations),
+    print(json.dumps({"account_limits": account_limits, "observed_builds": len(observations),
                       "failed": sum(o["failed"] for o in observations),
                       "events": observations}, indent=2))
     return 0
