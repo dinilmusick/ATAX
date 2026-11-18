@@ -82,6 +82,23 @@ jobs:
                 jobs="$(curl -fsS --connect-timeout 10 --max-time 20 \
                   "https://api.github.com/repos/$bridge/actions/runs/$run_id/jobs?per_page=50" || true)"
                 printf '%s' "$jobs" | jq -r '.jobs[]? | "Job: \(.name) - \(.conclusion)", (.steps[]? | select(.conclusion != "success") | "Step: \(.name) - \(.conclusion)")' || true
+                if [[ "$conclusion" != success ]]; then
+                  first_job="$(printf '%s' "$jobs" | jq -r '.jobs[0].id // empty' 2>/dev/null || true)"
+                  if [[ "$first_job" =~ ^[0-9]+$ ]]; then
+                    safe_log="$(mktemp)"
+                    for attempt in $(seq 1 4); do
+                      if curl -fsSL --connect-timeout 10 --max-time 25 \
+                        "https://api.github.com/repos/$bridge/actions/jobs/$first_job/logs" -o "$safe_log" 2>/dev/null; then
+                        grep -E 'FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:' "$safe_log" \
+                          | sed -E 's/^.*(FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:)/\1/' \
+                          | head -n 3 | tee -a "$GITHUB_STEP_SUMMARY" || true
+                        break
+                      fi
+                      sleep 3
+                    done
+                    rm -f "$safe_log"
+                  fi
+                fi
                 [[ "$conclusion" == success ]] || exit 1
                 break
               fi
