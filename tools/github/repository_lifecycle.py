@@ -68,9 +68,25 @@ def main():
         api("/repos/"+target,tok,"DELETE")
         try: api("/repos/"+target,tok)
         except RuntimeError as exc:
-            if "Not Found" in str(exc) or "not found" in str(exc).lower():
-                print(json.dumps({"operation":"delete","repository":target,"verified":True,"exists":False})); return 0
-            raise
-        raise SystemExit("delete verification failed: repository still exists")
+            if "Not Found" in str(exc) or "not found" in str(exc).lower(): pass
+            else: raise
+        else:
+            raise SystemExit("delete verification failed: repository still exists via authenticated API")
+        # Independent unauthenticated anonymous 404 GET verification to ensure public absence
+        req = request.Request(API_ROOT + f"/repos/{target}", headers={"User-Agent": "atax-github-repository-tool"})
+        verified_404 = False
+        for attempt in range(5):
+            try:
+                with request.urlopen(req, timeout=20): pass
+            except error.HTTPError as exc:
+                if exc.code == 404:
+                    verified_404 = True
+                    break
+                raise RuntimeError(f"Independent deletion check failed: HTTP {exc.code}") from None
+            if attempt < 4:
+                import time; time.sleep(2)
+        if not verified_404:
+            raise SystemExit("delete verification failed: repository still accessible anonymously")
+        print(json.dumps({"operation":"delete","repository":target,"verified":True,"exists":False})); return 0
 
 if __name__=="__main__": raise SystemExit(main())
