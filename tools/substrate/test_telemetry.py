@@ -64,20 +64,27 @@ class CloudflareTests(unittest.TestCase):
         items = [
             {"account_id": "a", "usage_source": "estimate",
              "monthly_budget_minutes": 3000, "monthly_used_minutes": 0,
-             "concurrency_available": True},
+             "concurrency_available": True, "limit_reached": False},
             {"account_id": "b", "usage_source": "verified",
              "monthly_budget_minutes": 3000, "monthly_used_minutes": 500,
-             "concurrency_available": True},
+             "concurrency_available": True, "limit_reached": False},
             {"account_id": "c", "usage_source": "verified",
              "monthly_budget_minutes": 3000, "monthly_used_minutes": 2999,
-             "concurrency_available": True},
+             "concurrency_available": True, "limit_reached": False},
         ]
         self.assertEqual([x["account_id"] for x in account_choices(items)], ["b"])
+
+    def test_cloudflare_exhaustion_blocks_even_verified_monthly_budget(self):
+        self.assertEqual(account_choices([{
+            "account_id": "x", "usage_source": "verified", "limit_reached": True,
+            "monthly_budget_minutes": 3000, "monthly_used_minutes": 50,
+            "concurrency_available": True
+        }]), [])
 
     def test_unknown_usage_must_not_trigger_rotation(self):
         self.assertEqual(account_choices([{"account_id": "unknown",
             "monthly_budget_minutes": 3000, "monthly_used_minutes": 0,
-            "concurrency_available": True}]), [])
+            "concurrency_available": True, "limit_reached": False}]), [])
 
     def test_failure_taxonomy(self):
         self.assertTrue(build_failed({"build_outcome": "failure"}))
