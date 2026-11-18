@@ -18,7 +18,7 @@ ERROR_LINE = re.compile(
     re.IGNORECASE,
 )
 SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b([A-Z0-9_]*(?:TOKEN|PASSWORD|SECRET|COOKIE|API[_-]?KEY|CREDENTIAL)[A-Z0-9_]*)"
+    r"(?i)\b([A-Z0-9_]*(?:TOKEN|PASSWORD|SECRET|COOKIE|AUTHORIZATION|API[_-]?KEY|CREDENTIAL)[A-Z0-9_]*)"
     r"(\s*[:=]\s*)([^\s,;]+)"
 )
 BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
