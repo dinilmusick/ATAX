@@ -195,7 +195,7 @@ def main() -> int:
 
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
-    if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\\.ya?ml", args.workflow):
+    if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", args.workflow):
         raise SystemExit("Unsafe workflow file.")
 
     bearer = token()
@@ -204,6 +204,8 @@ def main() -> int:
         raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
     secret_writer = secrets_token()
     source = api(f"/repos/{args.source}", clone_token)
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+", source["default_branch"]):
+        raise SystemExit("Unsafe source default branch.")
     target_ref = args.ref or source["default_branch"]
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
