@@ -30,8 +30,10 @@ URL_CREDENTIALS = re.compile(r"(https?://)[^/@\s]+:[^/@\s]+@")
 
 def redact(value: str) -> str:
     value = ANSI.sub("", value)
-    value = SECRET_ASSIGNMENT.sub(lambda m: m.group(1) + m.group(2) + "[redacted]", value)
+    # Redact structured Authorization headers before the generic assignment
+    # rule so the word "Bearer" cannot hide the credential that follows it.
     value = BEARER.sub("Bearer [redacted]", value)
+    value = SECRET_ASSIGNMENT.sub(lambda m: m.group(1) + m.group(2) + "[redacted]", value)
     value = GITHUB_TOKEN.sub("[redacted-github-token]", value)
     value = AWS_KEY.sub("[redacted-aws-key]", value)
     value = JWT.sub("[redacted-jwt]", value)
