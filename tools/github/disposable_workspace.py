@@ -88,6 +88,10 @@ jobs:
           git -C target -c credential.helper= \
             fetch --no-tags origin "$TARGET_REF"
           git -C target checkout --detach FETCH_HEAD
+          if [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"
+          fi
+          echo "FMRL checked out exact target commit: $(git -C target rev-parse HEAD)"
 
       - name: Install pinned act
         shell: bash
