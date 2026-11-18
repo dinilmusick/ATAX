@@ -52,17 +52,22 @@ jobs:
       - name: Audit canonical ATAX ledger
         shell: bash
         run: python3 tools/substrate/health_audit.py > substrate-health.json
+      - name: Reconcile GitHub repository SHAs, PRs and check runs
+        env:
+          GITHUB_SYNC_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GITHUB_SYNC_TOKEN" ]]; then
+            echo "::error::Read-only PRIVATE_REPO_TOKEN is required for GitHub sync"
+            exit 2
+          fi
+          python3 tools/substrate/github_sync.py > github-sync.json
       - name: Observe Cloudflare Workers builds
         if: env.CLOUDFLARE_BUILD_ACCOUNTS_JSON != ''
         shell: bash
         run: python3 tools/substrate/cloudflare_builds.py > cloudflare-builds.json
-      - name: Upload sanitized control-plane evidence
+      - name: Remove private telemetry files from public-runner workspace
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: atax-observations-${{ github.run_id }}
-          path: |
-            substrate-health.json
-            cloudflare-builds.json
-          if-no-files-found: ignore
-          retention-days: 14
+        shell: bash
+        run: rm -f substrate-health.json github-sync.json cloudflare-builds.json
