@@ -107,15 +107,27 @@ jobs:
           if [[ -z "$ref" ]]; then
             ref="$(python3 -c 'import json;print(json.load(open("/tmp/fmrl.json"))["default_ref"])')"
           fi
+          dispatched=0
+          dispatch_error=""
           for i in $(seq 1 12); do
-            if gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" \
+            if dispatch_error="$(gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" \
               -f ref=main -f "inputs[repository]=$SOURCE" -f "inputs[ref]=$ref" \
-              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" >/dev/null 2>&1; then
+              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" >/dev/null 2>&1)"; then
+              dispatched=1
               break
             fi
-            [[ "$i" == 12 ]] && { echo "FMRL dispatch failed" >&2; exit 1; }
+            if [[ "$i" == 12 ]]; then
+              # GitHub CLI error text contains API diagnostics only; redact the
+              # controller token and bound the output. Never print inputs,
+              # source contents, private logs, or clone credentials.
+              dispatch_error="${dispatch_error//"$GH_TOKEN"/[redacted]}"
+              diagnostic="$(printf '%s' "$dispatch_error" | tr '\\r\\n' ' ' | cut -c1-500)"
+              echo "FMRL dispatch failed after 12 attempts: ${diagnostic:-no GitHub API diagnostic returned}" | tee -a "$GITHUB_STEP_SUMMARY" >&2
+              exit 1
+            fi
             sleep 5
           done
+          [[ "$dispatched" == 1 ]] || { echo "FMRL dispatch did not start" >&2; exit 1; }
           completed=0
           for i in $(seq 1 105); do
             result="$(gh api "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/runs" \
@@ -127,9 +139,15 @@ jobs:
                 echo "FMRL run: $url; conclusion: $conclusion" >> "$GITHUB_STEP_SUMMARY"
                 # Preserve failure step names before the disposable repository is deleted.
                 # Do not retain private-source artifacts or raw logs.
-                gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
-                  --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' \
-                  >> "$GITHUB_STEP_SUMMARY" || echo "FMRL job-step detail unavailable." >> "$GITHUB_STEP_SUMMARY"
+                failure_details="$(gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
+                  --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' 2>/dev/null || true)"
+                if [[ -n "$failure_details" ]]; then
+                  # Print only job and failed-step names. Do not persist raw
+                  # private-source logs or upload any source-bearing artifacts.
+                  printf '%s\\n' "$failure_details" | tee -a "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "FMRL job-step detail unavailable." | tee -a "$GITHUB_STEP_SUMMARY"
+                fi
                 [[ "$conclusion" == success ]] || exit 1
                 break
               fi
