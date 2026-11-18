@@ -23,17 +23,17 @@ def main() -> int:
         "normal build step completed",
         "private source code should not be retained",
         "Error: cannot find module './secret-module'",
-        "PRIVATE_REPO_TOKEN=ghp_123456789012345678901234567890",
-        "Authorization: Bearer eyJabcdefghijk.abcdefghijk.abcdefghijk",
-        "DATABASE_URL=postgresql://alice:super-secret@db.example.invalid/app",
-        "AWS_SECRET_ACCESS_KEY=AKIA1234567890ABCDEF",
+        "Error: PRIVATE_REPO_TOKEN=ghp_123456789012345678901234567890",
+        "Error: Authorization: Bearer eyJabcdefghijk.abcdefghijk.abcdefghijk",
+        "Error: DATABASE_URL=postgresql://alice:super-secret@db.example.invalid/app",
+        "Error: AWS_SECRET_ACCESS_KEY=AKIA1234567890ABCDEF",
         "ordinary output with no diagnostic marker",
     ])
     output = run(sample)
     required = [
         "Error: cannot find module",
         "PRIVATE_REPO_TOKEN=[redacted]",
-        "Bearer [redacted]",
+        "Authorization: [redacted]",
         "[redacted-database-url]",
         "[redacted-aws-key]",
     ]
