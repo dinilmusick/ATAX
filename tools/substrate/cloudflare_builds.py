@@ -19,7 +19,7 @@ from urllib.parse import quote
 from health_audit import Postgrest, utcnow
 
 API_ROOT = "https://api.cloudflare.com/client/v4"
-FAILURES = {"failure", "failed", "error", "cancelled", "canceled"}
+FAILURES = {"fail", "failure", "failed", "error", "cancelled", "canceled"}
 CATEGORIES = (
     ("types", r"typescript|ts\d{4}|typecheck|tsc:"),
     ("lint", r"eslint|lint error|prettier"),
