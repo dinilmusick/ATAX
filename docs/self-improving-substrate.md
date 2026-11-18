@@ -53,3 +53,19 @@ The Skipo CLI must run inside a private target's disposable FMRL GitHub-hosted r
 7. Self-improvement candidates become independently verified PR changes without ATAX spawning agents.
 
 This change implements the first diagnostic and policy layer. The remaining gates are not certified by the existence of this document or workflow.
+
+## Implementation reconciliation (2026-11-18)
+
+Canonical database migrations have been applied from the accompanying SQL sources:
+- 20261118_ownerless_atax_self_improvement.sql: ownerless global systems can register improvement cycles/constraints; RLS and existing service-role-only improvement RPC grants remain intact.
+- 20261118_atax_context_snapshot.sql: read-only snapshot at atax_context_snapshot(system_key_in), granted only to service_role. Verified return of 43 skill versions, active constraints, memories, candidates and current system repository mapping. It is a bounded overview, not a substitute for reading full source contracts.
+
+Canonical Supabase contains five ATAX constraints and five initial constraint observations, covering task verification, claim fencing, goal context drift, current build evidence and FMRL security. Five evidence-backed self-improvement candidates remain available for incoming agents; they are NOT automatically promoted to goals because existing promotion calls a legacy goal constructor rather than the canonical Vision/Omni pathway. Fixing that is an explicit next task.
+
+The new GitHub reconciler polls current default-branch SHAs, check runs and open/closed PR transitions; source failures remain ERROR/UNKNOWN, never healthy. The current GitHub mapping is not certified synced until this code runs successfully against each actual repository with a suitable read-only token. The Cloudflare collector now polls both Workers Builds and the authoritative build-minute limits endpoint. The latter returns whether the limit has been reached and when it refreshes, NOT the exact remaining minutes.
+
+Security correction: no private ledger IDs, build output, account inventory, or private repository metadata is uploaded to public GitHub Actions artifacts. CI scripts write temporary JSON only inside the ephemeral runner; these files are removed after execution. Canonical results live in protected Supabase. The workflow requires explicit GitHub Actions secrets before monitoring can run; the Cloudflare connector connection in ChatGPT does not automatically grant GitHub Actions credentials.
+
+Suggested locked GitHub-runner diagnostic stack (adopt per target, after version verification): TypeScript tsc --noEmit, ESLint or Biome, oxlint, Knip, dependency-cruiser, Vitest, Playwright, Miniflare/workerd, Semgrep, OSV-Scanner, Trivy, Gitleaks, actionlint and ShellCheck. Choose smallest checks first: parse -> typecheck -> lint -> unit -> graph/conformance -> build -> Cloudflare deployment -> runtime smoke -> independently verified result. Skipo certification remains the app-architecture gate; do not duplicate the canonical Skipo implementation in ATAX.
+
+The ATAX Security Gates npm audit is currently a blocker (nine high and eight moderate findings in an ATAX toolchain CI artifact). This is separately registered as an ATAX self-improvement candidate. Do not bypass the audit or merge the main PR as fully verified until this failure is reconciled.
