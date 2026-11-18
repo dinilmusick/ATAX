@@ -24,6 +24,14 @@ class FmrlTests(unittest.TestCase):
         self.assertLess(controller.index('actions/runs/$run_id/jobs?per_page=100'),
                         controller.index('name: ALWAYS delete FMRL and verify absence'))
 
+    def test_secret_scan_covers_checked_out_head_history_not_other_branches(self):
+        security = (ROOT / ".." / ".." / ".github" / "workflows" / "security-gates.yml").read_text()
+        scan = next(line.strip() for line in security.splitlines() if "gitleaks git" in line)
+        self.assertIn('--log-opts="--full-history HEAD"', scan)
+        self.assertNotIn("--all", scan)
+        self.assertIn("--redact", scan)
+        self.assertIn("--exit-code 1", scan)
+
     def test_controller_dispatch_uses_actions_write_credential(self):
         controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
         dispatch = controller.split(
