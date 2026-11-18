@@ -94,7 +94,7 @@ jobs:
 
       - name: Dispatch FMRL runner and independently inspect result
         env:
-          GH_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}
+          GH_TOKEN: ${{ secrets.FMRL_DISPATCH_TOKEN || secrets.FMRL_SECRETS_TOKEN }}
           BRIDGE: ${{ steps.bridge.outputs.repository }}
           SOURCE: ${{ steps.request.outputs.repository }}
           REQUESTED_REF: ${{ steps.request.outputs.ref }}
@@ -115,6 +115,10 @@ jobs:
               -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" 2>&1 >/dev/null)"; then
               dispatched=1
               break
+            fi
+            if [[ "$dispatch_error" == *"Resource not accessible by personal access token"* ]]; then
+              echo "FMRL dispatch denied (HTTP 403): grant Actions: write on newly created FMRL repositories to FMRL_DISPATCH_TOKEN (recommended) or FMRL_SECRETS_TOKEN. Secrets: write alone is insufficient." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+              exit 1
             fi
             if [[ "$i" == 12 ]]; then
               # GitHub CLI error text contains API diagnostics only; redact the
