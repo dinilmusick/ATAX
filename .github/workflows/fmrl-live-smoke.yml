@@ -1,3 +1,4 @@
+# Verification pass 2: nested output retained only in runner-local temp file.
 name: Disposable FMRL live smoke (CI branch only)
 on:
   push:
