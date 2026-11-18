@@ -21,6 +21,11 @@ on:
         required: false
         default: ""
         type: string
+      skipo_action:
+        description: Optional pinned Skipo command, executed inside FMRL
+        required: false
+        default: ""
+        type: string
   issues:
     types: [opened]
 
@@ -52,6 +57,7 @@ jobs:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_EVENT: ${{ inputs.event }}
           INPUT_WORKFLOW: ${{ inputs.workflow }}
+          INPUT_SKIPO_ACTION: ${{ inputs.skipo_action }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -60,18 +66,22 @@ jobs:
             'repository':os.environ.get('INPUT_REPOSITORY',''),
             'ref':os.environ.get('INPUT_REF',''),
             'event':os.environ.get('INPUT_EVENT','push'),
-            'workflow':os.environ.get('INPUT_WORKFLOW','')
+            'workflow':os.environ.get('INPUT_WORKFLOW',''),
+            'skipo_action':os.environ.get('INPUT_SKIPO_ACTION','')
           }
           repo=data.get('repository') or ''
           ref=data.get('ref') or ''
           event=data.get('event') or 'push'
           workflow=data.get('workflow') or ''
+          skipo_action=data.get('skipo_action') or ''
           assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo)
           assert re.fullmatch(r'[A-Za-z0-9_./-]*',ref)
           assert event in ('push','pull_request','workflow_dispatch')
           assert not workflow or re.fullmatch(r'[A-Za-z0-9_.-]+\.ya?ml',workflow)
+          assert skipo_action in ('','inspect','diagnose','plan','verify','test','update','repair','sync')
+          assert not (skipo_action and workflow)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-            for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow)]:
+            for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow),('skipo_action',skipo_action)]:
               print(key+'='+val,file=out)
           PY
 
@@ -100,6 +110,7 @@ jobs:
           REQUESTED_REF: ${{ steps.request.outputs.ref }}
           EVENT: ${{ steps.request.outputs.event }}
           WORKFLOW: ${{ steps.request.outputs.workflow }}
+          SKIPO_ACTION: ${{ steps.request.outputs.skipo_action }}
         shell: bash
         run: |
           set -euo pipefail
@@ -110,7 +121,8 @@ jobs:
           for i in $(seq 1 12); do
             if gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" \
               -f ref=main -f "inputs[repository]=$SOURCE" -f "inputs[ref]=$ref" \
-              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" >/dev/null 2>&1; then
+              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" \
+              -f "inputs[skipo_action]=$SKIPO_ACTION" >/dev/null 2>&1; then
               break
             fi
             [[ "$i" == 12 ]] && { echo "FMRL dispatch failed" >&2; exit 1; }
