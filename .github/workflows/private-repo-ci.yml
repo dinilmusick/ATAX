@@ -157,9 +157,10 @@ jobs:
           done
           [[ "$dispatched" == 1 ]] || { echo "FMRL dispatch did not start" >&2; exit 1; }
           completed=0
-          for i in $(seq 1 105); do
-            result="$(gh api "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/runs" \
-              --jq '.workflow_runs[0] | [.id,.status,.conclusion,.html_url] | @tsv' 2>/dev/null || true)"
+          for i in $(seq 1 55); do
+            response="$(curl -fsS --connect-timeout 10 --max-time 20 \
+              "https://api.github.com/repos/$BRIDGE/actions/workflows/atax-private-ci.yml/runs?per_page=5" 2>/dev/null || true)"
+            result="$(printf '%s' "$response" | jq -r '.workflow_runs[0] | [.id,.status,.conclusion,.html_url] | @tsv' 2>/dev/null || true)"
             if [[ -n "$result" && "$result" != null ]]; then
               IFS=$'\t' read -r run_id status conclusion url <<< "$result"
               if [[ "$status" == completed ]]; then
@@ -167,8 +168,9 @@ jobs:
                 echo "FMRL run: $url; conclusion: $conclusion" >> "$GITHUB_STEP_SUMMARY"
                 # Preserve failure step names before the disposable repository is deleted.
                 # Do not retain private-source artifacts or raw logs.
-                failure_details="$(gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
-                  --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' 2>/dev/null || true)"
+                jobs="$(curl -fsS --connect-timeout 10 --max-time 20 \
+                  "https://api.github.com/repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" 2>/dev/null || true)"
+                failure_details="$(printf '%s' "$jobs" | jq -r '.jobs[]? | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' 2>/dev/null || true)"
                 if [[ -n "$failure_details" ]]; then
                   # Print only job and failed-step names. Do not persist raw
                   # private-source logs or upload any source-bearing artifacts.
@@ -180,7 +182,7 @@ jobs:
                 break
               fi
             fi
-            sleep 25
+            sleep 50
           done
           [[ "$completed" == 1 ]] || { echo "FMRL verification timed out" >&2; exit 1; }
 
