@@ -12,13 +12,13 @@ import sys
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ERROR_LINE = re.compile(
     r"\b(error|failed|failure|exception|traceback|assertionerror|"
-    r"typeerror|referenceerror|syntaxerror|err_[a-z0-9_]+|"
+    r"typeerror|referenceerror|syntaxerror|err_[a-z0-9_]+|err!|"
     r"cannot find module|not found|exit code|exitcode|"
     r"econnrefused|eaddrinuse|unhandled rejection)\b",
     re.IGNORECASE,
 )
 SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b(token|password|secret|authorization|cookie|api[_-]?key)"
+    r"(?i)\b([A-Z0-9_]*(?:TOKEN|PASSWORD|SECRET|COOKIE|API[_-]?KEY|CREDENTIAL)[A-Z0-9_]*)"
     r"(\s*[:=]\s*)([^\s,;]+)"
 )
 BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
