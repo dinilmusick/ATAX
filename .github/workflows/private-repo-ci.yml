@@ -94,7 +94,7 @@ jobs:
 
       - name: Dispatch FMRL runner and independently inspect result
         env:
-          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}
           BRIDGE: ${{ steps.bridge.outputs.repository }}
           SOURCE: ${{ steps.request.outputs.repository }}
           REQUESTED_REF: ${{ steps.request.outputs.ref }}
