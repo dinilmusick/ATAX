@@ -1,0 +1,118 @@
+name: ATAX Skipo CLI (ephemeral target runner)
+description: Run an immutable Skipo CLI revision against a checked-out target in GitHub-hosted CI, without executing target code in ATAX.
+inputs:
+  skipo-ref:
+    description: Full 40-character Skipo Git commit SHA (never a mutable branch or tag).
+    required: true
+  operation:
+    description: Skipo subcommand; mutating commands require allow-write=true.
+    required: false
+    default: diagnose
+  project-path:
+    description: Target directory relative to GITHUB_WORKSPACE; for create, the new app name.
+    required: false
+    default: .
+  allow-write:
+    description: Explicit opt-in for create/adopt/sync/update/repair/fix.
+    required: false
+    default: 'false'
+outputs:
+  skipo-commit:
+    description: Git commit used for the CLI.
+    value: ${{ steps.setup.outputs.skipo-commit }}
+  status:
+    description: passed or failed.
+    value: ${{ steps.execute.outputs.status }}
+runs:
+  using: composite
+  steps:
+    - name: Validate toolchain request and ATAX isolation
+      shell: bash
+      env:
+        SKIPO_REF: ${{ inputs.skipo-ref }}
+        OPERATION: ${{ inputs.operation }}
+        TARGET_PATH: ${{ inputs.project-path }}
+        ALLOW_WRITE: ${{ inputs.allow-write }}
+      run: |
+        set -euo pipefail
+        if [[ "$GITHUB_REPOSITORY" == 'dinilmusick/ATAX' ]]; then
+          echo 'ATAX is a control plane, not a target code runner.' >&2
+          exit 2
+        fi
+        [[ "$SKIPO_REF" =~ ^[a-fA-F0-9]{40}$ ]] || { echo 'skipo-ref must be a full Git commit SHA.' >&2; exit 2; }
+        case "$OPERATION" in
+          inspect|check|diagnose|plan|verify|certify|policy|semantic|test) ;;
+          create|adopt|sync|update|repair|fix)
+            [[ "$ALLOW_WRITE" == 'true' ]] || { echo 'Mutating Skipo operations require allow-write=true.' >&2; exit 2; }
+            ;;
+          *) echo 'Unsupported Skipo operation.' >&2; exit 2 ;;
+        esac
+        python3 - <<'PY'
+        import os
+        from pathlib import Path
+        root = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+        raw = os.environ['TARGET_PATH']
+        if not raw or Path(raw).is_absolute():
+            raise SystemExit('project-path must be nonempty and relative to GITHUB_WORKSPACE')
+        target = (root / raw).resolve()
+        if target != root and root not in target.parents:
+            raise SystemExit('project-path must stay within GITHUB_WORKSPACE')
+        if os.environ['OPERATION'] == 'create' and (
+            raw in ('.', '..') or '/' in raw or '\\' in raw
+        ):
+            raise SystemExit('For create, project-path must be a single new app name')
+        PY
+
+    - name: Set up Node.js 22
+      uses: actions/setup-node@v7
+      with:
+        node-version: '22'
+
+    - name: Clone and install pinned Skipo CLI
+      id: setup
+      shell: bash
+      env:
+        SKIPO_REF: ${{ inputs.skipo-ref }}
+      run: |
+        set -euo pipefail
+        export GIT_TERMINAL_PROMPT=0
+        tool_dir="$(mktemp -d "$RUNNER_TEMP/atax-skipo.XXXXXX")"
+        git -c credential.helper= clone --quiet --depth=1 --no-checkout https://github.com/dinilmusick/Skipo.git "$tool_dir"
+        if [[ "$(git -C "$tool_dir" rev-parse HEAD)" != "$SKIPO_REF" ]]; then
+          git -C "$tool_dir" fetch --no-tags --depth=1 origin "$SKIPO_REF"
+        fi
+        git -C "$tool_dir" checkout --quiet --detach "$SKIPO_REF"
+        actual="$(git -C "$tool_dir" rev-parse HEAD)"
+        [[ "$actual" == "$SKIPO_REF" ]] || { echo 'Skipo ref mismatch.' >&2; exit 2; }
+        echo "SKIPO_ROOT=$tool_dir" >> "$GITHUB_ENV"
+        echo "skipo-commit=$actual" >> "$GITHUB_OUTPUT"
+        corepack enable
+        corepack prepare pnpm@10.33.0 --activate
+        pnpm --dir "$tool_dir" install --frozen-lockfile
+        node --version
+        python3 --version
+        pnpm --version
+
+    - name: Run Skipo against the target worktree
+      id: execute
+      shell: bash
+      env:
+        OPERATION: ${{ inputs.operation }}
+        TARGET_PATH: ${{ inputs.project-path }}
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_WORKSPACE"
+        if node "$SKIPO_ROOT/bin/skipo.js" "$OPERATION" "$TARGET_PATH"; then
+          echo 'status=passed' >> "$GITHUB_OUTPUT"
+        else
+          echo 'status=failed' >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+    - name: Remove the isolated CLI checkout
+      if: always()
+      shell: bash
+      run: |
+        if [[ -n "${SKIPO_ROOT:-}" && "$SKIPO_ROOT" == "$RUNNER_TEMP"/atax-skipo.* ]]; then
+          rm -rf -- "$SKIPO_ROOT"
+        fi
