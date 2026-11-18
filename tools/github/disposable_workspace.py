@@ -41,6 +41,11 @@ on:
         required: false
         default: ""
         type: string
+      skipo_action:
+        description: Optional installed Skipo command
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -87,6 +92,7 @@ jobs:
           git -C target checkout --detach FETCH_HEAD
 
       - name: Install pinned act
+        if: inputs.skipo_action == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -97,6 +103,7 @@ jobs:
           sudo install -m 0755 /tmp/act /usr/local/bin/act
 
       - name: Execute target workflow
+        if: inputs.skipo_action == ''
         env:
           TARGET_EVENT: ${{ inputs.event }}
           TARGET_WORKFLOW: ${{ inputs.workflow }}
@@ -114,6 +121,40 @@ jobs:
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
           act "${args[@]}"
+
+      - name: Set up Node for Skipo
+        if: inputs.skipo_action != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run pinned Skipo CLI in target checkout
+        if: inputs.skipo_action != ''
+        env:
+          SKIPO_ACTION: ${{ inputs.skipo_action }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SKIPO_ACTION" =~ ^(inspect|diagnose|plan|verify|test|update|repair|sync)$ ]] || exit 2
+          cd target
+          test -d .git
+          if [[ -f pnpm-lock.yaml ]]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+          elif [[ -f package-lock.json ]]; then
+            npm ci --ignore-scripts
+          else
+            echo "Skipo requires a committed lockfile and pinned dependency" >&2
+            exit 2
+          fi
+          test -x node_modules/.bin/skipo || {
+            echo "Skipo CLI not present in pinned target dependencies" >&2
+            exit 2
+          }
+          node_modules/.bin/skipo --help >/dev/null
+          node_modules/.bin/skipo "$SKIPO_ACTION" .
+          # FMRL execution is transient: mutation results must be recreated
+          # by an authorised PR-writing agent, never pushed using clone tokens.
 
       - name: Remove private checkout
         if: always()
