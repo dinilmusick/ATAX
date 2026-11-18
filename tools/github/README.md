@@ -16,3 +16,7 @@ A new permanent repository (plain or Skipo) is a different lifecycle from dispos
 Repository creation: `create_repository.py` or `create-repository.sh`. Skipo scaffolding: `scaffold-skipo-app.sh`. Disposable private CI: `disposable_workspace.py` (FMRL only). ATAX Actions control-plane entry: `.github/workflows/private-repo-ci.yml`. Cleanup: `repository_lifecycle.py delete --repository <owner/FMRL-...>` followed by independent absence verification.
 
 New application repositories are permanent and **must not** be confused with FMRL compute. Credentials must never be printed, committed, injected into untrusted target code, or included in artifacts.
+
+## FMRL dispatch credential contract
+
+The control-plane runner uses three separate authorities. `CODING_REPO_TOKEN` provisions and deletes disposable public FMRL repositories. `FMRL_SECRETS_TOKEN` installs the clone-only `PRIVATE_REPO_TOKEN` as an Actions secret (never exposed as a workflow input). `FMRL_DISPATCH_TOKEN` is the preferred token for invoking the disposable repository's workflow: grant it **Actions: write** on newly created FMRL repositories. The controller falls back to `FMRL_SECRETS_TOKEN` only if no dispatch token is configured; in that case this token also requires Actions: write, not merely Secrets: write. Do not substitute the private clone token or execute target builds inside ATAX. On an authorization-related HTTP 403 the controller fails immediately and still deletes the disposable repository and verifies HTTP 404.
