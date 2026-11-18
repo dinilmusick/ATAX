@@ -20,6 +20,9 @@ HEADERS = {
 WORKFLOW = """name: Disposable FMRL Private CI
 
 on:
+  push:
+    branches: [main]
+    paths: [.fmrl/execute]
   workflow_dispatch:
     inputs:
       repository:
@@ -52,15 +55,15 @@ jobs:
     steps:
       - name: Refuse any target other than the provisioned private repository
         env:
-          REQUESTED_REPOSITORY: ${{ inputs.repository }}
+          REQUESTED_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}
         shell: bash
         run: test "$REQUESTED_REPOSITORY" = "%%TARGET_SOURCE%%"
 
       - name: Clone private target at runtime
         env:
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          TARGET_REPOSITORY: ${{ inputs.repository }}
-          TARGET_REF: ${{ inputs.ref }}
+          TARGET_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}
+          TARGET_REF: ${{ inputs.ref || '%%TARGET_REF%%' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,8 +101,8 @@ jobs:
 
       - name: Execute target workflow
         env:
-          TARGET_EVENT: ${{ inputs.event }}
-          TARGET_WORKFLOW: ${{ inputs.workflow }}
+          TARGET_EVENT: ${{ inputs.event || '%%TARGET_EVENT%%' }}
+          TARGET_WORKFLOW: ${{ inputs.workflow || '%%TARGET_WORKFLOW%%' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -175,6 +178,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Private source owner/name.")
     parser.add_argument("--target", default=None, help="FMRL-prefixed temporary public repo name.")
+    parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
+    parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
+    parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -187,12 +193,18 @@ def main() -> int:
     if args.source.lower() == "dinilmusick/atax":
         raise SystemExit("ATAX is control plane, never target checkout or runner.")
 
+    if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
+        raise SystemExit("Unsafe target ref.")
+    if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\\.ya?ml", args.workflow):
+        raise SystemExit("Unsafe workflow file.")
+
     bearer = token()
     clone_token = os.environ.get("PRIVATE_REPO_TOKEN")
     if not clone_token:
         raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
     secret_writer = secrets_token()
     source = api(f"/repos/{args.source}", clone_token)
+    target_ref = args.ref or source["default_branch"]
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
@@ -207,7 +219,11 @@ def main() -> int:
     try:
         api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
             "message": "chore: add ATAX private CI bridge",
-            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source).replace("%%DEFAULT_REF%%", source["default_branch"]).encode()).decode(),
+            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source)
+                .replace("%%DEFAULT_REF%%", source["default_branch"])
+                .replace("%%TARGET_REF%%", target_ref)
+                .replace("%%TARGET_EVENT%%", args.event)
+                .replace("%%TARGET_WORKFLOW%%", args.workflow).encode()).decode(),
             "branch": "main",
         })
 
@@ -258,6 +274,8 @@ def main() -> int:
             "public": True,
             "private_source_published": False,
             "default_ref": source["default_branch"],
+            "verified_target_ref": target_ref,
+            "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
