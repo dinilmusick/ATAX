@@ -21,6 +21,10 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('actions/runs/$run_id/jobs?per_page=100', controller)
         self.assertIn(failure_step, controller)
         self.assertIn('"Failed step: "', controller)
+        dispatch = controller.split("      - name: Dispatch FMRL runner and independently inspect result")[1].split(\
+            "      - name: ALWAYS delete FMRL and verify absence")[0]
+        self.assertIn("GH_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}", dispatch)
+        self.assertNotIn("GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}", dispatch)
         self.assertLess(controller.index('actions/runs/$run_id/jobs?per_page=100'),
                         controller.index('name: ALWAYS delete FMRL and verify absence'))
 
