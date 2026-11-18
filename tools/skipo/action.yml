@@ -13,9 +13,13 @@ inputs:
     required: false
     default: .
   allow-write:
-    description: Explicit opt-in for create/adopt/sync/update/repair/fix.
+    description: Explicit opt-in for mutating Skipo commands, including add/remove and full-stack pages.
     required: false
     default: 'false'
+  cli-args-json:
+    description: Optional exact Skipo argument vector as JSON array (e.g. ["add","main","tab","Mixer","."]); when nonempty overrides operation and project-path.
+    required: false
+    default: '[]'
 outputs:
   skipo-commit:
     description: Git commit used for the CLI.
@@ -33,6 +37,7 @@ runs:
         OPERATION: ${{ inputs.operation }}
         TARGET_PATH: ${{ inputs.project-path }}
         ALLOW_WRITE: ${{ inputs.allow-write }}
+        CLI_ARGS_JSON: ${{ inputs.cli-args-json }}
       run: |
         set -euo pipefail
         if [[ "$GITHUB_REPOSITORY" == 'dinilmusick/ATAX' ]]; then
@@ -48,8 +53,25 @@ runs:
           *) echo 'Unsupported Skipo operation.' >&2; exit 2 ;;
         esac
         python3 - <<'PY'
-        import os
+        import json, os
         from pathlib import Path
+        raw_argv = json.loads(os.environ['CLI_ARGS_JSON'])
+        if not isinstance(raw_argv, list) or len(raw_argv) > 32 or any(
+            not isinstance(x, str) or not x or len(x) > 512 or
+            any(ord(c) < 32 or ord(c) == 127 for c in x) for x in raw_argv
+        ):
+            raise SystemExit('cli-args-json must be an array of up to 32 nonempty safe strings')
+        supported = {'inspect','check','diagnose','plan','verify','certify',
+                     'policy','semantic','test','create','adopt','sync','update',
+                     'repair','fix','add','remove','auth','login','workspace',
+                     'workspaceMenu','mainPage'}
+        mutating = {'create','adopt','sync','update','repair','fix','add',
+                    'remove','auth','login','workspace','workspaceMenu','mainPage'}
+        if raw_argv:
+            if raw_argv[0] not in supported:
+                raise SystemExit('Unsupported Skipo CLI command')
+            if raw_argv[0] in mutating and os.environ['ALLOW_WRITE'] != 'true':
+                raise SystemExit('Mutating Skipo CLI commands require allow-write=true')
         root = Path(os.environ['GITHUB_WORKSPACE']).resolve()
         raw = os.environ['TARGET_PATH']
         if not raw or Path(raw).is_absolute():
@@ -99,10 +121,20 @@ runs:
       env:
         OPERATION: ${{ inputs.operation }}
         TARGET_PATH: ${{ inputs.project-path }}
+        CLI_ARGS_JSON: ${{ inputs.cli-args-json }}
       run: |
         set -euo pipefail
         cd "$GITHUB_WORKSPACE"
-        if node "$SKIPO_ROOT/bin/skipo.js" "$OPERATION" "$TARGET_PATH"; then
+        if python3 - <<'PY'
+        import json, os, subprocess, sys
+        from pathlib import Path
+        argv = json.loads(os.environ['CLI_ARGS_JSON'])
+        if not argv:
+            argv = [os.environ['OPERATION'], os.environ['TARGET_PATH']]
+        skipo = Path(os.environ['SKIPO_ROOT']) / 'bin' / 'skipo.js'
+        sys.exit(subprocess.call(['node', str(skipo), *argv], cwd=os.environ['GITHUB_WORKSPACE']))
+        PY
+        then
           echo 'status=passed' >> "$GITHUB_OUTPUT"
         else
           echo 'status=failed' >> "$GITHUB_OUTPUT"
