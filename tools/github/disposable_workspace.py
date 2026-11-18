@@ -120,7 +120,44 @@ jobs:
             test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
-          act "${args[@]}"
+          # Never stream private target test output into the public FMRL job log.
+          # Retain raw output only in this transient runner and report safe
+          # categories/codes, not paths, source fragments, or secret values.
+          set +e
+          act "${args[@]}" >/tmp/fmrl-nested-raw.log 2>&1
+          nested_status=$?
+          set -e
+          python3 - <<'DIAGNOSTICS'
+          import collections
+          import re
+          from pathlib import Path
+
+          value = Path('/tmp/fmrl-nested-raw.log').read_text(errors='replace')
+          counts = collections.Counter()
+          signals = (
+              ('typescript', r'TS[0-9]{4}'),
+              ('npm-install', r'npm (?:ERR!|error) code [A-Za-z0-9_-]+'),
+              ('dependency-resolution', r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+'),
+              ('missing-module', r'cannot find module|module not found'),
+              ('docker-daemon', r'cannot connect to the docker daemon'),
+              ('docker-image', r'failed to pull image|docker.*(?:denied|rate limit|error response)'),
+              ('permission', r'permission denied|resource not accessible'),
+              ('network', r'getaddrinfo|econnreset|etimedout|name resolution'),
+              ('disk', r'no space left on device'),
+              ('runtime-error', r'(?:typeerror|syntaxerror|referenceerror|assertionerror)'),
+              ('act-error', r'(?:act).*?(?:error|failed|fatal)'),
+          )
+          for category, pattern in signals:
+              counts[category] = len(re.findall(pattern, value, flags=re.I))
+          codes = sorted(set(re.findall(r'TS[0-9]{4}|ERR_PNPM_[A-Z0-9_]+|(?<=npm error code )[A-Z0-9_-]+', value)))
+          print('FMRL nested execution diagnostic: raw target output suppressed')
+          print('Nested failure categories: ' + ', '.join(
+              '%s=%d' % (key, num) for key, num in counts.items() if num
+          ) if any(counts.values()) else 'No recognized safe failure categories')
+          print('Safe error identifiers: ' + ', '.join(codes[:16]) if codes else 'No safe code identifier found')
+          DIAGNOSTICS
+          rm -f /tmp/fmrl-nested-raw.log
+          exit "$nested_status"
 
       - name: Remove private checkout
         if: always()
