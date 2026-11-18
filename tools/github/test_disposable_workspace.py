@@ -236,5 +236,71 @@ class FmrlTests(unittest.TestCase):
         self.assertNotIn("Authorization", fetch.call_args.args[0].headers)
 
 
+    def test_fmrl_push_fallback_is_one_shot_and_never_contains_private_source(self):
+        workflow = MODULE.WORKFLOW
+        self.assertIn("  push:\n    branches: [main]\n    paths: [.fmrl/execute]", workflow)
+        self.assertIn("TARGET_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}", workflow)
+        self.assertIn("TARGET_REF: ${{ inputs.ref || '%%TARGET_REF%%' }}", workflow)
+        self.assertIn("TARGET_EVENT: ${{ inputs.event || '%%TARGET_EVENT%%' }}", workflow)
+        self.assertIn("TARGET_WORKFLOW: ${{ inputs.workflow || '%%TARGET_WORKFLOW%%' }}", workflow)
+        self.assertNotIn("CODING_REPO_TOKEN", workflow)
+        self.assertNotIn("FMRL_SECRETS_TOKEN", workflow)
+        controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
+        dispatch = controller.split(
+            "      - name: Dispatch FMRL runner and independently inspect result"
+        )[1].split("      - name: ALWAYS delete FMRL and verify absence")[0]
+        self.assertIn('if [[ "$dispatch_error" == *"Resource not accessible by personal access token"* ]]', dispatch)
+        self.assertIn('GH_TOKEN="$FMRL_CONTENTS_TOKEN" gh api -X PUT "repos/$BRIDGE/contents/.fmrl/execute"', dispatch)
+        self.assertIn("FMRL_CONTENTS_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}", dispatch)
+        self.assertIn('registered" == 1', dispatch)
+        self.assertNotIn("PRIVATE_REPO_TOKEN", dispatch)
+        self.assertIn("repository_lifecycle.py delete --repository", controller)
+
+    def test_push_fallback_rejects_unsafe_target_ref_and_workflow(self):
+        for extra in (["--ref", "main'; echo unsafe"], ["--workflow", "ci.yml;bad"]):
+            with mock.patch.object(MODULE, "api") as api, \
+                 mock.patch.object(sys, "argv", [
+                     "disposable_workspace.py", "--source", "dinilmusick/KONE", *extra
+                 ]):
+                with self.assertRaises(SystemExit):
+                    MODULE.main()
+                api.assert_not_called()
+
+    def test_push_fallback_embeds_requested_exact_sha(self):
+        calls = []
+        sha = "a" * 40
+
+        def fake_api(path, bearer, method="GET", payload=None):
+            calls.append((path, method, payload))
+            if path == "/repos/dinilmusick/KONE":
+                return {"private": True, "default_branch": "develop"}
+            if path == "/user/repos":
+                return {"full_name": "dinilmusick/FMRL-unit-test"}
+            if path == "/repos/dinilmusick/FMRL-unit-test":
+                return {"private": False, "html_url": "https://github.com/dinilmusick/FMRL-unit-test"}
+            return None
+
+        with mock.patch.object(MODULE, "api", side_effect=fake_api), \
+             mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(MODULE.subprocess, "run"), \
+             mock.patch.dict(MODULE.os.environ, {
+                 "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "clone-only",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
+             }), \
+             mock.patch.object(sys, "argv", ["disposable_workspace.py", "--source",
+                                           "dinilmusick/KONE", "--target", "FMRL-unit-test",
+                                           "--ref", sha, "--workflow", "ci.yml"]), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(MODULE.main(), 0)
+        source = json.loads(output.getvalue())
+        self.assertEqual(source["verified_target_ref"], sha)
+        import base64
+        generated = base64.b64decode(next(call[2]["content"] for call in calls
+            if call[0].endswith("atax-private-ci.yml"))).decode()
+        self.assertIn("TARGET_REF: ${{ inputs.ref || '" + sha + "' }}", generated)
+        self.assertIn("TARGET_WORKFLOW: ${{ inputs.workflow || 'ci.yml' }}", generated)
+        self.assertNotIn("clone-only", generated)
+
+
 if __name__ == "__main__":
     unittest.main()
