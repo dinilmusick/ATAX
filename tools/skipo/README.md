@@ -37,11 +37,31 @@ Replace the ATAX placeholder with the reviewed full commit SHA after merging the
 
 ## Supported operations
 
-Read-only operations: `inspect`, `check`, `diagnose`, `plan`, `verify`, `certify`, `policy`, `semantic`, `test`.
+Read-only operations: `inspect`, `check`, `diagnose`, `plan`, `verify`, `certify`, `policy`, `semantic`, `test`. Full native Skipo subcommands, including nested `add` and page/repair commands, can be sent with `cli-args-json`, which overrides the convenience `operation` and `project-path` inputs without shell interpolation.
 
-Mutating operations: `create`, `adopt`, `sync`, `update`, `repair`, `fix` require `allow-write: 'true'` and should run only on an **isolated working branch** created for the task; never on production main. `project-path` cannot escape `GITHUB_WORKSPACE`. The `create` operation treats it as a new one-component application name; other operations treat it as a project-relative directory.
+Mutating operations: `create`, `adopt`, `sync`, `update`, `repair`, `fix`, `add`, `remove`, `auth`, `login`, `workspace`, `workspaceMenu`, and `mainPage` require `allow-write: 'true'` and should run only on an **isolated working branch** created for the task; never on production main. `project-path` cannot escape `GITHUB_WORKSPACE`. The `create` operation treats it as a new one-component application name; other operations treat it as a project-relative directory.
 
 The action emits a `skipo-commit` and `status` output and exposes CLI stdout/stderr in the workflow step. A failed command fails CI; the agent should preserve a *redacted* structured diagnostic and commit/SHA fingerprint in Supabase, then correct the code in a PR. Never record tokens, environment values, complete private source, or raw private build artifacts in a public FMRL repository.
+
+## Native argument-vector mode
+
+For the complete supported Skipo CLI grammar, pass an argv array rather than a shell command string. Examples:
+
+```yaml
+with:
+  skipo-ref: 25a9921b051e7c6b2601fe33f0f163e432a56d2a
+  cli-args-json: '["add","main","tab","Mixer","."]'
+  allow-write: 'true'
+```
+
+```yaml
+with:
+  skipo-ref: 25a9921b051e7c6b2601fe33f0f163e432a56d2a
+  cli-args-json: '["repair","shell",".","--plan"]'
+  allow-write: 'true'
+```
+
+The native vector is passed directly to the installed Skipo executable with no shell evaluation; unknown verbs and control characters are rejected. The mutation gate applies to the requested *command*, but passing a destructive command on a real repo is still dangerous. Treat raw arguments as trusted task-contract data, use an isolated checkout/branch, and never let arbitrary issue comments or PR text supply them. Native Skipo's own repair and conformance checks are authoritative; ATAX does not reimplement Skipo's architecture.
 
 ## Boundaries and remaining integration
 
