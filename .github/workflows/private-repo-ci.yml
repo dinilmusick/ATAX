@@ -75,6 +75,9 @@ jobs:
               print(key+'='+val,file=out)
           PY
 
+      - name: Verify redacted FMRL diagnostic boundary
+        run: python3 tools/github/test_sanitize_fmrl_diagnostic.py
+
       - name: Provision disposable FMRL public repository
         id: bridge
         env:
