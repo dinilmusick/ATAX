@@ -81,6 +81,7 @@ class CloudflareTests(unittest.TestCase):
 
     def test_failure_taxonomy(self):
         self.assertTrue(build_failed({"build_outcome": "failure"}))
+        self.assertTrue(build_failed({"status": "stopped", "build_outcome": "fail"}))
         self.assertFalse(build_failed({"build_outcome": "success"}))
         self.assertEqual(failure_category({"status": "failed"}, "TS2304: cannot find name"),
                          "types")
