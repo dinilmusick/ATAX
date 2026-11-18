@@ -124,12 +124,17 @@ jobs:
               IFS=$'\t' read -r run_id status conclusion url <<< "$result"
               if [[ "$status" == completed ]]; then
                 completed=1
-                echo "FMRL run: $url; conclusion: $conclusion" >> "$GITHUB_STEP_SUMMARY"
-                # Preserve failure step names before the disposable repository is deleted.
-                # Do not retain private-source artifacts or raw logs.
-                gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
+                echo "FMRL run: $url; conclusion: $conclusion" | tee -a "$GITHUB_STEP_SUMMARY"
+                # Preserve only job and failed-step names before the disposable repository is deleted.
+                # Never retain private source, credentials, artifacts, or raw test logs.
+                details="$(gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
                   --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' \
-                  >> "$GITHUB_STEP_SUMMARY" || echo "FMRL job-step detail unavailable." >> "$GITHUB_STEP_SUMMARY"
+                  2>/dev/null || true)"
+                if [[ -n "$details" ]]; then
+                  printf '%s\n' "$details" | tee -a "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "FMRL job-step detail unavailable." | tee -a "$GITHUB_STEP_SUMMARY"
+                fi
                 [[ "$conclusion" == success ]] || exit 1
                 break
               fi
