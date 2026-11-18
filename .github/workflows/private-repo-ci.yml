@@ -75,6 +75,9 @@ jobs:
               print(key+'='+val,file=out)
           PY
 
+      - name: Verify redacted FMRL diagnostic boundary
+        run: python3 tools/github/test_sanitize_fmrl_diagnostic.py
+
       - name: Provision disposable FMRL public repository
         id: bridge
         env:
@@ -125,12 +128,18 @@ jobs:
               if [[ "$status" == completed ]]; then
                 completed=1
                 echo "FMRL run: $url; conclusion: $conclusion" >> "$GITHUB_STEP_SUMMARY"
-                # Preserve failure step names before the disposable repository is deleted.
-                # Do not retain private-source artifacts or raw logs.
+                # Preserve failure step names and a strictly redacted diagnostic summary
+                # before deleting the disposable repository. Never persist raw logs or artifacts.
                 gh api "repos/$BRIDGE/actions/runs/$run_id/jobs?per_page=100" \
                   --jq '.jobs[] | "Job: " + .name + " (" + (.conclusion // .status) + ")", (.steps[]? | select(.conclusion == "failure") | "Failed step: " + .name)' \
                   >> "$GITHUB_STEP_SUMMARY" || echo "FMRL job-step detail unavailable." >> "$GITHUB_STEP_SUMMARY"
-                [[ "$conclusion" == success ]] || exit 1
+                if [[ "$conclusion" != success ]]; then
+                  if ! gh run view "$run_id" --repo "$BRIDGE" --log 2>/dev/null \
+                    | python3 tools/github/sanitize_fmrl_diagnostic.py >> "$GITHUB_STEP_SUMMARY"; then
+                    echo "Sanitized nested-run diagnostic unavailable." >> "$GITHUB_STEP_SUMMARY"
+                  fi
+                  exit 1
+                fi
                 break
               fi
             fi
