@@ -38,7 +38,7 @@ class FmrlTests(unittest.TestCase):
             "      - name: Dispatch FMRL runner and independently inspect result"
         )[1].split("      - name: ALWAYS delete FMRL and verify absence")[0]
         self.assertIn("GH_TOKEN: ${{ secrets.FMRL_DISPATCH_TOKEN || secrets.FMRL_SECRETS_TOKEN }}", dispatch)
-        self.assertIn("grant Actions: write on newly created FMRL repositories", dispatch)
+        self.assertIn("using one-shot Contents:write push trigger", dispatch)
         self.assertNotIn("GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}", dispatch)
 
     def test_runner_only_uses_clone_token_in_clone_step(self):
