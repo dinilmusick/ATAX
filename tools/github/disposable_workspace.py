@@ -262,8 +262,9 @@ def api(path: str, bearer: str, method: str = "GET", payload=None):
                 return None
             return json.load(response)
     except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API {method} {path} failed: {detail}") from exc
+        # The source repository path or API error body can contain private
+        # target metadata. Never print it into public ATAX workflow logs.
+        raise RuntimeError(f"GitHub API {method} operation failed (HTTP {exc.code}); target redacted") from None
 
 def verify_deleted_public_bridge(repository: str) -> None:
     """Check public repository absence without reusing the provisioning token."""
@@ -368,7 +369,9 @@ def main() -> int:
                 # A newly provisioned repo may not yet expose its Actions
                 # encryption public key. Surface the actual failure safely.
                 diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
-                diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]").replace(secret_writer, "[redacted]")
+                for private_value in (clone_token, bearer, secret_writer, args.source, target_ref, args.workflow):
+                    if private_value:
+                        diagnostic = diagnostic.replace(private_value, "[redacted]")
                 if "Resource not accessible by personal access token" in diagnostic:
                     raise RuntimeError(
                         "FMRL requires FMRL_SECRETS_TOKEN with repository Secrets: write "
