@@ -19,7 +19,7 @@ jobs:
           CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
         run: |
           python3 - <<'PY'
-          import json,os,urllib.request,urllib.error,uuid
+          import json,os,urllib.request,urllib.error,uuid,time
           token=os.environ.get('CODING_REPO_TOKEN')
           if not token: raise SystemExit('BLOCKED: CODING_REPO_TOKEN missing')
           def api(path,method='GET',data=None):
@@ -42,8 +42,15 @@ jobs:
                   {'owner':'dinilmusick','name':name,'private':False,'include_all_branches':False})
               created=True
               assert result['name']==name
-              manifest=api(path+'/contents/meditations.config.json')
-              assert manifest.get('type')=='file','FAIL: generated template missing config'
+              manifest=None
+              for attempt in range(15):
+                  try:
+                      manifest=api(path+'/contents/meditations.config.json')
+                      break
+                  except RuntimeError as exc:
+                      if 'HTTP 404' not in str(exc): raise
+                      time.sleep(2)
+              assert manifest and manifest.get('type')=='file','FAIL: generated template missing config after 30s'
               print('PASS: template flag and generated configuration')
           finally:
               if created:
