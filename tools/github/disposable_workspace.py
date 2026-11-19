@@ -20,27 +20,10 @@ HEADERS = {
 WORKFLOW = """name: Disposable FMRL Private CI
 
 on:
+  push:
+    branches: [main]
+    paths: [.fmrl/execute]
   workflow_dispatch:
-    inputs:
-      repository:
-        description: Private repository owner/name
-        required: true
-        type: string
-      ref:
-        description: Branch, tag, or SHA
-        required: false
-        default: "%%DEFAULT_REF%%"
-        type: string
-      event:
-        description: act event
-        required: false
-        default: push
-        type: string
-      workflow:
-        description: Optional workflow filename
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
@@ -49,18 +32,25 @@ jobs:
   private-ci:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}
     steps:
-      - name: Refuse any target other than the provisioned private repository
+      - name: Verify secret-bound private identity and exact commit
         env:
-          REQUESTED_REPOSITORY: ${{ inputs.repository }}
+          TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
         shell: bash
-        run: test "$REQUESTED_REPOSITORY" = "%%TARGET_SOURCE%%"
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FMRL_EXECUTION_MODE" =~ ^(direct|act)$ ]]
 
       - name: Clone private target at runtime
         env:
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          TARGET_REPOSITORY: ${{ inputs.repository }}
-          TARGET_REF: ${{ inputs.ref }}
+          TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +59,7 @@ jobs:
           # GitHub Git-over-HTTPS uses username/token credentials, not a REST API Bearer header.
           # Credentials are supplied only to this checkout step, never stored in a remote URL.
           askpass="$(mktemp)"
-          trap 'rm -f "$askpass"' EXIT
+          trap 'rm -f "$askpass" /tmp/fmrl-clone-private.log' EXIT
           cat > "$askpass" <<'ASKPASS'
           #!/usr/bin/env bash
           case "$1" in
@@ -80,13 +70,32 @@ jobs:
           ASKPASS
           chmod 700 "$askpass"
           export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
-          git -c credential.helper= \
-            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target
-          git -C target -c credential.helper= \
-            fetch --no-tags origin "$TARGET_REF"
-          git -C target checkout --detach FETCH_HEAD
+          # Even Git stderr can contain the private repository URL and SHA.
+          # Suppress all raw clone/checkout output to a transient runner-only
+          # file; only sanitized step status is allowed in public job logs.
+          if ! git -c credential.helper= \
+            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target \
+            >/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL private clone failed (details suppressed)" >&2
+            exit 1
+          fi
+          if ! git -C target -c credential.helper= \
+            fetch --no-tags origin "$TARGET_REF" \
+            >>/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL exact private SHA fetch failed (details suppressed)" >&2
+            exit 1
+          fi
+          if ! git -C target checkout --detach FETCH_HEAD \
+            >>/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL exact private SHA checkout failed (details suppressed)" >&2
+            exit 1
+          fi
+          test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"
+          rm -f /tmp/fmrl-clone-private.log
+          echo "FMRL exact private SHA verified without exposing its value"
 
       - name: Install pinned act
+        if: env.FMRL_EXECUTION_MODE == 'act'
         shell: bash
         run: |
           set -euo pipefail
@@ -97,9 +106,10 @@ jobs:
           sudo install -m 0755 /tmp/act /usr/local/bin/act
 
       - name: Execute target workflow
+        if: env.FMRL_EXECUTION_MODE == 'act'
         env:
-          TARGET_EVENT: ${{ inputs.event }}
-          TARGET_WORKFLOW: ${{ inputs.workflow }}
+          TARGET_EVENT: ${{ secrets.FMRL_TARGET_EVENT }}
+          TARGET_WORKFLOW: ${{ secrets.FMRL_TARGET_WORKFLOW }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,12 +118,128 @@ jobs:
           # Nested act on GitHub-hosted runners must mount the checked-out private worktree.
           # This mount exists only inside the ephemeral runner; no source is committed to FMRL.
           args=("$TARGET_EVENT" "--bind" "--directory" "$PWD" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
-          if [[ -n "$TARGET_WORKFLOW" ]]; then
+          if [[ -n "$TARGET_WORKFLOW" && "$TARGET_WORKFLOW" != "-" ]]; then
             [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
             test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
-          act "${args[@]}"
+          # Never stream private target test output into the public FMRL job log.
+          # Retain raw output only in this transient runner and report safe
+          # categories/codes, not paths, source fragments, or secret values.
+          set +e
+          act "${args[@]}" >/tmp/fmrl-nested-raw.log 2>&1
+          nested_status=$?
+          set -e
+          python3 - <<'DIAGNOSTICS'
+          import collections
+          import re
+          from pathlib import Path
+
+          value = Path('/tmp/fmrl-nested-raw.log').read_text(errors='replace')
+          counts = collections.Counter()
+          signals = (
+              ('typescript', r'TS[0-9]{4}'),
+              ('npm-install', r'npm (?:ERR!|error) code [A-Za-z0-9_-]+'),
+              ('dependency-resolution', r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+'),
+              ('missing-module', r'cannot find module|module not found'),
+              ('docker-daemon', r'cannot connect to the docker daemon'),
+              ('docker-image', r'failed to pull image|docker.*(?:denied|rate limit|error response)'),
+              ('permission', r'permission denied|resource not accessible'),
+              ('network', r'getaddrinfo|econnreset|etimedout|name resolution'),
+              ('disk', r'no space left on device'),
+              ('runtime-error', r'(?:typeerror|syntaxerror|referenceerror|assertionerror)'),
+              ('act-error', r'(?:act).*?(?:error|failed|fatal)'),
+          )
+          for category, pattern in signals:
+              counts[category] = len(re.findall(pattern, value, flags=re.I))
+          codes = sorted(set(re.findall(r'TS[0-9]{4}|ERR_PNPM_[A-Z0-9_]+|(?<=npm error code )[A-Z0-9_-]+', value)))
+          print('FMRL nested execution diagnostic: raw target output suppressed')
+          print('Nested failure categories: ' + ', '.join(
+              '%s=%d' % (key, num) for key, num in counts.items() if num
+          ) if any(counts.values()) else 'No recognized safe failure categories')
+          print('Safe error identifiers: ' + ', '.join(codes[:16]) if codes else 'No safe code identifier found')
+          DIAGNOSTICS
+          rm -f /tmp/fmrl-nested-raw.log
+          exit "$nested_status"
+
+      - name: Set up direct-suite Node host
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up frozen pnpm host
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Run portable private-suite checks (not full workflow parity)
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (
+            set -euo pipefail
+            cd target
+            test -f package.json
+            if [[ -f pnpm-lock.yaml ]]; then
+              pnpm install --frozen-lockfile
+              export FMRL_PACKAGE_MANAGER=pnpm
+            elif [[ -f package-lock.json ]]; then
+              npm ci --include=optional --no-audit --no-fund
+              export FMRL_PACKAGE_MANAGER=npm
+            else
+              exit 42
+            fi
+            node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            import {spawnSync} from 'node:child_process';
+            const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+            const scripts=p.scripts || {};
+            const manager=process.env.FMRL_PACKAGE_MANAGER;
+            if (!scripts.test || !scripts.build || !(scripts.typecheck || scripts.lint))
+              throw new Error('Direct CI requires test, build and lint/typecheck');
+            const ordered=['check:canonical-ui','lint','typecheck','validate:api',
+              'verify:ecosystem-package-chain','verify:architecture','verify:bundle',
+              'test','build','verify:build-artifacts'];
+            const executed=[];
+            for (const name of ordered) {
+              if (!scripts[name]) continue;
+              const r=spawnSync(manager,['run',name],{cwd:process.cwd(),
+                stdio:'inherit',env:process.env});
+              if (r.error) throw r.error;
+              if (r.status !== 0) throw new Error('Direct CI failed: '+name+' exit='+r.status);
+              executed.push(name);
+            }
+            if (!executed.includes('test') || !executed.includes('build'))
+              throw new Error('Missing mandatory direct CI gates');
+            console.log('FMRL portable checks passed: '+executed.join(','));
+            NODE
+          ) >/tmp/fmrl-direct-raw.log 2>&1
+          result=$?
+          set -e
+          python3 - "$result" <<'SAFE'
+          from pathlib import Path
+          import re,sys
+          output=Path('/tmp/fmrl-direct-raw.log').read_text(errors='replace')
+          code=int(sys.argv[1])
+          print('FMRL direct suite: '+('PASS' if code==0 else 'FAIL')+'; exit='+str(code))
+          print('FMRL coverage: frozen install plus portable package scripts; NOT full workflow parity')
+          receipt=re.findall(r'FMRL portable checks passed: ([A-Za-z0-9:_, -]+)',output)
+          if receipt: print('FMRL verified script names: '+receipt[-1][:250])
+          if code:
+              categories={'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+',
+                'typescript':r'TS[0-9]{4}', 'network':r'getaddrinfo|econnreset|etimedout',
+                'module':r'cannot find module|module not found',
+                'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror'}
+              print('FMRL failure categories: '+', '.join(
+                key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
+                if re.search(pat,output,re.I))[:250])
+          SAFE
+          rm -f /tmp/fmrl-direct-raw.log
+          exit "$result"
 
       - name: Remove private checkout
         if: always()
@@ -152,8 +278,9 @@ def api(path: str, bearer: str, method: str = "GET", payload=None):
                 return None
             return json.load(response)
     except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API {method} {path} failed: {detail}") from exc
+        # The source repository path or API error body can contain private
+        # target metadata. Never print it into public ATAX workflow logs.
+        raise RuntimeError(f"GitHub API {method} operation failed (HTTP {exc.code}); target redacted") from None
 
 def verify_deleted_public_bridge(repository: str) -> None:
     """Check public repository absence without reusing the provisioning token."""
@@ -175,6 +302,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, help="Private source owner/name.")
     parser.add_argument("--target", default=None, help="FMRL-prefixed temporary public repo name.")
+    parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
+    parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
+    parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
+    parser.add_argument("--mode", choices=("direct", "act"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -187,12 +318,22 @@ def main() -> int:
     if args.source.lower() == "dinilmusick/atax":
         raise SystemExit("ATAX is control plane, never target checkout or runner.")
 
+    if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
+        raise SystemExit("Unsafe target ref.")
+    if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", args.workflow):
+        raise SystemExit("Unsafe workflow file.")
+
     bearer = token()
     clone_token = os.environ.get("PRIVATE_REPO_TOKEN")
     if not clone_token:
         raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
     secret_writer = secrets_token()
     source = api(f"/repos/{args.source}", clone_token)
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+", source["default_branch"]):
+        raise SystemExit("Unsafe source default branch.")
+    target_ref = args.ref
+    if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
+        raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
@@ -207,7 +348,7 @@ def main() -> int:
     try:
         api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
             "message": "chore: add ATAX private CI bridge",
-            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source).replace("%%DEFAULT_REF%%", source["default_branch"]).encode()).decode(),
+            "content": base64.b64encode(WORKFLOW.encode()).decode(),
             "branch": "main",
         })
 
@@ -219,11 +360,21 @@ def main() -> int:
         for credential in ("CODING_REPO_TOKEN", "PRIVATE_REPO_TOKEN", "FMRL_SECRETS_TOKEN", "GITHUB_TOKEN"):
             env.pop(credential, None)
         env["GH_TOKEN"] = secret_writer
-        for attempt in range(4):
+        # Private repository name, exact SHA, and clone credential remain
+        # encrypted runtime secrets, never public Git commit content.
+        for secret_name, secret_value in (
+            ("PRIVATE_REPO_TOKEN", clone_token),
+            ("FMRL_TARGET_REPOSITORY", args.source),
+            ("FMRL_TARGET_REF", target_ref),
+            ("FMRL_TARGET_EVENT", args.event),
+            ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
+            ("FMRL_EXECUTION_MODE", args.mode),
+        ):
+          for attempt in range(4):
             try:
                 subprocess.run(
-                    ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
-                    input=clone_token,
+                    ["gh", "secret", "set", secret_name, "--repo", target],
+                    input=secret_value,
                     text=True,
                     env=env,
                     capture_output=True,
@@ -234,7 +385,9 @@ def main() -> int:
                 # A newly provisioned repo may not yet expose its Actions
                 # encryption public key. Surface the actual failure safely.
                 diagnostic = (exc.stderr or "GitHub CLI returned a nonzero status")
-                diagnostic = diagnostic.replace(clone_token, "[redacted]").replace(bearer, "[redacted]").replace(secret_writer, "[redacted]")
+                for private_value in (clone_token, bearer, secret_writer, args.source, target_ref, args.workflow):
+                    if private_value:
+                        diagnostic = diagnostic.replace(private_value, "[redacted]")
                 if "Resource not accessible by personal access token" in diagnostic:
                     raise RuntimeError(
                         "FMRL requires FMRL_SECRETS_TOKEN with repository Secrets: write "
@@ -243,7 +396,7 @@ def main() -> int:
                     ) from None
                 if attempt == 3:
                     raise RuntimeError(
-                        "Cannot install clone-only secret on FMRL after 4 attempts: " + diagnostic[:500]
+                        "Cannot install required encrypted FMRL binding after 4 attempts: " + diagnostic[:500]
                     ) from None
                 time.sleep(3 * (attempt + 1))
 
@@ -257,8 +410,13 @@ def main() -> int:
             "url": verified["html_url"],
             "public": True,
             "private_source_published": False,
+            "private_target_metadata_published": False,
             "default_ref": source["default_branch"],
+            "verified_target_ref": target_ref,
+            "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
+            "execution_mode": args.mode,
+            "coverage": "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act",
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
         }, indent=2))
