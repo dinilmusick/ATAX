@@ -24,7 +24,7 @@ def main():
     p.add_argument("--template", required=True, help="Existing owner/repo marked as template")
     p.add_argument("--owner", required=True, help="Destination owner")
     p.add_argument("--name", required=True, help="New repository name")
-    p.add_argument("--visibility", choices=["public", "private"], default="public")
+    p.add_argument("--visibility", choices=["private"], default="private", help="Meditation repositories are always private")
     p.add_argument("--description", default="")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
@@ -33,7 +33,7 @@ def main():
         re.fullmatch(valid, v) for v in (a.owner, a.name)):
         p.error("Invalid repository identifier")
     payload = {"owner": a.owner, "name": a.name,
-               "private": a.visibility == "private", "include_all_branches": False}
+               "private": True, "include_all_branches": False}
     if a.description:
         payload["description"] = a.description
     endpoint = f"/repos/{a.template}/generate"
@@ -57,9 +57,13 @@ def main():
     created = api(endpoint, token, "POST", payload)
     if created.get("full_name", "").lower() != f"{a.owner}/{a.name}".lower():
         raise SystemExit("Unexpected generated repository identity")
+    if created.get("private") is not True:
+        raise SystemExit("SECURITY: generated repository is not private; inspect and restrict immediately")
     for attempt in range(20):
         try:
             target = api(target_path, token)
+            if target.get("private") is not True:
+                raise SystemExit("SECURITY: destination repository is not private")
             if target.get("default_branch") and not target.get("empty", False):
                 branch = api(target_path + "/branches/" + target["default_branch"], token)
                 if branch.get("commit", {}).get("sha"):
