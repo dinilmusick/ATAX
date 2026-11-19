@@ -1,4 +1,4 @@
-name: Create permanent repository from template
+name: Create a Meditation
 on:
   workflow_dispatch:
     inputs:
