@@ -15,6 +15,12 @@ A new permanent repository (plain or Skipo) is a different lifecycle from dispos
 
 Repository creation: `create_repository.py` or `create-repository.sh`. Skipo scaffolding: `scaffold-skipo-app.sh`. Disposable private CI: `disposable_workspace.py` (FMRL only). ATAX Actions control-plane entry: `.github/workflows/private-repo-ci.yml`. Cleanup: `repository_lifecycle.py delete --repository <owner/FMRL-...>` followed by independent absence verification.
 
+## Direct suite vs complete workflow evidence
+
+The FMRL bridge defaults to an explicitly labeled **direct portable suite** when nested `act` cannot produce reliable target results. It runs only in a disposable public FMRL runner and uses the private checkout strictly in the ephemeral worktree. The direct suite requires a frozen npm/pnpm lockfile install, a manifest-declared test, build and typecheck/lint gate, plus available architecture/security/build-artifact scripts. Raw target output is held only in the runner, never echoed or archived; a bounded classification and script names are emitted.
+
+**A successful direct suite is NOT proof that all target GitHub Actions jobs passed.** Workflow-specific end-to-end, browser, cloud secrets/deploy, service integration or release authorization remain unverified unless exercised separately. Exact target SHA, check categories, FMRL run ID and independent FMRL deletion/404 must be recorded in ATAX before accepting anything. `--mode act` remains available only for deliberate legacy comparison; no success fallback may silently turn a failed `act` job into a full-workflow PASS.
+
 New application repositories are permanent and **must not** be confused with FMRL compute. Credentials must never be printed, committed, injected into untrusted target code, or included in artifacts.
 
 ## FMRL dispatch credential contract
