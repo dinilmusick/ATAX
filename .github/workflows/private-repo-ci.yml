@@ -90,11 +90,13 @@ jobs:
           set -euo pipefail
           python3 tools/github/disposable_workspace.py --source "$TARGET" \
             --target "FMRL-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --ref "$TARGET_REF" --event "$TARGET_EVENT" --workflow "$TARGET_WORKFLOW" > /tmp/fmrl.json
+            --ref "$TARGET_REF" --event "$TARGET_EVENT" --workflow "$TARGET_WORKFLOW" \
+            --mode direct > /tmp/fmrl.json
           bridge="$(python3 -c 'import json;print(json.load(open("/tmp/fmrl.json"))["disposable_repository"])')"
           [[ "$bridge" =~ ^[A-Za-z0-9_.-]+/FMRL-[A-Za-z0-9-]+$ ]]
           echo "repository=$bridge" >> "$GITHUB_OUTPUT"
           echo "Provisioned disposable bridge: $bridge" >> "$GITHUB_STEP_SUMMARY"
+          echo "FMRL mode: exact-head portable direct suite. This verifies only locked install, typed checks, tests and builds; NOT the complete source GitHub Actions workflow." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch FMRL runner and independently inspect result
         env:
