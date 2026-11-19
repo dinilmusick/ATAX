@@ -1,0 +1,72 @@
+name: Create permanent repository from template
+on:
+  workflow_dispatch:
+    inputs:
+      template:
+        description: Existing owner/repo template (for example dinilmusick/Skiplet)
+        required: true
+        type: string
+      owner:
+        description: Destination owner
+        required: true
+        type: string
+      name:
+        description: Destination repository name
+        required: true
+        type: string
+      visibility:
+        description: Destination visibility
+        required: true
+        default: public
+        type: choice
+        options: [public, private]
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  generate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.title == '[template-repo] create' &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create and verify destination
+        id: create
+        env:
+          CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_TEMPLATE: ${{ inputs.template }}
+          INPUT_OWNER: ${{ inputs.owner }}
+          INPUT_NAME: ${{ inputs.name }}
+          INPUT_VISIBILITY: ${{ inputs.visibility }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re,subprocess
+          if os.environ['EVENT_NAME']=='issues':
+              data=json.loads(os.environ.get('ISSUE_BODY') or '{}')
+          else:
+              data={key:os.environ['INPUT_'+key.upper()] for key in ('template','owner','name','visibility')}
+          args=['python3','tools/github/create_from_template.py']
+          for key in ('template','owner','name','visibility'):
+              args.extend(['--'+key,str(data.get(key) or ('public' if key=='visibility' else ''))])
+          result=subprocess.run(args,check=True,capture_output=True,text=True)
+          print(result.stdout)
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              output.write('Generated repository: '+result.stdout+'\n')
+          PY
+      - name: Report outcome
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RESULT: ${{ steps.create.outcome }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Template repository generation: **$RESULT**. Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
