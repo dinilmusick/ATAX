@@ -7,9 +7,8 @@ on:
         required: true
         type: string
       ref:
-        description: Target branch/tag
-        required: false
-        default: ""
+        description: Exact target commit SHA (40 lowercase hexadecimal characters)
+        required: true
         type: string
       event:
         description: Target event
@@ -21,20 +20,12 @@ on:
         required: false
         default: ""
         type: string
-  issues:
-    types: [opened]
-
 permissions:
   contents: read
-  issues: write
 
 jobs:
   fmrl:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issues' &&
-       startsWith(github.event.issue.title, '[fmrl-ci]') &&
-       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -46,8 +37,6 @@ jobs:
       - name: Resolve and validate request
         id: request
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
           INPUT_REPOSITORY: ${{ inputs.repository }}
           INPUT_REF: ${{ inputs.ref }}
           INPUT_EVENT: ${{ inputs.event }}
@@ -56,7 +45,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json,os,re
-          data = json.loads(os.environ.get('ISSUE_BODY') or '{}') if os.environ['EVENT_NAME']=='issues' else {
+          data = {
             'repository':os.environ.get('INPUT_REPOSITORY',''),
             'ref':os.environ.get('INPUT_REF',''),
             'event':os.environ.get('INPUT_EVENT','push'),
@@ -67,7 +56,7 @@ jobs:
           event=data.get('event') or 'push'
           workflow=data.get('workflow') or ''
           assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo)
-          assert re.fullmatch(r'[A-Za-z0-9_./-]*',ref)
+          assert re.fullmatch(r'[0-9a-f]{40}',ref)
           assert event in ('push','pull_request','workflow_dispatch')
           assert not workflow or re.fullmatch(r'[A-Za-z0-9_.-]+\.ya?ml',workflow)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
@@ -103,23 +92,13 @@ jobs:
           GH_TOKEN: ${{ secrets.FMRL_DISPATCH_TOKEN || secrets.FMRL_SECRETS_TOKEN }}
           FMRL_CONTENTS_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
           BRIDGE: ${{ steps.bridge.outputs.repository }}
-          SOURCE: ${{ steps.request.outputs.repository }}
-          REQUESTED_REF: ${{ steps.request.outputs.ref }}
-          EVENT: ${{ steps.request.outputs.event }}
-          WORKFLOW: ${{ steps.request.outputs.workflow }}
         shell: bash
         run: |
           set -euo pipefail
-          ref="$REQUESTED_REF"
-          if [[ -z "$ref" ]]; then
-            ref="$(python3 -c 'import json;print(json.load(open("/tmp/fmrl.json"))["default_ref"])')"
-          fi
           dispatched=0
           dispatch_error=""
           for i in $(seq 1 12); do
-            if dispatch_error="$(gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" \
-              -f ref=main -f "inputs[repository]=$SOURCE" -f "inputs[ref]=$ref" \
-              -f "inputs[event]=$EVENT" -f "inputs[workflow]=$WORKFLOW" 2>&1 >/dev/null)"; then
+            if dispatch_error="$(gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" -f ref=main 2>&1 >/dev/null)"; then
               dispatched=1
               break
             fi
@@ -127,8 +106,8 @@ jobs:
               # Workflow dispatch requires Actions: write, while bridge provisioning
               # already has Contents: write. A personal-token push on this exact
               # marker can trigger the FMRL workflow without expanding secret scope.
-              # The pinned private ref/event/workflow live in the temporary bridge
-              # workflow created above; the marker contains no source or credentials.
+              # Target identity/ref/event are encrypted as disposable Actions secrets.
+              # The static committed workflow and one-shot marker contain no private metadata.
               echo "FMRL workflow_dispatch denied (HTTP 403); using one-shot Contents:write push trigger." >> "$GITHUB_STEP_SUMMARY"
               registered=0
               for ready in $(seq 1 12); do
@@ -190,8 +169,8 @@ jobs:
                     for attempt in $(seq 1 4); do
                       if curl -fsSL --connect-timeout 10 --max-time 25 \
                         "https://api.github.com/repos/$BRIDGE/actions/jobs/$first_job/logs" -o "$safe_log" 2>/dev/null; then
-                        grep -E 'FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:' "$safe_log" \
-                          | sed -E 's/^.*(FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:)/\1/' \
+                        grep -E 'FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:|FMRL direct suite:|FMRL coverage:|FMRL verified script names:|FMRL failure categories:' "$safe_log" \
+                          | sed -E 's/^.*(FMRL nested execution diagnostic:|Nested failure categories:|Safe error identifiers:|FMRL direct suite:|FMRL coverage:|FMRL verified script names:|FMRL failure categories:)/\1/' \
                           | head -n 3 | tee -a "$GITHUB_STEP_SUMMARY" || true
                         break
                       fi
