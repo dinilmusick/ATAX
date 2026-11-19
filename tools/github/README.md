@@ -16,3 +16,13 @@ A new permanent repository (plain or Skipo) is a different lifecycle from dispos
 Repository creation: `create_repository.py` or `create-repository.sh`. Skipo scaffolding: `scaffold-skipo-app.sh`. Disposable private CI: `disposable_workspace.py` (FMRL only). ATAX Actions control-plane entry: `.github/workflows/private-repo-ci.yml`. Cleanup: `repository_lifecycle.py delete --repository <owner/FMRL-...>` followed by independent absence verification.
 
 New application repositories are permanent and **must not** be confused with FMRL compute. Credentials must never be printed, committed, injected into untrusted target code, or included in artifacts.
+
+## Public repository network-enabled CI (2026-11-19)
+
+For PUBLIC targets, when the agent's local runtime cannot resolve npm or other package registries, distinguish local DNS failures (for example EAI_AGAIN) from package compatibility errors. Do not claim that a dependency is broken without a network-enabled install result.
+
+Use the target repository's GitHub-hosted CI for public source; this is distinct from PRIVATE targets, which MUST use the disposable FMRL boundary above. The ATAX control plane may dispatch public target workflows but MUST NOT checkout/build the target itself.
+
+For Skiplet: ensure `dinilmusick/Skiplet/.github/workflows/ci.yml` supports `workflow_dispatch`. Create an owner-authorized issue titled exactly `[public-ci] Skiplet` in `dinilmusick/ATAX`; `.github/workflows/public-target-ci-dispatch.yml` uses `CODING_REPO_TOKEN` to dispatch Skiplet CI on main. The controller only dispatches; do not interpret a successful dispatch as a passing build. Inspect the target run jobs/logs and compare its head SHA with the expected commit, then persist the result and fix errors.
+
+For reproducible npm installs, generate and commit `package-lock.json` using a network-enabled runner and use `npm ci` once the lockfile is present. Never generate a fabricated lockfile or silently substitute `npm install` as final reproducibility evidence. Do not expose registry credentials.
