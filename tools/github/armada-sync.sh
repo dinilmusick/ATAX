@@ -71,18 +71,24 @@ verify_frozen_heads() {
 # we never accumulate duplicate snapshots or overwrite a moving branch.
 pending_sync_pr() {
   local repo="$1" name="$2" direction="$3" titles
-  titles="$(gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].title')" || return 2
+  titles="$(gh api --paginate "repos/$repo/pulls?state=open&per_page=100" --jq '.[].title')" || return 2
   if [[ "$direction" == inbound ]]; then
     grep -Eq "^sync(: import ${name} upstream |\\(${name}\\):)" <<< "$titles"
   else
     grep -Eq "^sync: export Armada ${name} " <<< "$titles"
   fi
 }
-branch_exists() { gh api "repos/$1/git/ref/heads/$2" >/dev/null 2>&1; }
+branch_exists() {
+  local response
+  response="$(gh api "repos/$1/git/ref/heads/$2" 2>&1)" && return 0
+  if [[ "$response" == *'HTTP 404'* || "$response" == *'Not Found'* ]]; then return 1; fi
+  echo "::warning::Unable to verify remote branch existence ($1:$2): $response" >&2
+  return 2
+}
 
 propose_inbound() {
   local name="$1" prefix="$2" remote="$3" url="$4" src_branch="$5" src_sha="$6" src_tree="$7" base="$8"
-  local work="$TMP/inbound-$name" candidate arm_tree changes removed out branch
+  local work="$TMP/inbound-$name" candidate arm_tree changes removed out branch status
   git worktree add -q --detach "$work" "$base"
   if ! (cd "$work" && git -c user.name='ATAX Sync Review' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
       subtree pull --prefix="$prefix" "$url" "$src_sha" --squash >"$TMP/$name.inbound.log" 2>&1); then
@@ -125,7 +131,7 @@ propose_inbound() {
 propose_outbound() {
   local name="$1" prefix="$2" remote="$3" url="$4" src_branch="$5" src_sha="$6" src_tree="$7" base="$8" split="$9"
   local branch="armada-out-${name,,}-${split:0:12}"
-  local split_tree
+  local split_tree status
   split_tree="$(git rev-parse "$split^{tree}")"
   [[ "$split_tree" == "$(git rev-parse "$base:$prefix")" ]] || { echo "::warning::BLOCKED split tree mismatch $name" >&2; return 1; }
   if [[ "$DRY_RUN" == 1 ]]; then
