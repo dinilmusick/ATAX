@@ -300,7 +300,9 @@ def verify_deleted_public_bridge(repository: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", required=True, help="Private source owner/name.")
+    parser.add_argument("--source", default="", help="Explicit private source owner/name for manual dispatch.")
+    parser.add_argument("--source-id", type=int, default=None, help="Opaque private GitHub repository ID for owner-only issue dispatch.")
+    parser.add_argument("--pr-number", type=int, default=None, help="Open pull-request number to resolve to an exact private SHA.")
     parser.add_argument("--target", default=None, help="FMRL-prefixed temporary public repo name.")
     parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
     parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
@@ -308,10 +310,12 @@ def main() -> int:
     parser.add_argument("--mode", choices=("direct", "act"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
     args = parser.parse_args()
 
-    if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
-        raise SystemExit("--source must be owner/name.")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.source):
-        raise SystemExit("--source must be a safe owner/name.")
+    if args.source_id is not None:
+        if args.source or args.ref or not args.pr_number or args.source_id <= 0 or args.pr_number <= 0:
+            raise SystemExit("Opaque issue dispatch must supply only positive --source-id and --pr-number.")
+    else:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.source):
+            raise SystemExit("--source must be owner/name.")
     target_name = args.target or ("FMRL-" + uuid.uuid4().hex[:12])
     if not re.fullmatch(r"FMRL-[A-Za-z0-9-]+", target_name):
         raise SystemExit("--target must be an FMRL-prefixed repository name.")
@@ -328,14 +332,48 @@ def main() -> int:
     if not clone_token:
         raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
     secret_writer = secrets_token()
-    source = api(f"/repos/{args.source}", clone_token)
-    if not re.fullmatch(r"[A-Za-z0-9_./-]+", source["default_branch"]):
-        raise SystemExit("Unsafe source default branch.")
-    target_ref = args.ref
-    if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
-        raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
+    if args.source_id is not None:
+        # Resolve private identity only in the authorized ATAX control-plane
+        # runtime with its read-only token. The public issue never contains
+        # a private repo name, branch or commit SHA.
+        try:
+            source = api(f"/repositories/{args.source_id}", clone_token)
+        except RuntimeError:
+            # Compatibility fallback for fine-grained tokens without the
+            # repository-ID redirect endpoint.
+            source = None
+            for page in range(1, 6):
+                options = api(f"/user/repos?per_page=100&visibility=private&page={page}", clone_token)
+                source = next((r for r in options if int(r.get("id", -1)) == args.source_id), None)
+                if source or len(options) < 100:
+                    break
+            if source is None:
+                raise SystemExit("Opaque repository ID is not accessible to the clone-only token.")
+        if int(source.get("id", -1)) != args.source_id:
+            raise SystemExit("Opaque repository ID did not match the authorized source.")
+        args.source = source.get("full_name", "")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.source):
+            raise SystemExit("Resolved repository identity failed validation.")
+        if source.get("owner", {}).get("login", "").lower() != "dinilmusick":
+            raise SystemExit("Opaque FMRL request is restricted to the owner's repositories.")
+        request_pr = api(f"/repos/{args.source}/pulls/{args.pr_number}", clone_token)
+        if request_pr.get("state") != "open":
+            raise SystemExit("Opaque FMRL request requires an open pull request.")
+        pr_head = request_pr.get("head") or {}
+        if not pr_head.get("repo") or int(pr_head["repo"].get("id", -1)) != args.source_id:
+            raise SystemExit("Cross-repository pull request heads are not supported by exact-SHA FMRL.")
+        target_ref = pr_head.get("sha", "")
+    else:
+        source = api(f"/repos/{args.source}", clone_token)
+        target_ref = args.ref
+    if args.source.lower() == "dinilmusick/atax":
+        raise SystemExit("ATAX is control plane, never target checkout or runner.")
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+", source.get("default_branch", "")):
+        raise SystemExit("Unsafe source default branch.")
+    if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
+        raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
 
     created = api("/user/repos", bearer, "POST", {
         "name": target_name,
