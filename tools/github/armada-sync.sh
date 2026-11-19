@@ -115,12 +115,21 @@ propose_inbound() {
   if ! verify_frozen_heads "$url" "$src_branch" "$src_sha" "$base"; then
     echo "::warning::BLOCKED moved source/Armada head during inbound $name" >&2; return 1
   fi
-  if pending_sync_pr "$ARMADA" "$name" inbound; then
-    echo "::notice::Existing inbound $name PR requires resolution; no duplicate"; return 0
-  fi
-  if branch_exists "$ARMADA" "$branch"; then
-    echo "::warning::BLOCKED existing inbound branch $branch; no replacement/duplicate" >&2; return 1
-  fi
+  status=0
+  pending_sync_pr "$ARMADA" "$name" inbound || status=$?
+  case "$status" in
+    0) echo "::notice::Existing inbound $name PR requires resolution; no duplicate"; return 0 ;;
+    1) ;;
+    *) echo "::warning::BLOCKED unable to enumerate open inbound PRs for $name" >&2; return 1 ;;
+  esac
+  status=0
+  branch_exists "$ARMADA" "$branch" || status=$?
+  case "$status" in
+    0) echo "::warning::BLOCKED existing inbound branch $branch; no replacement/duplicate" >&2; return 1 ;;
+    1) ;;
+    *) echo "::warning::BLOCKED unknown inbound branch status $branch" >&2; return 1 ;;
+  esac
+  verify_frozen_heads "$url" "$src_branch" "$src_sha" "$base" || { echo "::warning::BLOCKED moved heads before inbound push" >&2; return 1; }
   git push -q origin "$candidate:refs/heads/$branch"
   gh pr create -R "$ARMADA" --base main --head "$branch" \
      --title "sync: import $name upstream ${src_sha:0:12}" \
