@@ -4,6 +4,7 @@ on:
     types: [opened]
 permissions:
   contents: read
+  issues: write
 jobs:
   verify:
     if: >-
@@ -12,14 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Verify template and test generation
+      - name: Verify template generation and cleanup
+        id: verify
         env:
           CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
         run: |
           python3 - <<'PY'
-          import json,os,urllib.request,urllib.error
-          token=os.getenv('CODING_REPO_TOKEN')
-          if not token: raise SystemExit('CODING_REPO_TOKEN missing')
+          import json,os,urllib.request,urllib.error,uuid
+          token=os.environ.get('CODING_REPO_TOKEN')
+          if not token: raise SystemExit('BLOCKED: CODING_REPO_TOKEN missing')
           def api(path,method='GET',data=None):
               req=urllib.request.Request('https://api.github.com'+path,
                   data=None if data is None else json.dumps(data).encode(),method=method,
@@ -31,21 +33,30 @@ jobs:
               except urllib.error.HTTPError as exc:
                   raise RuntimeError(f'GitHub {method} {path}: HTTP {exc.code}') from None
           source=api('/repos/dinilmusick/Skiplet')
-          assert source.get('is_template') is True,'Skiplet is not a GitHub template'
-          name='MDT-Skiplet-Template-Verification'
+          assert source.get('is_template') is True,'FAIL: is_template is not true'
+          name='MDT-Skiplet-Verification-'+uuid.uuid4().hex[:10]
           path='/repos/dinilmusick/'+name
+          created=False
           try:
-              created=api('/repos/dinilmusick/Skiplet/generate','POST',
+              result=api('/repos/dinilmusick/Skiplet/generate','POST',
                   {'owner':'dinilmusick','name':name,'private':False,'include_all_branches':False})
-              assert created['name']==name
+              created=True
+              assert result['name']==name
               manifest=api(path+'/contents/meditations.config.json')
-              assert manifest.get('type')=='file','Generated template lacks art direction'
-              print('PASS: is_template=true; generated repository contains meditations.config.json')
+              assert manifest.get('type')=='file','FAIL: generated template missing config'
+              print('PASS: template flag and generated configuration')
           finally:
-              try:
+              if created:
                   api(path,'DELETE')
-                  print('Temporary verification repository deleted')
-              except Exception as exc:
-                  print('CLEANUP BLOCKER:',exc)
-                  raise
+                  print('PASS: disposable repository deleted')
           PY
+      - name: Report outcome to verification issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RESULT: ${{ steps.verify.outcome }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf 'Skiplet verification result: **%s**\n\nRun: %s\n\nInspect the run logs for template flag, generated config, and cleanup evidence.\n' "$RESULT" "$RUN_URL" > /tmp/skiplet-result.md
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/skiplet-result.md
