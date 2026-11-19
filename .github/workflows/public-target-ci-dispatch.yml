@@ -1,0 +1,29 @@
+name: Public target CI dispatch controller
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.title == '[public-ci] Skiplet' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch Skiplet CI in network-enabled target runner
+        env:
+          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPORT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "BLOCKED: CODING_REPO_TOKEN is not configured"
+            exit 1
+          fi
+          gh api -X POST repos/dinilmusick/Skiplet/actions/workflows/ci.yml/dispatches -f ref=main
+          echo "Dispatched Skiplet CI on main; inspect target Actions for exact-head results." > /tmp/report.md
+          GH_TOKEN="$REPORT_TOKEN" gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/report.md
