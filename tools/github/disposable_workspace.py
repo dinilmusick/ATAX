@@ -52,6 +52,8 @@ jobs:
   private-ci:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      FMRL_EXECUTION_MODE: %%EXECUTION_MODE%%
     steps:
       - name: Refuse any target other than the provisioned private repository
         env:
@@ -94,6 +96,7 @@ jobs:
           echo "FMRL checked out exact target commit: $(git -C target rev-parse HEAD)"
 
       - name: Install pinned act
+        if: env.FMRL_EXECUTION_MODE == 'act'
         shell: bash
         run: |
           set -euo pipefail
@@ -104,6 +107,7 @@ jobs:
           sudo install -m 0755 /tmp/act /usr/local/bin/act
 
       - name: Execute target workflow
+        if: env.FMRL_EXECUTION_MODE == 'act'
         env:
           TARGET_EVENT: ${{ inputs.event || '%%TARGET_EVENT%%' }}
           TARGET_WORKFLOW: ${{ inputs.workflow || '%%TARGET_WORKFLOW%%' }}
@@ -158,6 +162,85 @@ jobs:
           DIAGNOSTICS
           rm -f /tmp/fmrl-nested-raw.log
           exit "$nested_status"
+
+      - name: Set up direct-suite Node host
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up frozen pnpm host
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Run portable private-suite checks (not full workflow parity)
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (
+            set -euo pipefail
+            cd target
+            test -f package.json
+            if [[ -f pnpm-lock.yaml ]]; then
+              pnpm install --frozen-lockfile
+              export FMRL_PACKAGE_MANAGER=pnpm
+            elif [[ -f package-lock.json ]]; then
+              npm ci --include=optional --no-audit --no-fund
+              export FMRL_PACKAGE_MANAGER=npm
+            else
+              exit 42
+            fi
+            node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            import {spawnSync} from 'node:child_process';
+            const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+            const scripts=p.scripts || {};
+            const manager=process.env.FMRL_PACKAGE_MANAGER;
+            if (!scripts.test || !scripts.build || !(scripts.typecheck || scripts.lint))
+              throw new Error('Direct CI requires test, build and lint/typecheck');
+            const ordered=['check:canonical-ui','lint','typecheck','validate:api',
+              'verify:ecosystem-package-chain','verify:architecture','verify:bundle',
+              'test','build','verify:build-artifacts'];
+            const executed=[];
+            for (const name of ordered) {
+              if (!scripts[name]) continue;
+              const r=spawnSync(manager,['run',name],{cwd:process.cwd(),
+                stdio:'inherit',env:process.env});
+              if (r.error) throw r.error;
+              if (r.status !== 0) throw new Error('Direct CI failed: '+name+' exit='+r.status);
+              executed.push(name);
+            }
+            if (!executed.includes('test') || !executed.includes('build'))
+              throw new Error('Missing mandatory direct CI gates');
+            console.log('FMRL portable checks passed: '+executed.join(','));
+            NODE
+          ) >/tmp/fmrl-direct-raw.log 2>&1
+          result=$?
+          set -e
+          python3 - "$result" <<'SAFE'
+          from pathlib import Path
+          import re,sys
+          output=Path('/tmp/fmrl-direct-raw.log').read_text(errors='replace')
+          code=int(sys.argv[1])
+          print('FMRL direct suite: '+('PASS' if code==0 else 'FAIL')+'; exit='+str(code))
+          print('FMRL coverage: frozen install plus portable package scripts; NOT full workflow parity')
+          receipt=re.findall(r'FMRL portable checks passed: ([A-Za-z0-9:_, -]+)',output)
+          if receipt: print('FMRL verified script names: '+receipt[-1][:250])
+          if code:
+              categories={'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+',
+                'typescript':r'TS[0-9]{4}', 'network':r'getaddrinfo|econnreset|etimedout',
+                'module':r'cannot find module|module not found',
+                'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror'}
+              print('FMRL failure categories: '+', '.join(
+                key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
+                if re.search(pat,output,re.I))[:250])
+          SAFE
+          rm -f /tmp/fmrl-direct-raw.log
+          exit "$result"
 
       - name: Remove private checkout
         if: always()
@@ -222,6 +305,7 @@ def main() -> int:
     parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
     parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
     parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
+    parser.add_argument("--mode", choices=("direct", "act"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -266,7 +350,8 @@ def main() -> int:
                 .replace("%%DEFAULT_REF%%", source["default_branch"])
                 .replace("%%TARGET_REF%%", target_ref)
                 .replace("%%TARGET_EVENT%%", args.event)
-                .replace("%%TARGET_WORKFLOW%%", args.workflow).encode()).decode(),
+                .replace("%%TARGET_WORKFLOW%%", args.workflow)
+                .replace("%%EXECUTION_MODE%%", args.mode).encode()).decode(),
             "branch": "main",
         })
 
@@ -320,6 +405,8 @@ def main() -> int:
             "verified_target_ref": target_ref,
             "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
+            "execution_mode": args.mode,
+            "coverage": "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act",
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
         }, indent=2))
