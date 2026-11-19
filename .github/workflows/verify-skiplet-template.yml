@@ -1,0 +1,51 @@
+name: Verify Skiplet template creation
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.event.issue.title == '[skiplet-template] verify' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify template and test generation
+        env:
+          CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request,urllib.error
+          token=os.getenv('CODING_REPO_TOKEN')
+          if not token: raise SystemExit('CODING_REPO_TOKEN missing')
+          def api(path,method='GET',data=None):
+              req=urllib.request.Request('https://api.github.com'+path,
+                  data=None if data is None else json.dumps(data).encode(),method=method,
+                  headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
+                           'X-GitHub-Api-Version':'2022-11-28','User-Agent':'atax-skiplet-verify'})
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as response:
+                      return json.load(response) if response.status!=204 else {}
+              except urllib.error.HTTPError as exc:
+                  raise RuntimeError(f'GitHub {method} {path}: HTTP {exc.code}') from None
+          source=api('/repos/dinilmusick/Skiplet')
+          assert source.get('is_template') is True,'Skiplet is not a GitHub template'
+          name='MDT-Skiplet-Template-Verification'
+          path='/repos/dinilmusick/'+name
+          try:
+              created=api('/repos/dinilmusick/Skiplet/generate','POST',
+                  {'owner':'dinilmusick','name':name,'private':False,'include_all_branches':False})
+              assert created['name']==name
+              manifest=api(path+'/contents/meditations.config.json')
+              assert manifest.get('type')=='file','Generated template lacks art direction'
+              print('PASS: is_template=true; generated repository contains meditations.config.json')
+          finally:
+              try:
+                  api(path,'DELETE')
+                  print('Temporary verification repository deleted')
+              except Exception as exc:
+                  print('CLEANUP BLOCKER:',exc)
+                  raise
+          PY
