@@ -59,7 +59,7 @@ jobs:
           # GitHub Git-over-HTTPS uses username/token credentials, not a REST API Bearer header.
           # Credentials are supplied only to this checkout step, never stored in a remote URL.
           askpass="$(mktemp)"
-          trap 'rm -f "$askpass"' EXIT
+          trap 'rm -f "$askpass" /tmp/fmrl-clone-private.log' EXIT
           cat > "$askpass" <<'ASKPASS'
           #!/usr/bin/env bash
           case "$1" in
