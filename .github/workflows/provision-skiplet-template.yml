@@ -1,0 +1,46 @@
+name: Provision permanent Skiplet template
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  provision:
+    if: >-
+      github.event.issue.title == '[skiplet-template] provision' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Provision repository using ATAX coding token
+        env:
+          CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          token=os.environ.get('CODING_REPO_TOKEN')
+          if not token:
+              raise SystemExit('CODING_REPO_TOKEN unavailable to workflow')
+          def api(path, method='GET', data=None):
+              body=None if data is None else json.dumps(data).encode()
+              req=urllib.request.Request('https://api.github.com'+path, data=body, method=method,
+                  headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
+                           'X-GitHub-Api-Version':'2022-11-28','User-Agent':'atax-skiplet-provision'})
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as response:
+                      return json.load(response) if response.status!=204 else {}
+              except urllib.error.HTTPError as exc:
+                  if exc.code==404: return None
+                  raise RuntimeError(f'GitHub API {method} {path} HTTP {exc.code}') from None
+          repo=api('/repos/dinilmusick/Skiplet')
+          if repo is None:
+              repo=api('/user/repos','POST',{'name':'Skiplet','private':False,'auto_init':True,
+                  'description':'Artistic, static Meditations template with Skipo portability'})
+          if repo.get('full_name','').lower()!='dinilmusick/skiplet':
+              raise SystemExit('Unexpected repository owner')
+          repo=api('/repos/dinilmusick/Skiplet','PATCH',{'is_template':True})
+          if not repo or not repo.get('is_template'):
+              raise SystemExit('Template flag verification failed')
+          print('Verified template repository:',repo['html_url'])
+          PY
