@@ -14,12 +14,6 @@ on:
         description: Destination repository name
         required: true
         type: string
-      visibility:
-        description: Destination visibility
-        required: true
-        default: public
-        type: choice
-        options: [public, private]
   issues:
     types: [opened]
 permissions:
@@ -55,8 +49,9 @@ jobs:
           else:
               data={key:os.environ['INPUT_'+key.upper()] for key in ('template','owner','name','visibility')}
           args=['python3','tools/github/create_from_template.py']
-          for key in ('template','owner','name','visibility'):
-              args.extend(['--'+key,str(data.get(key) or ('public' if key=='visibility' else ''))])
+          for key in ('template','owner','name'):
+              args.extend(['--'+key,str(data.get(key) or '')])
+          args.extend(['--visibility','private'])
           result=subprocess.run(args,check=True,capture_output=True,text=True)
           print(result.stdout)
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
