@@ -26,3 +26,11 @@ Use the target repository's GitHub-hosted CI for public source; this is distinct
 For Skiplet: ensure `dinilmusick/Skiplet/.github/workflows/ci.yml` supports `workflow_dispatch`. Create an owner-authorized issue titled exactly `[public-ci] Skiplet` in `dinilmusick/ATAX`; `.github/workflows/public-target-ci-dispatch.yml` uses `CODING_REPO_TOKEN` to dispatch Skiplet CI on main. The controller only dispatches; do not interpret a successful dispatch as a passing build. Inspect the target run jobs/logs and compare its head SHA with the expected commit, then persist the result and fix errors.
 
 For reproducible npm installs, generate and commit `package-lock.json` using a network-enabled runner and use `npm ci` once the lockfile is present. Never generate a fabricated lockfile or silently substitute `npm install` as final reproducibility evidence. Do not expose registry credentials.
+
+## Permanent repository creation from an existing GitHub template
+
+Use `tools/github/create_from_template.py` (or `.github/workflows/create-from-template.yml`) when a new permanent project must inherit a template. This is different from `create_repository.py`, which creates a normal empty/initialized repository, and different from disposable FMRL compute.
+
+CLI: `CODING_REPO_TOKEN=... python3 tools/github/create_from_template.py --template dinilmusick/Skiplet --owner dinilmusick --name MDT-Example --visibility public`. For a safe preview omit the token and add `--dry-run`. The source must have `is_template=true`; the destination must not exist. The tool invokes GitHub's template generation API, waits for the generated default branch and prints its exact commit SHA. A generated permanent repository is never automatically deleted.
+
+From GitHub Actions, dispatch `create-from-template.yml` with template, owner, name and visibility, or create an owner-authorized ATAX issue titled `[template-repo] create` whose body is JSON, e.g. `{"template":"dinilmusick/Skiplet","owner":"dinilmusick","name":"MDT-MyProject","visibility":"public"}`. The workflow uses `CODING_REPO_TOKEN` and reports outcome to the issue. Check the resulting repository and generated files independently before marking completion. Do not confuse creating a project FROM Skiplet with provisioning Skiplet itself.
