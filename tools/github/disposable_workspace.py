@@ -70,13 +70,29 @@ jobs:
           ASKPASS
           chmod 700 "$askpass"
           export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
-          git -c credential.helper= \
-            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target
-          git -C target -c credential.helper= \
-            fetch --no-tags origin "$TARGET_REF"
-          git -C target checkout --detach FETCH_HEAD
+          # Even Git stderr can contain the private repository URL and SHA.
+          # Suppress all raw clone/checkout output to a transient runner-only
+          # file; only sanitized step status is allowed in public job logs.
+          if ! git -c credential.helper= \
+            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target \
+            >/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL private clone failed (details suppressed)" >&2
+            exit 1
+          fi
+          if ! git -C target -c credential.helper= \
+            fetch --no-tags origin "$TARGET_REF" \
+            >>/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL exact private SHA fetch failed (details suppressed)" >&2
+            exit 1
+          fi
+          if ! git -C target checkout --detach FETCH_HEAD \
+            >>/tmp/fmrl-clone-private.log 2>&1; then
+            echo "FMRL exact private SHA checkout failed (details suppressed)" >&2
+            exit 1
+          fi
           test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"
-          echo "FMRL checked out exact target commit: $(git -C target rev-parse HEAD)"
+          rm -f /tmp/fmrl-clone-private.log
+          echo "FMRL exact private SHA verified without exposing its value"
 
       - name: Install pinned act
         if: env.FMRL_EXECUTION_MODE == 'act'
