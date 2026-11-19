@@ -27,6 +27,10 @@ For Skiplet: ensure `dinilmusick/Skiplet/.github/workflows/ci.yml` supports `wor
 
 For reproducible npm installs, generate and commit `package-lock.json` using a network-enabled runner and use `npm ci` once the lockfile is present. Never generate a fabricated lockfile or silently substitute `npm install` as final reproducibility evidence. Do not expose registry credentials.
 
+## Create a Meditation — uses the Skiplet scaffold to create a Meditation repository
+
+**Description:** Uses the Skiplet scaffold to create a new Meditation (`MDT-*`) GitHub repository, including the React/TypeScript starter, artistic configuration, and project instructions. Select a repository name and visibility; ATAX generates the repository from `dinilmusick/Skiplet` and verifies its default branch.
+
 ## Permanent repository creation from an existing GitHub template
 
 Use `tools/github/create_from_template.py` (or `.github/workflows/create-from-template.yml`) when a new permanent project must inherit a template. This is different from `create_repository.py`, which creates a normal empty/initialized repository, and different from disposable FMRL compute.
