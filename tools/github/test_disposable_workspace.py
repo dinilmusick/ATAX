@@ -329,6 +329,9 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('choices=("direct", "act"), default="direct"', source)
         self.assertIn('.replace("%%EXECUTION_MODE%%", args.mode)', source)
         self.assertIn('not full workflow parity', source)
+        controller = (ROOT / '..' / '..' / '.github' / 'workflows' / 'private-repo-ci.yml').read_text()
+        self.assertIn('--mode direct > /tmp/fmrl.json', controller)
+        self.assertIn('NOT the complete source GitHub Actions workflow', controller)
 
 
 if __name__ == "__main__":
