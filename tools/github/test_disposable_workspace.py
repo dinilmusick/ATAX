@@ -63,7 +63,9 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('rm -f /tmp/fmrl-nested-raw.log', execute)
         self.assertNotIn('cat /tmp/fmrl-nested-raw.log', execute)
         self.assertNotIn("upload-artifact", workflow)
-        self.assertIn("%%TARGET_SOURCE%%", workflow)
+        self.assertNotIn("%%TARGET_SOURCE%%", workflow)
+        self.assertIn("secrets.FMRL_TARGET_REPOSITORY", workflow)
+        self.assertIn("secrets.FMRL_TARGET_REF", workflow)
         self.assertIn("test ! -e target", workflow)
         cleanup = workflow.split("      - name: Remove private checkout")[1]
         self.assertIn("sudo rm -rf -- target", cleanup)
@@ -91,7 +93,7 @@ class FmrlTests(unittest.TestCase):
              }), \
              mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                                "--source", "dinilmusick/KONE",
-                                               "--target", "FMRL-unit-test"]), \
+                                               "--target", "FMRL-unit-test", "--ref", "a"*40]), \
              contextlib.redirect_stdout(io.StringIO()) as stream:
             self.assertEqual(MODULE.main(), 0)
             payload = json.loads(stream.getvalue())
@@ -105,10 +107,17 @@ class FmrlTests(unittest.TestCase):
         workflow_payload = calls[2][3]
         import base64
         workflow = base64.b64decode(workflow_payload["content"]).decode()
-        self.assertIn('test "$REQUESTED_REPOSITORY" = "dinilmusick/KONE"', workflow)
-        self.assertIn('default: "develop"', workflow)
+        self.assertNotIn("dinilmusick/KONE", workflow)
+        self.assertNotIn("develop", workflow)
+        self.assertNotIn("a"*40, workflow)
         self.assertNotIn("%%TARGET_SOURCE%%", workflow)
-        self.assertEqual(run.call_args.kwargs["input"], "source-read")
+        self.assertEqual(run.call_args_list[0].kwargs["input"], "source-read")
+        self.assertEqual(run.call_count, 6)
+        self.assertEqual([item.args[0][3] for item in run.call_args_list],
+                         ["PRIVATE_REPO_TOKEN","FMRL_TARGET_REPOSITORY","FMRL_TARGET_REF",
+                          "FMRL_TARGET_EVENT","FMRL_TARGET_WORKFLOW","FMRL_EXECUTION_MODE"])
+        self.assertEqual([item.kwargs["input"] for item in run.call_args_list],
+                         ["source-read","dinilmusick/KONE","a"*40,"push","-","direct"])
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "secret-writer")
         self.assertNotEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "management")
         self.assertNotIn("CODING_REPO_TOKEN", run.call_args.kwargs["env"])
@@ -176,7 +185,7 @@ class FmrlTests(unittest.TestCase):
         )
         with mock.patch.object(MODULE, "api", side_effect=fake_api), \
              mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \
-             mock.patch.object(MODULE.subprocess, "run", side_effect=[transient, mock.Mock(returncode=0)]) as run, \
+             mock.patch.object(MODULE.subprocess, "run", side_effect=lambda *a, **k: (_ for _ in ()).throw(transient) if len(run.call_args_list) == 1 else mock.Mock(returncode=0)) as run, \
              mock.patch.object(MODULE.time, "sleep") as sleep, \
              mock.patch.dict(MODULE.os.environ, {
                  "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
@@ -184,10 +193,10 @@ class FmrlTests(unittest.TestCase):
              }), \
              mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                             "--source", "dinilmusick/KONE",
-                                            "--target", "FMRL-unit-test"]), \
+                                            "--target", "FMRL-unit-test", "--ref", "a"*40]), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(MODULE.main(), 0)
-        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_count, 7)
         sleep.assert_called_once_with(3)
 
 
@@ -217,7 +226,7 @@ class FmrlTests(unittest.TestCase):
             }),
             mock.patch.object(sys, "argv", ["disposable_workspace.py",
                                            "--source", "dinilmusick/KONE",
-                                           "--target", "FMRL-unit-test"]),
+                                           "--target", "FMRL-unit-test", "--ref", "a"*40]),
         ):
             with self.assertRaisesRegex(RuntimeError, "Secrets: write"):
                 MODULE.main()
@@ -243,10 +252,10 @@ class FmrlTests(unittest.TestCase):
     def test_fmrl_push_fallback_is_one_shot_and_never_contains_private_source(self):
         workflow = MODULE.WORKFLOW
         self.assertIn("  push:\n    branches: [main]\n    paths: [.fmrl/execute]", workflow)
-        self.assertIn("TARGET_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}", workflow)
-        self.assertIn("TARGET_REF: ${{ inputs.ref || '%%TARGET_REF%%' }}", workflow)
-        self.assertIn("TARGET_EVENT: ${{ inputs.event || '%%TARGET_EVENT%%' }}", workflow)
-        self.assertIn("TARGET_WORKFLOW: ${{ inputs.workflow || '%%TARGET_WORKFLOW%%' }}", workflow)
+        self.assertIn("TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}", workflow)
+        self.assertIn("TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}", workflow)
+        self.assertIn("TARGET_EVENT: ${{ secrets.FMRL_TARGET_EVENT }}", workflow)
+        self.assertIn("TARGET_WORKFLOW: ${{ secrets.FMRL_TARGET_WORKFLOW }}", workflow)
         self.assertNotIn("CODING_REPO_TOKEN", workflow)
         self.assertNotIn("FMRL_SECRETS_TOKEN", workflow)
         controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
@@ -301,14 +310,17 @@ class FmrlTests(unittest.TestCase):
         import base64
         generated = base64.b64decode(next(call[2]["content"] for call in calls
             if call[0].endswith("atax-private-ci.yml"))).decode()
-        self.assertIn("TARGET_REF: ${{ inputs.ref || '" + sha + "' }}", generated)
-        self.assertIn("TARGET_WORKFLOW: ${{ inputs.workflow || 'ci.yml' }}", generated)
+        self.assertNotIn("dinilmusick/KONE", generated)
+        self.assertNotIn(sha, generated)
+        self.assertNotIn("ci.yml", generated)
         self.assertNotIn("clone-only", generated)
+        self.assertIn("secrets.FMRL_TARGET_REPOSITORY", generated)
+        self.assertIn("secrets.FMRL_TARGET_REF", generated)
 
 
     def test_direct_suite_is_frozen_fail_closed_and_explicitly_not_full_workflow_parity(self):
         workflow = MODULE.WORKFLOW
-        self.assertIn("FMRL_EXECUTION_MODE: %%EXECUTION_MODE%%", workflow)
+        self.assertIn("FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}", workflow)
         direct = workflow.split("      - name: Run portable private-suite checks")[1].split(
             "      - name: Remove private checkout")[0]
         self.assertIn("pnpm install --frozen-lockfile", direct)
@@ -327,12 +339,25 @@ class FmrlTests(unittest.TestCase):
         import inspect
         source = inspect.getsource(MODULE.main)
         self.assertIn('choices=("direct", "act"), default="direct"', source)
-        self.assertIn('.replace("%%EXECUTION_MODE%%", args.mode)', source)
+        self.assertIn('("FMRL_EXECUTION_MODE", args.mode)', source)
         self.assertIn('not full workflow parity', source)
         controller = (ROOT / '..' / '..' / '.github' / 'workflows' / 'private-repo-ci.yml').read_text()
         self.assertIn('--mode direct > /tmp/fmrl.json', controller)
         self.assertIn('NOT the complete source GitHub Actions workflow', controller)
 
+
+    def test_public_bridge_workflow_static_and_no_private_target_in_git(self):
+        workflow = MODULE.WORKFLOW
+        self.assertNotIn("%%TARGET_", workflow)
+        self.assertNotIn("%%DEFAULT_REF", workflow)
+        self.assertNotIn("dinilmusick/KONE", workflow)
+        self.assertNotIn("inputs:", workflow.split("workflow_dispatch:")[1].split("permissions:")[0])
+        self.assertIn('test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"', workflow)
+        controller = (ROOT / ".." / ".." / ".github" / "workflows" / "private-repo-ci.yml").read_text()
+        self.assertNotIn("  issues:", controller)
+        self.assertIn("assert re.fullmatch(r'[0-9a-f]{40}',ref)", controller)
+        self.assertNotIn('inputs[repository]', controller)
+        self.assertIn('gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" -f ref=main',controller)
 
 if __name__ == "__main__":
     unittest.main()
