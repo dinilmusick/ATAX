@@ -150,12 +150,21 @@ propose_outbound() {
   if ! verify_frozen_heads "$url" "$src_branch" "$src_sha" "$base"; then
     echo "::warning::BLOCKED moved source/Armada head during outbound $name" >&2; return 1
   fi
-  if pending_sync_pr "$remote" "$name" outbound; then
-    echo "::notice::Existing outbound $name PR requires resolution; no duplicate"; return 0
-  fi
-  if branch_exists "$remote" "$branch"; then
-    echo "::warning::BLOCKED existing outbound branch $branch; no replacement/duplicate" >&2; return 1
-  fi
+  status=0
+  pending_sync_pr "$remote" "$name" outbound || status=$?
+  case "$status" in
+    0) echo "::notice::Existing outbound $name PR requires resolution; no duplicate"; return 0 ;;
+    1) ;;
+    *) echo "::warning::BLOCKED unable to enumerate open outbound PRs for $name" >&2; return 1 ;;
+  esac
+  status=0
+  branch_exists "$remote" "$branch" || status=$?
+  case "$status" in
+    0) echo "::warning::BLOCKED existing outbound branch $branch; no replacement/duplicate" >&2; return 1 ;;
+    1) ;;
+    *) echo "::warning::BLOCKED unknown outbound branch status $branch" >&2; return 1 ;;
+  esac
+  verify_frozen_heads "$url" "$src_branch" "$src_sha" "$base" || { echo "::warning::BLOCKED moved heads before outbound push" >&2; return 1; }
   git push -q "$url" "$split:refs/heads/$branch"
   # The PR remains reviewed in the canonical source repository; default branch untouched.
   gh pr create -R "$remote" --base "$src_branch" --head "$branch" \
