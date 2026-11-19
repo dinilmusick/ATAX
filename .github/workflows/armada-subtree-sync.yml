@@ -24,6 +24,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Validate Git subtree reconciliation guards on isolated fixtures
+        run: bash tools/github/test-armada-sync.sh
       - name: Reconcile components without publishing source artifacts
         env:
           CODING_REPO_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
