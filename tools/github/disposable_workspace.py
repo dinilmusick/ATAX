@@ -24,26 +24,6 @@ on:
     branches: [main]
     paths: [.fmrl/execute]
   workflow_dispatch:
-    inputs:
-      repository:
-        description: Private repository owner/name
-        required: true
-        type: string
-      ref:
-        description: Branch, tag, or SHA
-        required: false
-        default: "%%DEFAULT_REF%%"
-        type: string
-      event:
-        description: act event
-        required: false
-        default: push
-        type: string
-      workflow:
-        description: Optional workflow filename
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
@@ -53,19 +33,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      FMRL_EXECUTION_MODE: %%EXECUTION_MODE%%
+      FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}
     steps:
-      - name: Refuse any target other than the provisioned private repository
+      - name: Verify secret-bound private identity and exact commit
         env:
-          REQUESTED_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}
+          TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
         shell: bash
-        run: test "$REQUESTED_REPOSITORY" = "%%TARGET_SOURCE%%"
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$FMRL_EXECUTION_MODE" =~ ^(direct|act)$ ]]
 
       - name: Clone private target at runtime
         env:
           PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          TARGET_REPOSITORY: ${{ inputs.repository || '%%TARGET_SOURCE%%' }}
-          TARGET_REF: ${{ inputs.ref || '%%TARGET_REF%%' }}
+          TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,9 +75,7 @@ jobs:
           git -C target -c credential.helper= \
             fetch --no-tags origin "$TARGET_REF"
           git -C target checkout --detach FETCH_HEAD
-          if [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]; then
-            test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"
-          fi
+          test "$(git -C target rev-parse HEAD)" = "$TARGET_REF"
           echo "FMRL checked out exact target commit: $(git -C target rev-parse HEAD)"
 
       - name: Install pinned act
@@ -109,8 +92,8 @@ jobs:
       - name: Execute target workflow
         if: env.FMRL_EXECUTION_MODE == 'act'
         env:
-          TARGET_EVENT: ${{ inputs.event || '%%TARGET_EVENT%%' }}
-          TARGET_WORKFLOW: ${{ inputs.workflow || '%%TARGET_WORKFLOW%%' }}
+          TARGET_EVENT: ${{ secrets.FMRL_TARGET_EVENT }}
+          TARGET_WORKFLOW: ${{ secrets.FMRL_TARGET_WORKFLOW }}
         shell: bash
         run: |
           set -euo pipefail
@@ -119,7 +102,7 @@ jobs:
           # Nested act on GitHub-hosted runners must mount the checked-out private worktree.
           # This mount exists only inside the ephemeral runner; no source is committed to FMRL.
           args=("$TARGET_EVENT" "--bind" "--directory" "$PWD" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
-          if [[ -n "$TARGET_WORKFLOW" ]]; then
+          if [[ -n "$TARGET_WORKFLOW" && "$TARGET_WORKFLOW" != "-" ]]; then
             [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
             test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
@@ -331,7 +314,9 @@ def main() -> int:
     source = api(f"/repos/{args.source}", clone_token)
     if not re.fullmatch(r"[A-Za-z0-9_./-]+", source["default_branch"]):
         raise SystemExit("Unsafe source default branch.")
-    target_ref = args.ref or source["default_branch"]
+    target_ref = args.ref
+    if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
+        raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
     if not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
@@ -346,12 +331,7 @@ def main() -> int:
     try:
         api(f"/repos/{target}/contents/.github/workflows/atax-private-ci.yml", bearer, "PUT", {
             "message": "chore: add ATAX private CI bridge",
-            "content": base64.b64encode(WORKFLOW.replace("%%TARGET_SOURCE%%", args.source)
-                .replace("%%DEFAULT_REF%%", source["default_branch"])
-                .replace("%%TARGET_REF%%", target_ref)
-                .replace("%%TARGET_EVENT%%", args.event)
-                .replace("%%TARGET_WORKFLOW%%", args.workflow)
-                .replace("%%EXECUTION_MODE%%", args.mode).encode()).decode(),
+            "content": base64.b64encode(WORKFLOW.encode()).decode(),
             "branch": "main",
         })
 
@@ -363,11 +343,21 @@ def main() -> int:
         for credential in ("CODING_REPO_TOKEN", "PRIVATE_REPO_TOKEN", "FMRL_SECRETS_TOKEN", "GITHUB_TOKEN"):
             env.pop(credential, None)
         env["GH_TOKEN"] = secret_writer
-        for attempt in range(4):
+        # Private repository name, exact SHA, and clone credential remain
+        # encrypted runtime secrets, never public Git commit content.
+        for secret_name, secret_value in (
+            ("PRIVATE_REPO_TOKEN", clone_token),
+            ("FMRL_TARGET_REPOSITORY", args.source),
+            ("FMRL_TARGET_REF", target_ref),
+            ("FMRL_TARGET_EVENT", args.event),
+            ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
+            ("FMRL_EXECUTION_MODE", args.mode),
+        ):
+          for attempt in range(4):
             try:
                 subprocess.run(
-                    ["gh", "secret", "set", "PRIVATE_REPO_TOKEN", "--repo", target],
-                    input=clone_token,
+                    ["gh", "secret", "set", secret_name, "--repo", target],
+                    input=secret_value,
                     text=True,
                     env=env,
                     capture_output=True,
@@ -387,7 +377,7 @@ def main() -> int:
                     ) from None
                 if attempt == 3:
                     raise RuntimeError(
-                        "Cannot install clone-only secret on FMRL after 4 attempts: " + diagnostic[:500]
+                        "Cannot install required encrypted FMRL binding after 4 attempts: " + diagnostic[:500]
                     ) from None
                 time.sleep(3 * (attempt + 1))
 
@@ -401,6 +391,7 @@ def main() -> int:
             "url": verified["html_url"],
             "public": True,
             "private_source_published": False,
+            "private_target_metadata_published": False,
             "default_ref": source["default_branch"],
             "verified_target_ref": target_ref,
             "push_fallback_path": ".fmrl/execute",
