@@ -62,7 +62,7 @@ begin
     ids:=ids||to_jsonb(tid);
   end loop;
   update public.goals g set
-    completion_parameters=coalesce((select jsonb_agg(jsonb_build_object('id',t.task_key,'task_id',t.id,'description',coalesce(t.description,t.task_name),'required',true) order by t.created_at,t.id) from public.tasks t where t.goal_id=g.id and t.parent_task_id is null),'[]'::jsonb),
+    completion_parameters=coalesce((select jsonb_agg(jsonb_build_object('id',t.task_key,'task_id',t.id,'description',coalesce(t.description,t.task_name),'required',true) order by t.id) from public.tasks t where t.goal_id=g.id and t.parent_task_id is null),'[]'::jsonb),
     updated_at=now()
   where g.id=goal_out.id returning * into goal_out;
   insert into public.goal_events(goal_id,event_type,agent_id,message,payload)
