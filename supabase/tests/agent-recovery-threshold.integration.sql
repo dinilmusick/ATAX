@@ -3,16 +3,20 @@ begin;
 do $test$
 declare
   registered public.tasks;
+  fixture_goal_id uuid;
   first_claim public.tasks;
   early_claim public.tasks;
   recovered public.tasks;
 begin
+  insert into public.goals(name,created_by_agent_id,status)
+  values ('Fixture recovery-threshold ' || replace(gen_random_uuid()::text,'-',''),'recovery-threshold-orchestrator','ready')
+  returning id into fixture_goal_id;
   select * into registered from public.task_ledger_register(
     'recovery-threshold-test','Recovery Threshold Test','5-minute threshold leaf',
     'Disposable integration-test task',array['recovery-threshold']::text[],
     'recovery-threshold-session','worker',3::smallint,'Testing heartbeat-based recovery','{}'::jsonb,null
   );
-  update public.tasks set required_capabilities=array['recovery-threshold']::text[], task_role='loop_authoring' where id=registered.id;
+  update public.tasks set goal_id=fixture_goal_id, required_capabilities=array['recovery-threshold']::text[], task_role='loop_authoring' where id=registered.id;
   select * into first_claim from public.task_ledger_claim_next(
     'recovery-threshold-old','Old Worker','worker',array['recovery-threshold']::text[],900
   );
