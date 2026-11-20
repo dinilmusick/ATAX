@@ -19,7 +19,7 @@ jobs:
       - name: Validate substrate plan
         run: python3 tools/supabase/substrate/bootstrap.py plan
       - name: Run substrate unit tests
-        run: python3 -m unittest tools/supabase/substrate/test_bootstrap.py
+        run: PYTHONPATH=tools/supabase/substrate python3 -m unittest tools/supabase/substrate/test_bootstrap.py
 
   deploy:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
