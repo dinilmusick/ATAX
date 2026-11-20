@@ -321,7 +321,19 @@ jobs:
                   'required-dependency','conflicting-constraints',
                   'incompatible-range','skipo-version-requirement',
                   'invalid-contract','missing-provider-declaration',
-                  'invalid-baseline','version-other'}
+                  'invalid-baseline','version-other',
+                  # Frnes read-only Skipo verification status classifier emits
+                  # only these fixed enums (never raw input or rule text).
+                  'cli-exit-nonzero','root-not-ok','operation-unexpected',
+                  'root-status-unexpected','diagnostics-not-array',
+                  'diagnostics-present','independent-absent',
+                  'architecture-failed','maintenance-failed',
+                  'capabilities-failed','environment-failed',
+                  'dependency-failed','shell-failed','independent-failed',
+                  'independent-unclassified','policy-diagnostics',
+                  'semantic-diagnostics','skipo-diagnostics',
+                  'other-diagnostics','policy-not-compliant',
+                  'semantic-not-compliant','contract-status'}
               observed=re.findall(
                   r'(?m)^FMRL Skipo migration categories: ([a-z,-]{1,160})$',
                   output)

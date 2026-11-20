@@ -348,6 +348,17 @@ class FmrlTests(unittest.TestCase):
         assert "rm -f /tmp/fmrl-direct-raw.log" in workflow
         assert "console.log('FMRL diagnostic unavailable')" in workflow
 
+    def test_frnes_skipo_status_classes_are_fixed_and_public_safe(self):
+        source = (ROOT / "disposable_workspace.py").read_text()
+        for category in (
+            "'independent-unclassified'", "'environment-failed'",
+            "'dependency-failed'", "'policy-not-compliant'",
+            "'semantic-not-compliant'", "'cli-exit-nonzero'",
+            "'root-not-ok'"):
+            self.assertIn(category, source)
+        self.assertIn("items.intersection(allowed_categories)", source)
+        self.assertIn("FMRL Skipo migration categories:", source)
+
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)
