@@ -1,0 +1,48 @@
+"""Static shell syntax verification for generated FMRL bridge workflows."""
+import importlib.util
+from pathlib import Path
+import subprocess
+import unittest
+
+SPEC = importlib.util.spec_from_file_location(
+    "fmrl_disposable_shell",
+    Path(__file__).with_name("disposable_workspace.py"),
+)
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
+    def test_every_embedded_bash_step_parses(self):
+        lines = MODULE.WORKFLOW.splitlines()
+        checked = 0
+        for i, line in enumerate(lines):
+            if line != "        run: |":
+                continue
+            script = []
+            for segment in lines[i + 1:]:
+                if segment.strip() and not segment.startswith("          "):
+                    break
+                script.append(segment[10:] if segment.startswith("          ") else "")
+            result = subprocess.run(
+                ["bash", "-n"], input="\n".join(script) + "\n",
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"Generated Bash block {i + 1} is invalid: {result.stderr}",
+            )
+            checked += 1
+        self.assertGreaterEqual(checked, 5)
+
+    def test_node_heredoc_closes_at_scalar_baseline(self):
+        script = MODULE.WORKFLOW.split(
+            "      - name: Run portable private-suite checks", 1
+        )[1].split("      - name: Remove private checkout", 1)[0]
+        self.assertIn("\n          NODE\n", script)
+        self.assertNotIn("\n            NODE\n", script)
+        self.assertIn("FMRL direct suite:", script)
+
+
+if __name__ == "__main__":
+    unittest.main()
