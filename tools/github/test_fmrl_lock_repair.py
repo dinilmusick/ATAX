@@ -54,7 +54,9 @@ class FmrlLockRepairContract(unittest.TestCase):
         controller = (ROOT.parent.parent / ".github/workflows/owner-authorized-private-ci.yml").read_text()
         self.assertIn("github.event.issue.user.id == 155351357", controller)
         self.assertIn("[atax-fmrl] repair-lockfile", controller)
-        self.assertIn("'dinilmusick/Frnes'", controller)
+        # The public owner-authorization issue uses ONLY an opaque PR ID.
+        self.assertNotIn("dinilmusick/Frnes", controller)
+        source = (ROOT / "disposable_workspace.py").read_text()
         self.assertIn('"dinilmusick/Frnes"', source)
         self.assertIn("candidate_repo", controller)
         self.assertIn("source_branch", controller)
