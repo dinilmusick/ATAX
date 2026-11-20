@@ -1,4 +1,4 @@
--- Rollback-only test of the exact 60-minute stale-worker threshold.
+-- Rollback-only test of the exact 5-minute stale-heartbeat threshold.
 begin;
 do $test$
 declare
@@ -8,21 +8,21 @@ declare
   recovered public.tasks;
 begin
   select * into registered from public.task_ledger_register(
-    'recovery-threshold-test','Recovery Threshold Test','60-minute threshold leaf',
+    'recovery-threshold-test','Recovery Threshold Test','5-minute threshold leaf',
     'Disposable integration-test task',array['recovery-threshold']::text[],
     'recovery-threshold-session','worker',3::smallint,'Testing heartbeat-based recovery','{}'::jsonb,null
   );
+  update public.tasks set required_capabilities=array['recovery-threshold']::text[], task_role='loop_authoring' where id=registered.id;
   select * into first_claim from public.task_ledger_claim_next(
     'recovery-threshold-old','Old Worker','worker',array['recovery-threshold']::text[],900
   );
-  update public.tasks set required_capabilities=array['recovery-threshold']::text[] where id=registered.id;
 
   if first_claim.id is distinct from registered.id then
     raise exception 'Initial worker did not claim the test task';
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '59 minutes',
+  set heartbeat_at=now()-interval '4 minutes 59 seconds',
       claim_expires_at=now()-interval '1 minute'
   where id=first_claim.id;
 
@@ -30,11 +30,11 @@ begin
     'recovery-threshold-early','Early Worker','worker',array['recovery-threshold']::text[],900
   );
   if early_claim.id is not null then
-    raise exception 'Expired lease incorrectly allowed reassignment before 60 minutes';
+    raise exception 'Expired lease incorrectly allowed reassignment before five minutes';
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '61 minutes',
+  set heartbeat_at=now()-interval '5 minutes 1 second',
       claim_expires_at=now()+interval '15 minutes'
   where id=first_claim.id;
 
@@ -42,7 +42,7 @@ begin
     'recovery-threshold-new','Recovery Worker','worker',array['recovery-threshold']::text[],900
   );
   if recovered.id is distinct from first_claim.id then
-    raise exception 'Stale heartbeat did not allow reassignment after 60 minutes';
+    raise exception 'Stale heartbeat did not allow reassignment after five minutes';
   end if;
   if recovered.claimed_by_agent_id<>'recovery-threshold-new' then
     raise exception 'New worker did not receive ownership';
@@ -50,7 +50,7 @@ begin
   if recovered.claim_token=first_claim.claim_token then
     raise exception 'Recovery did not rotate the claim token';
   end if;
-  if recovered.claim_expires_at<now()+interval '60 minutes' then
+  if recovered.claim_expires_at<now()+interval '10 minutes' then
     raise exception 'New claim lease is shorter than the recovery window';
   end if;
   if not exists(
@@ -62,7 +62,7 @@ begin
     raise exception 'Recovery event did not preserve previous worker evidence';
   end if;
 
-  raise notice 'PASS: expired lease cannot bypass the 60-minute heartbeat threshold; stale task is atomically reassigned';
+  raise notice 'PASS: expired lease cannot bypass the 5-minute heartbeat threshold; stale task is atomically reassigned';
 end;
 $test$;
 rollback;
