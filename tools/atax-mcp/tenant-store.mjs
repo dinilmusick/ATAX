@@ -6,7 +6,7 @@ const encoder=new TextEncoder(), decoder=new TextDecoder();
 const VALID_SUBJECT=/^[\w.@:-]{3,120}$/;
 const ALIAS=/^[A-Z][A-Z0-9_]{0,47}$/;
 const PROVIDERS=new Set(['supabase','github','cloudflare','vercel']);
-const SCOPES=new Set(['atax:read','atax:write','atax:verify','atax:github:read','atax:github:create','atax:github:ci','atax:cloudflare:read','atax:vercel:read']);
+const SCOPES=new Set(['atax:read','atax:write','atax:verify','atax:github:read','atax:github:create','atax:github:ci','atax:cloudflare:read','atax:vercel:read','atax:vercel:deploy']);
 export const INVITABLE_SCOPES=Object.freeze([...SCOPES]);
 const PREFIX={github:'GH_TOKEN_',cloudflare:'CLOUDFLARE_TOKEN_',vercel:'VERCEL_TOKEN_'};
 const b64=bytes=>btoa(Array.from(bytes,x=>String.fromCharCode(x)).join(''));
