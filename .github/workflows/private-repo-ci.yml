@@ -90,9 +90,10 @@ jobs:
           assert re.fullmatch(r'[0-9a-f]{40}',ref)
           assert event in ('push','pull_request','workflow_dispatch')
           assert not workflow or re.fullmatch(r'[A-Za-z0-9_.-]+\.ya?ml',workflow)
-          assert mode in ('direct','repair')
+          assert mode in ('direct','repair','artifact')
           assert not branch or (re.fullmatch(r'[A-Za-z0-9_./-]{1,180}',branch) and '..' not in branch)
           assert mode != 'repair' or (repo in ('dinilmusick/Luth','dinilmusick/Srkl-Engine','dinilmusick/Aiko','dinilmusick/Frnes') and branch)
+          assert mode != 'artifact' or (repo in ('dinilmusick/Srkl-Engine','dinilmusick/Aiko') and branch)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
             for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow),('mode',mode),('branch',branch)]:
               print(key+'='+val,file=out)
