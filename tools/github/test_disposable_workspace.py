@@ -374,5 +374,15 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("FMRL Skipo rule IDs:", controller)
         self.assertNotIn("print(output)", runner)
 
+
+    def test_skipo_migration_classes_cannot_expose_target_error_text(self):
+        runner = (ROOT / 'disposable_workspace.py').read_text()
+        controller = (ROOT.parent.parent / '.github/workflows/private-repo-ci.yml').read_text()
+        self.assertIn('allowed_categories={', runner)
+        self.assertIn('items.intersection(allowed_categories)', runner)
+        self.assertIn('FMRL Skipo migration categories:', runner)
+        self.assertIn('FMRL Skipo migration categories:', controller)
+        self.assertNotIn('print(output)', runner)
+
 if __name__ == "__main__":
     unittest.main()
