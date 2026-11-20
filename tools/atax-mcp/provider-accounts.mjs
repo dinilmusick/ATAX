@@ -141,6 +141,37 @@ async function vercelBuildEvents(a,_db,p,ctx){
   note:'Diagnostic messages are redacted and truncated. BLOCKED, ERROR, BUILDING and READY are distinct deployment states.'};
 }
 
+
+async function vercelCreateDeployment(a,_db,p,ctx){
+ if(a.confirm!==true)throw Error('Explicit deployment confirmation required');
+ if(a.target==='production' && a.confirm_production!==true)throw Error('Production deployment requires a separate explicit confirmation');
+ const selected=resolveProviderAccount(ctx.env,p,'vercel',a.account);
+ const team=ctx.env['VERCEL_TEAM_ID_'+selected.alias];
+ if(team&&!ID.test(team))throw Error('Invalid Vercel team binding');
+ if(!/^prj_[A-Za-z0-9_-]{6,100}$/.test(a.project_id))throw Error('Invalid Vercel project ID');
+ if(!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(a.ref) || a.ref.includes('..') || a.ref.includes('//'))throw Error('Invalid Git ref');
+ const teamParam=team?'?teamId='+encodeURIComponent(team):'';
+ const project=await providerGet(ctx.fetcher,'https://api.vercel.com/v9/projects/'+encodeURIComponent(a.project_id)+teamParam,selected.token);
+ if(project.id!==a.project_id||!project.name||!project.link||project.link.type!=='github'||
+    (!Number.isSafeInteger(project.link.repoId)&&!/^\\d{1,20}$/.test(String(project.link.repoId||''))))
+   throw Error('Target project must be verified and linked to a GitHub repository in Vercel');
+ const payload={name:project.name,project:project.id,
+   gitSource:{type:'github',repoId:project.link.repoId,ref:a.ref},
+   ...(a.target==='production'?{target:'production'}:{})};
+ const response=await ctx.fetcher('https://api.vercel.com/v13/deployments'+teamParam,{
+   method:'POST',redirect:'error',headers:{
+     authorization:'Bearer '+selected.token,accept:'application/json','content-type':'application/json',
+     'user-agent':'atax-mcp-control-plane'
+   },body:JSON.stringify(payload)});
+ if(!response.ok)throw Error('Vercel deployment creation failed (HTTP '+response.status+')');
+ let result;try{result=await response.json()}catch{throw Error('Vercel deployment response was not JSON')}
+ if(!result.id || typeof result.id!=='string')throw Error('Vercel deployment response missing ID');
+ return {account:selected.alias,project_id:project.id,deployment_id:result.id,url:result.url||null,
+   target:a.target==='production'?'production':'preview',
+   state:'deployment_accepted_not_built',
+   next:'Poll atax_vercel_deployments_list and inspect atax_vercel_build_events for actual build result. Never infer success from deployment acknowledgement.'};
+}
+
 export const providerTools=[
   tool('atax_provider_accounts_list','List permitted provider account aliases only. Tokens never appear.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
   tool('atax_cloudflare_accounts_list','Read Cloudflare accounts available to the selected owner-managed token.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
@@ -152,5 +183,13 @@ export const providerTools=[
   tool('atax_cloudflare_issue_summary','Read bounded Workers observability issue counts for the selected Cloudflare account.',
     'atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareErrorSummary),
   tool('atax_vercel_build_events','Read bounded, redacted Vercel deployment build events by ID, never unbounded raw logs.',
-    'atax:vercel:read',accountSchema({deployment_id:{type:'string',maxLength:90}},['deployment_id']),vercelBuildEvents)
+    'atax:vercel:read',accountSchema({deployment_id:{type:'string',maxLength:90}},['deployment_id']),vercelBuildEvents),
+  tool('atax_vercel_deployment_create','Explicitly build a verified Vercel project from its already-linked GitHub repository, using only the selected developer Vercel account. Production needs separate confirmation.',
+    'atax:vercel:deploy',accountSchema({
+      project_id:{type:'string',minLength:10,maxLength:104},
+      ref:{type:'string',minLength:1,maxLength:100},
+      target:{type:'string',enum:['preview','production']},
+      confirm:{type:'boolean'},
+      confirm_production:{type:'boolean'}
+    },['project_id','ref','confirm']),vercelCreateDeployment)
 ];
