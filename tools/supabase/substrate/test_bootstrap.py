@@ -26,7 +26,7 @@ class SubstrateToolTests(unittest.TestCase):
     def test_substrate_assets_do_not_embed_secret_values(self):
         substrate = Path(bootstrap.__file__).resolve().parent
         for path in substrate.rglob("*"):
-            if path.is_file() and path.suffix in {".py", ".sql", ".toml", ".md", ".json", ".yaml", ".yml"}:
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 # Construct marker fragments so the scanner doesn't flag its own
                 # test expectations; still reject those markers in every asset.
                 text = path.read_text(errors="ignore")
