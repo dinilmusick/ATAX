@@ -63,3 +63,14 @@ Production acceptance requires, on the *selected* Cloudflare account: bound secr
 ## Boundaries
 
 ATAX is only a coordination control plane and tooling provider. This gateway neither creates external agents nor schedules them. It never executes target code; ATAX's existing container-first and disposable FMRL compute boundary remains in force. Remote MCP outages must not affect GitHub-native agents.
+## Governed work authoring (MCP-only agents)
+
+The server supports canonical creation and maintenance through named, **allowlisted** PostgreSQL RPCs. `atax:write` permits Vision creation/target/board association, bounded and Omni goal creation, goal and task dependencies, goal priority, and loop contracts. `atax:read` exposes goal resumes, blockers and self-improvement context, while `atax:verify` exposes pending verification. These do not spawn or schedule agents, execute arbitrary SQL, or bypass database acceptance and fencing guards.
+
+Vision-linked Omni goals require an actual target and existing attached tldraw board, as enforced by Supabase.
+
+**Current System association limit:** Existing goal-creation RPCs do not automatically project a metadata `system_id` into canonical `goals.system_id`. Metadata is not proof of an associated System. Do not advertise System-bound creation until an independently tested System-linking RPC is available.
+
+## Build and independent verification
+
+The CI job checks the deterministic, secret-free protocol/auth suite and a Cloudflare Wrangler deploy dry-run. A dry-run confirms Worker packaging only, not credentials or live Supabase calls. Production release requires authenticated read/write/verifier tests and independent evidence without secrets.
