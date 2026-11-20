@@ -20,12 +20,29 @@ on:
         required: false
         default: ""
         type: string
+  workflow_call:
+    inputs:
+      repository:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+      event:
+        required: false
+        default: push
+        type: string
+      workflow:
+        required: false
+        default: ""
+        type: string
+
 permissions:
   contents: read
 
 jobs:
   fmrl:
-    if: github.event_name == 'workflow_dispatch'
+    if: inputs.repository != '' && inputs.ref != ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

@@ -1,0 +1,79 @@
+name: Owner-authorized npm release dispatch
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.user.id == 155351357 &&
+      github.event.issue.title == '[atax-release] kloks-2.2.6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate immutable source and dispatch trusted Kloks publisher
+        id: dispatch
+        env:
+          EXPECTED_HEAD: ${{ github.event.issue.body }}
+          CODING_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          ECOSYSTEM_TOKEN: ${{ secrets.ECOSYSTEM_SYNC_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s' "$EXPECTED_HEAD" | tr -d '\r\n[:space:]')"
+          [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { echo 'Request needs one exact main SHA' >&2; exit 1; }
+          head="$(curl -fsSL --retry 3 --max-time 20 \
+            https://api.github.com/repos/dinilmusick/Kloks/git/ref/heads/main | jq -r .object.sha)"
+          [[ "$head" == "$expected" ]] || { echo 'Main head changed; refusing unpinned release' >&2; exit 1; }
+          current="$(curl -fsSL --retry 3 --max-time 20 \
+            "https://raw.githubusercontent.com/dinilmusick/Kloks/$expected/package.json" \
+            | jq -r .version)"
+          [[ "$current" == '2.2.6' ]] || { echo 'Pinned package version differs from approved 2.2.6' >&2; exit 1; }
+          if npm view '@ultrst-armada/kloks@2.2.6' version \
+             --registry=https://registry.npmjs.org/ >/dev/null 2>/tmp/npm-version.err; then
+            echo 'outcome=already-published' >> "$GITHUB_OUTPUT"
+            echo 'Immutable version already exists; no publication requested.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          grep -Eq 'E404|404 Not Found' /tmp/npm-version.err || {
+            echo 'npm registry lookup failed for a reason other than 404; refusing dispatch' >&2
+            exit 1
+          }
+          dispatched=0
+          for auth in "$ECOSYSTEM_TOKEN" "$CODING_TOKEN"; do
+            [[ -n "$auth" ]] || continue
+            if GH_TOKEN="$auth" gh api -X POST \
+              repos/dinilmusick/Kloks/actions/workflows/npm-release.yml/dispatches \
+              -f ref=main -F publish=true >/dev/null 2>/tmp/dispatch.err; then
+              dispatched=1
+              break
+            fi
+          done
+          [[ "$dispatched" == 1 ]] || {
+            echo 'Actions:write authorization unavailable; trusted publisher not dispatched' >&2
+            exit 1
+          }
+          echo 'outcome=dispatched' >> "$GITHUB_OUTPUT"
+          echo "Verified main SHA: $expected" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Dispatched original Kloks npm Release with publish=true; publication must be verified separately.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Report authorized operation
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST: ${{ github.event.issue.number }}
+          OUTCOME: ${{ steps.dispatch.outputs.outcome }}
+          RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'ATAX release dispatch: %s. Status: %s.\n' \
+            "${OUTCOME:-not-dispatched}" "$RESULT" > /tmp/report.txt
+          printf 'Controller evidence: https://github.com/%s/actions/runs/%s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> /tmp/report.txt
+          printf 'Target workflow: https://github.com/dinilmusick/Kloks/actions/workflows/npm-release.yml\n' >> /tmp/report.txt
+          gh issue comment "$REQUEST" --repo "$GITHUB_REPOSITORY" --body-file /tmp/report.txt

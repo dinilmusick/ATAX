@@ -1,0 +1,74 @@
+name: Owner-authorized private verification request
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  resolve:
+    if: >-
+      github.event.issue.user.id == 155351357 &&
+      github.event.issue.title == '[atax-fmrl] verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      repository: ${{ steps.lookup.outputs.repository }}
+      ref: ${{ steps.lookup.outputs.ref }}
+    steps:
+      - name: Resolve private pull request without publishing target metadata
+        id: lookup
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          OPAQUE_PR_ID: ${{ github.event.issue.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo 'Private read-only token unavailable'; exit 1; }
+          pr_id="$(printf '%s' "$OPAQUE_PR_ID" | tr -d '\r\n[:space:]')"
+          [[ "$pr_id" =~ ^PR_[A-Za-z0-9_-]{8,90}$ ]] || { echo 'Invalid opaque pull request id'; exit 1; }
+          response="$(gh api graphql \
+            -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { state headRefOid repository { nameWithOwner isPrivate owner { login } } } } }' \
+            -f id="$pr_id")"
+          name="$(jq -r '.data.node.repository.nameWithOwner // empty' <<< "$response")"
+          sha="$(jq -r '.data.node.headRefOid // empty' <<< "$response")"
+          private="$(jq -r '.data.node.repository.isPrivate // false' <<< "$response")"
+          owner="$(jq -r '.data.node.repository.owner.login // empty' <<< "$response")"
+          state="$(jq -r '.data.node.state // empty' <<< "$response")"
+          [[ "$owner" == dinilmusick && "$private" == true && "$state" == OPEN ]]
+          [[ "$name" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'repository=%s\nref=%s\n' "$name" "$sha" >> "$GITHUB_OUTPUT"
+          echo 'Resolved exact private PR head using authorized owner and clone-only credential.' >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    needs: resolve
+    uses: ./.github/workflows/private-repo-ci.yml
+    with:
+      repository: ${{ needs.resolve.outputs.repository }}
+      ref: ${{ needs.resolve.outputs.ref }}
+      event: push
+      workflow: ""
+    secrets: inherit
+
+  report:
+    if: always() && needs.resolve.result != 'skipped'
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report only safe verification outcome
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST: ${{ github.event.issue.number }}
+          RESOLVE: ${{ needs.resolve.result }}
+          VERIFY: ${{ needs.verify.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'ATAX FMRL private verification: resolve=%s, verify=%s.\n' "$RESOLVE" "$VERIFY" > /tmp/report.txt
+          printf 'Controller evidence: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> /tmp/report.txt
+          printf 'Private source was not committed into the ATAX repository or disposable bridge.\n' >> /tmp/report.txt
+          gh issue comment "$REQUEST" --repo "$GITHUB_REPOSITORY" --body-file /tmp/report.txt
