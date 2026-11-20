@@ -95,7 +95,7 @@ def main() -> None:
         "parents": [expected],
     }, stage="create-lock-commit")["sha"]
     # Non-forced atomic fast-forward: fail instead of overwriting a concurrent PR update.
-    api(branch_path, token, "PATCH", {"sha": new_commit, "force": False}, stage="atomic-branch-update")
+    api(branch_path.replace("/git/ref/", "/git/refs/"), token, "PATCH", {"sha": new_commit, "force": False}, stage="atomic-branch-update")
     updated = api(branch_path, token, stage="branch-readback")
     if updated["object"]["sha"] != new_commit:
         fail("Independent branch readback differs from committed SHA")
