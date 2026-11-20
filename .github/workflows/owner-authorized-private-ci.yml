@@ -30,17 +30,38 @@ jobs:
           [[ -n "$GH_TOKEN" ]] || { echo 'Private read-only token unavailable'; exit 1; }
           pr_id="$(printf '%s' "$OPAQUE_PR_ID" | tr -d '\r\n[:space:]')"
           [[ "$pr_id" =~ ^PR_[A-Za-z0-9_-]{8,90}$ ]] || { echo 'Invalid opaque pull request id'; exit 1; }
-          response="$(gh api graphql \
-            -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { state headRefOid repository { nameWithOwner isPrivate owner { login } } } } }' \
-            -f id="$pr_id")"
-          name="$(jq -r '.data.node.repository.nameWithOwner // empty' <<< "$response")"
-          sha="$(jq -r '.data.node.headRefOid // empty' <<< "$response")"
-          private="$(jq -r '.data.node.repository.isPrivate // false' <<< "$response")"
-          owner="$(jq -r '.data.node.repository.owner.login // empty' <<< "$response")"
-          state="$(jq -r '.data.node.state // empty' <<< "$response")"
-          [[ "$owner" == dinilmusick && "$private" == true && "$state" == OPEN ]]
-          [[ "$name" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          # The read-only fine-grained credential does not authorize GraphQL
+          # node lookup. Resolve only across its authorized private repos via
+          # REST without putting repository names or source SHA in public logs.
+          candidates="$(mktemp)"
+          trap 'rm -f "$candidates"' EXIT
+          if ! gh api --paginate \
+            '/user/repos?affiliation=owner&visibility=private&per_page=100' \
+            --jq '.[].full_name' > "$candidates"; then
+            echo 'Private REST repository enumeration unavailable' >&2
+            exit 1
+          fi
+          name=""
+          sha=""
+          while IFS= read -r repo; do
+            [[ "$repo" =~ ^dinilmusick/[A-Za-z0-9_.-]+$ ]] || continue
+            match="$(gh api --paginate \
+              "repos/$repo/pulls?state=open&per_page=100" 2>/dev/null \
+              | jq -sr --arg requested "$pr_id" '
+                map(.[] | select(.node_id == $requested and .state == "open"))
+                | .[0].head.sha // empty
+              ' || true)"
+            if [[ "$match" =~ ^[0-9a-f]{40}$ ]]; then
+              name="$repo"
+              sha="$match"
+              break
+            fi
+          done < "$candidates"
+          [[ "$name" =~ ^dinilmusick/[A-Za-z0-9_.-]+$ ]] || {
+            echo 'The opaque PR is not accessible through approved private REST scope' >&2
+            exit 1
+          }
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
           printf 'repository=%s\nref=%s\n' "$name" "$sha" >> "$GITHUB_OUTPUT"
           echo 'Resolved exact private PR head using authorized owner and clone-only credential.' >> "$GITHUB_STEP_SUMMARY"
 
