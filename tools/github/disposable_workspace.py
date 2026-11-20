@@ -299,6 +299,17 @@ jobs:
               seen=set(re.findall(r'\\bSKIPO_[A-Z0-9_-]+\\b',output))
               safe=sorted(seen.intersection(approved))
               print('FMRL Skipo rule IDs: '+(','.join(safe) if safe else 'none'))
+              # Frnes emits only fixed private migration error categories.
+              allowed_categories={'missing-contract','unapplied','lockfile',
+                  'installed','migration-path','unsafe-path','deprecated-pattern',
+                  'integrity','version','unclassified'}
+              observed=re.findall(
+                  r'(?m)^FMRL Skipo migration categories: ([a-z,-]{1,160})$',
+                  output)
+              items=set(observed[-1].split(',')) if observed else set()
+              safe_classes=sorted(items.intersection(allowed_categories))
+              print('FMRL Skipo migration categories: '+(
+                  ','.join(safe_classes) if safe_classes else 'none'))
               subgates=re.findall(
                 r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
                 output)
