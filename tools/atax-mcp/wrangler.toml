@@ -1,0 +1,10 @@
+name = "atax-mcp"
+main = "worker.mjs"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+# Supabase remains canonical; this Worker only handles incoming MCP HTTP requests.
+# Define every credential with `wrangler secret put`, NEVER in this file.
+[vars]
+SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
+MCP_GITHUB_OWNER = "dinilmusick"

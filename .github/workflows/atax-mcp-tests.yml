@@ -1,0 +1,47 @@
+name: ATAX MCP gateway tests
+
+on:
+  pull_request:
+    paths:
+      - 'tools/atax-mcp/**'
+      - '.github/workflows/atax-mcp-tests.yml'
+      - '.github/workflows/private-repo-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/atax-mcp/**'
+      - '.github/workflows/atax-mcp-tests.yml'
+      - '.github/workflows/private-repo-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stateless-mcp-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and protocol/auth tests (ATAX gateway only)
+        run: |
+          node --check tools/atax-mcp/worker.mjs
+          node --check tools/atax-mcp/github-tools.mjs
+          node --test tools/atax-mcp/worker.test.mjs
+
+      - name: Independent live Cloudflare health and fail-closed probe
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/atax-remote-mcp-gateway-20261120'
+        env:
+          HEALTH_URL: https://atax-mcp.dextro1n1laevo.workers.dev/health
+          MCP_URL: https://atax-mcp.dextro1n1laevo.workers.dev/mcp
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 --max-time 20 "$HEALTH_URL" | grep -F '"status":"ok"'
+          code="$(curl --silent --show-error --max-time 20 -o /tmp/atax-mcp-unauth.json -w '%{http_code}' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci-probe","version":"1"}}}' "$MCP_URL")"
+          if [ "$code" != "503" ] && [ "$code" != "401" ]; then
+            echo "Expected auth/config failure, got HTTP $code" >&2; cat /tmp/atax-mcp-unauth.json >&2; exit 1
+          fi
+      - name: Cloudflare Worker packaging dry-run
+        run: npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-mcp-dry-run
