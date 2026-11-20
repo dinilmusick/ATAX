@@ -5,6 +5,7 @@ DECLARE
   created jsonb;
   goal_uuid uuid;
   target_system_id uuid;
+  test_universe_id uuid;
   invalid_task_rejected boolean := false;
   unknown_system_rejected boolean := false;
 BEGIN
@@ -12,8 +13,14 @@ BEGIN
   IF target_system_id IS NULL THEN
     -- Isolated CI migrations may not seed a named System. Build one in this transaction
     -- with canonical required fields; production already has the ATAX System.
-    INSERT INTO public.systems (system_key,name,system_type,status,description)
-    VALUES ('atax','ATAX Test System','service','active','Rollback-only System-bound integration fixture')
+    SELECT id INTO test_universe_id FROM public.universes WHERE status='active' LIMIT 1;
+    IF test_universe_id IS NULL THEN
+      INSERT INTO public.universes (universe_key,name,status,description)
+      VALUES ('atax-integration-' || replace(gen_random_uuid()::text,'-',''),'ATAX rollback-only fixture Universe','active','Do not persist outside this test transaction')
+      RETURNING id INTO test_universe_id;
+    END IF;
+    INSERT INTO public.systems (system_key,name,system_type,status,description,universe_id)
+    VALUES ('atax','ATAX Test System','service','active','Rollback-only System-bound integration fixture',test_universe_id)
     RETURNING id INTO target_system_id;
   END IF;
   created := public.atax_goal_create_system_bounded(
