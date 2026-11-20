@@ -153,7 +153,7 @@ async function vercelCreateDeployment(a,_db,p,ctx){
  const teamParam=team?'?teamId='+encodeURIComponent(team):'';
  const project=await providerGet(ctx.fetcher,'https://api.vercel.com/v9/projects/'+encodeURIComponent(a.project_id)+teamParam,selected.token);
  if(project.id!==a.project_id||!project.name||!project.link||project.link.type!=='github'||
-    (!Number.isSafeInteger(project.link.repoId)&&!/^\\d{1,20}$/.test(String(project.link.repoId||''))))
+    (!Number.isSafeInteger(project.link.repoId)&&!/^[0-9]{1,20}$/.test(String(project.link.repoId||''))))
    throw Error('Target project must be verified and linked to a GitHub repository in Vercel');
  const payload={name:project.name,project:project.id,
    gitSource:{type:'github',repoId:project.link.repoId,ref:a.ref},
