@@ -74,6 +74,19 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("FMRL last observed nested script:", source)
         self.assertNotIn("print(output)", source)
 
+    def test_private_write_credential_never_enters_target_test_step(self):
+        workflow = MODULE.WORKFLOW
+        direct = workflow.split("      - name: Run portable private-suite checks", 1)[1].split(
+            "      - name: Regenerate one lockfile", 1
+        )[0]
+        self.assertNotIn("FMRL_DIAGNOSTIC_WRITE_TOKEN", direct)
+        self.assertNotIn("CODING_REPO_TOKEN", direct)
+        self.assertNotIn("print(output)", direct)
+        self.assertIn("Deliver bounded test failure labels to exact private PR", workflow)
+        self.assertIn("python3 tools/github/fmrl_private_diagnostic.py", workflow)
+        self.assertIn("if: always()", workflow)
+        self.assertIn("Remove private checkout", workflow)
+
     def test_node_heredoc_closes_at_scalar_baseline(self):
         script = MODULE.WORKFLOW.split(
             "      - name: Run portable private-suite checks", 1
