@@ -261,7 +261,7 @@ jobs:
                   reason=next((name for name,pattern in signatures
                       if re.search(pattern,output,re.I)), 'unclassified')
                   mark=re.search(
-                    r'(?:broken|yaml|scalar|mapping)[^\\n]{0,220}\\(([0-9]{1,6}):([0-9]{1,5})\\)',
+                    r'(?:broken|yaml|scalar|mapping)[^\n]{0,220}\(([0-9]{1,6}):([0-9]{1,5})\)',
                     output,re.I)
                   print('FMRL lockfile parse cause: '+reason+
                     ('; line='+mark.group(1)+'; column='+mark.group(2) if mark else ''))
