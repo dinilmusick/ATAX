@@ -35,6 +35,7 @@ jobs:
       - name: Test FMRL isolation and local target bootstrap
         run: |
           python3 -m unittest discover -s tools/github -p test_disposable_workspace.py -v
+          python3 -m unittest discover -s tools/github -p test_disposable_workflow_shell.py -v
           python3 -m unittest discover -s tools/agent-bootstrap -p test_bootstrap.py -v
       - name: Enforce ATAX control-plane boundary
         run: |

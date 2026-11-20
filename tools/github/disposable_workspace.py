@@ -216,7 +216,7 @@ jobs:
             if (!executed.includes('test') || !executed.includes('build'))
               throw new Error('Missing mandatory direct CI gates');
             console.log('FMRL portable checks passed: '+executed.join(','));
-            NODE
+          NODE
           ) >/tmp/fmrl-direct-raw.log 2>&1
           result=$?
           set -e
