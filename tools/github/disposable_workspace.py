@@ -230,13 +230,18 @@ jobs:
           receipt=re.findall(r'FMRL portable checks passed: ([A-Za-z0-9:_, -]+)',output)
           if receipt: print('FMRL verified script names: '+receipt[-1][:250])
           if code:
-              categories={'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+',
-                'typescript':r'TS[0-9]{4}', 'network':r'getaddrinfo|econnreset|etimedout',
+              categories={
+                'lockfile':r'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|npm (?:error|ERR!) code EUSAGE|package-lock.json.*(?:in sync|out of sync)',
+                'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+|npm (?:error|ERR!) code (?:ETARGET|E404)',
+                'network':r'getaddrinfo|econnreset|etimedout|ENOTFOUND',
+                'typescript':r'TS[0-9]{4}',
                 'module':r'cannot find module|module not found',
                 'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror'}
               print('FMRL failure categories: '+', '.join(
                 key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
                 if re.search(pat,output,re.I))[:250])
+              failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
+              print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
           SAFE
           rm -f /tmp/fmrl-direct-raw.log
           exit "$result"
