@@ -19,7 +19,7 @@ begin
   where id<>registered.id and status in ('queued','running');
 
   update public.tasks
-  set required_capabilities=array['heartbeat-hardening']::text[]
+  set required_capabilities=array['heartbeat-hardening']::text[], task_role='loop_authoring'
   where id=registered.id;
 
   select * into first_claim from public.task_ledger_claim_next(
