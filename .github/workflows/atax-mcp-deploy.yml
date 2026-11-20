@@ -9,7 +9,7 @@ on:
         type: string
       worker_url:
         description: 'Optional exact public Worker URL for health probe (no credentials)'
-        required: false
+        required: true
         type: string
 
 permissions:
@@ -41,12 +41,31 @@ jobs:
           set -euo pipefail
           [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid Cloudflare account ID'; exit 1; }
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing ATAX_MCP_CLOUDFLARE_API_TOKEN repository secret'; exit 1; }
+          if [ "$CLOUDFLARE_ACCOUNT_ID" != "38bdf043bc4cb132cfc22b13d597ca2e" ]; then
+            echo 'Deployment account must be the selected ATAX Cloudflare account' >&2
+            exit 1
+          fi
+          # Existence-only preflight; never retrieve or print secret contents.
+          secrets_json="$(curl --fail-with-body --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/atax-mcp/secrets")"
+          jq -e '.success == true and any(.result[]?; .name == "MCP_VAULT_KEY_B64")' <<<"$secrets_json" >/dev/null || {
+            echo 'MCP vault key binding missing; aborting deployment' >&2; exit 1;
+          }
           npx --yes wrangler@4 deploy --config tools/atax-mcp/wrangler.toml
-      - name: Verify health at explicit URL
-        if: inputs.worker_url != ''
+      - name: Verify health and configured auth at explicit URL
         env:
           WORKER_URL: ${{ inputs.worker_url }}
         run: |
           set -euo pipefail
           [[ "$WORKER_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo 'Expected HTTPS Worker URL'; exit 1; }
-          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/health"
+          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/health" | grep -F '"status":"ok"'
+          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/setup" >/dev/null
+          code="$(curl --silent --show-error --max-time 20 -o /tmp/atax-mcp-unauth-response.json \
+            -w '%{http_code}' -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"release-probe","version":"1"}}}' \
+            "${WORKER_URL%/}/mcp")"
+          if [ "$code" != "401" ]; then
+            echo "ATAX MCP must be configured and refuse unauthenticated requests with HTTP 401 (observed $code)" >&2
+            exit 1
+          fi
