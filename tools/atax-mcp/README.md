@@ -69,7 +69,7 @@ The server supports canonical creation and maintenance through named, **allowlis
 
 Vision-linked Omni goals require an actual target and existing attached tldraw board, as enforced by Supabase.
 
-**Current System association limit:** Existing goal-creation RPCs do not automatically project a metadata `system_id` into canonical `goals.system_id`. Metadata is not proof of an associated System. Do not advertise System-bound creation until an independently tested System-linking RPC is available.
+**Canonical System association:** New MCP goals require a `system_key` and call the additive, service-role-only `atax_goal_create_system_bounded` / `atax_goal_create_system_omni` RPCs. Each delegates to the original goal-creation RPC, then atomically attaches the goal and its finite tasks to a real active System. `atax_goal_attach_system` also safely repairs existing unlinked, non-running goals. The database rejects reassignment to another System. The checked-in SQL migration must be applied before enabling the corresponding MCP tools.
 
 ## Build and independent verification
 
