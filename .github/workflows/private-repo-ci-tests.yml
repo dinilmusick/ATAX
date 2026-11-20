@@ -6,6 +6,8 @@ on:
       - ".github/workflows/private-repo-ci.yml"
       - ".github/workflows/private-repo-ci-tests.yml"
       - "tools/github/disposable_workspace.py"
+      - "tools/github/fmrl_lock_writer.py"
+      - "tools/github/test_fmrl_lock_repair.py"
       - "tools/github/test_disposable_workspace.py"
       - "tools/agent-bootstrap/**"
       - "AGENT_INSTRUCTIONS.md"
