@@ -33,6 +33,34 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn("if: env.FMRL_EXECUTION_MODE == 'direct'", direct)
         self.assertNotIn("|| env.FMRL_EXECUTION_MODE == 'repair'", direct.splitlines()[1])
 
+    def test_frozen_artifact_writeback_is_private_and_exact_head(self):
+        wf = module.WORKFLOW
+        artifact = wf.split("      - name: Build reproducible Worker artifact", 1)[1].split(
+            "      - name: Regenerate one lockfile", 1
+        )[0]
+        self.assertIn("if: env.FMRL_EXECUTION_MODE == 'artifact'", artifact)
+        self.assertIn("npm ci --include=optional --no-audit --no-fund", artifact)
+        self.assertIn("npm run build", artifact)
+        self.assertIn("test -f target/api/index.js", artifact)
+        self.assertNotIn("FMRL_REPAIR_WRITE_TOKEN", artifact)
+        self.assertNotIn("CODING_REPO_TOKEN", artifact)
+        writer = (ROOT / "fmrl_lock_writer.py").read_text()
+        self.assertIn('path = "api/index.js" if kind == "artifact"', writer)
+        self.assertIn('"force": False', writer)
+        self.assertIn('old_ref["object"]["sha"] != expected', writer)
+        self.assertIn('stage="blob-readback"', writer)
+        self.assertIn('repo not in ("dinilmusick/Aiko", "dinilmusick/Srkl-Engine")', writer)
+
+    def test_artifact_mode_is_owner_authorized_and_uses_private_only_write(self):
+        owner = (ROOT.parent.parent / ".github/workflows/owner-authorized-private-ci.yml").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("[atax-fmrl] repair-artifact", owner)
+        self.assertIn("'artifact' || 'direct'", owner)
+        self.assertIn("assert mode in ('direct','repair','artifact')", controller)
+        self.assertIn("assert mode != 'artifact' or (repo in", controller)
+        self.assertIn("if args.mode in (\"repair\", \"artifact\"):", (ROOT / "disposable_workspace.py").read_text())
+        self.assertIn("FMRL_WRITE_KIND: ${{ secrets.FMRL_EXECUTION_MODE }}", module.WORKFLOW)
+
     def test_target_commands_receive_no_write_token(self):
         wf = module.WORKFLOW
         regen = wf.split("      - name: Regenerate one lockfile", 1)[1].split(
