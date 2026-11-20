@@ -227,9 +227,44 @@ jobs:
                 if (name === 'validate:api' && p.name === 'frnes' &&
                     scripts['validate:diagnostic'] === 'node scripts/frnes-validate-skipo.mjs') {
                   const diagnostic=spawnSync(manager,['run','validate:diagnostic'],{
-                    cwd:process.cwd(),stdio:'inherit',env:process.env,timeout:40000,
+                    cwd:process.cwd(),encoding:'utf8',stdio:['ignore','pipe','pipe'],
+                    env:process.env,timeout:40000,maxBuffer:16*1024*1024,
                   });
-                  if (diagnostic.error) console.log('FMRL diagnostic unavailable');
+                  // Fixed status only; child stdout/stderr stay private and
+                  // never enter the disposable public runner's printed logs.
+                  const diagnosticText=String(diagnostic.stderr||'');
+                  const state=diagnostic.error?'spawn-error'
+                    :diagnosticText.includes('Skipo verifier could not execute')?'process-unavailable'
+                    :diagnosticText.includes('Skipo verifier returned invalid JSON')?'invalid-json'
+                    :diagnosticText.includes('Skipo canonical verification failed')?'report-rejected'
+                    :diagnostic.status===0?'diagnostic-clean'
+                    :'unclassified';
+                  console.log('FMRL Frnes diagnostic state: '+state);
+                  if (state === 'invalid-json' || state === 'process-unavailable' ||
+                      state === 'unclassified') {
+                    // Only inspect a second read-only Skipo verify privately.
+                    // The code/trace stays in memory in the disposable runner.
+                    const direct=spawnSync(manager,['exec','skipo','verify','.'],{
+                      cwd:process.cwd(),encoding:'utf8',
+                      stdio:['ignore','pipe','pipe'],env:process.env,
+                      timeout:40000,maxBuffer:16*1024*1024,
+                    });
+                    let parseable=false;
+                    try {
+                      const report=JSON.parse(String(direct.stdout||''));
+                      parseable=report!==null && typeof report==='object';
+                    } catch {}
+                    console.log('FMRL Frnes verifier JSON: '+(parseable?'yes':'no'));
+                    const matches=String(direct.stderr||'').match(
+                      /\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\b/g
+                    );
+                    const fixedTypes=new Set(['FileNotFoundError','ValueError',
+                      'KeyError','TypeError','ModuleNotFoundError','ImportError',
+                      'PermissionError','RuntimeError','JSONDecodeError']);
+                    const code=matches?.at(-1);
+                    console.log('FMRL Frnes exception class: '+
+                      (fixedTypes.has(code)?code:'none'));
+                  }
                 }
                 throw new Error('Direct CI failed: '+name+' exit='+r.status);
               }
@@ -341,6 +376,21 @@ jobs:
               safe_classes=sorted(items.intersection(allowed_categories))
               print('FMRL Skipo migration categories: '+(
                   ','.join(safe_classes) if safe_classes else 'none'))
+              allowed_states={'spawn-error','process-unavailable',
+                  'invalid-json','report-rejected','diagnostic-clean','unclassified'}
+              receipts=re.findall(
+                  r'(?m)^FMRL Frnes diagnostic state: ([a-z-]{1,40})$',output)
+              state=receipts[-1] if receipts and receipts[-1] in allowed_states else 'not-run'
+              print('FMRL Frnes diagnostic state: '+state)
+              values=re.findall(r'(?m)^FMRL Frnes verifier JSON: (yes|no)$',output)
+              print('FMRL Frnes verifier JSON: '+(values[-1] if values else 'unknown'))
+              allowed_errors={'FileNotFoundError','ValueError','KeyError','TypeError',
+                  'ModuleNotFoundError','ImportError','PermissionError',
+                  'RuntimeError','JSONDecodeError','none'}
+              errors=re.findall(
+                  r'(?m)^FMRL Frnes exception class: ([A-Za-z]{1,40})$',output)
+              code=errors[-1] if errors and errors[-1] in allowed_errors else 'unknown'
+              print('FMRL Frnes exception class: '+code)
               subgates=re.findall(
                 r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
                 output)
