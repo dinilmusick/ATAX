@@ -338,6 +338,16 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("if: env.FMRL_EXECUTION_MODE == 'act'", workflow)
         self.assertIn("sudo rm -rf -- target", workflow)
 
+    def test_frnes_diagnostic_is_only_after_failed_mandatory_verify(self):
+        workflow = (ROOT / "disposable_workspace.py").read_text()
+        assert "if (r.status !== 0) {" in workflow
+        assert "name === 'validate:api' && p.name === 'frnes'" in workflow
+        assert "scripts['validate:diagnostic'] === 'node scripts/frnes-validate-skipo.mjs'" in workflow
+        assert "throw new Error('Direct CI failed: '+name+' exit='+r.status)" in workflow
+        assert "FMRL Skipo migration categories:" in workflow
+        assert "rm -f /tmp/fmrl-direct-raw.log" in workflow
+        assert "console.log('FMRL diagnostic unavailable')" in workflow
+
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)
