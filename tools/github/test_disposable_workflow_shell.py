@@ -57,6 +57,9 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("ERR_PNPM_[A-Z0-9_]+", workflow)
         self.assertIn("codes=", workflow)
         self.assertIn("for attempt in $(seq 1 15)", controller)
+        self.assertIn("FMRL_LOGS_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}", controller)
+        self.assertIn('for reader_token in "$FMRL_LOGS_TOKEN" "$GH_TOKEN" "$FMRL_CONTENTS_TOKEN"', controller)
+        self.assertIn("break 2", controller)
         self.assertIn("grep -E '^(FMRL coverage:", controller)
         self.assertIn("ALWAYS delete FMRL and verify absence", controller)
 
