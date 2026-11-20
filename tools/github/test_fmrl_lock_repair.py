@@ -44,6 +44,8 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn('repo not in ALLOWED', writer)
         self.assertIn('stage="private-branch-preflight"', writer)
         self.assertIn('stage="atomic-branch-update"', writer)
+        self.assertIn('branch_path.replace("/git/ref/", "/git/refs/")', writer)
+        self.assertIn('stage="private-branch-preflight"', writer)
 
     def test_issue_trigger_requires_owner_and_exact_pr(self):
         controller = (ROOT.parent.parent / ".github/workflows/owner-authorized-private-ci.yml").read_text()
