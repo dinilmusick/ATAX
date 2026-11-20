@@ -179,6 +179,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          found_pnpm="$(pnpm --version 2>/dev/null || true)"
+          [[ "$found_pnpm" == '10.33.0' ]] || { echo 'FMRL pinned pnpm version mismatch' >&2; exit 1; }
+          echo 'FMRL pinned pnpm version: 10.33.0'
           set +e
           (
             set -euo pipefail
