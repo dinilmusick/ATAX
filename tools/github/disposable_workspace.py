@@ -36,8 +36,8 @@ jobs:
     env:
       FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}
     steps:
-      - name: Checkout trusted static public FMRL writeback helper
-        if: env.FMRL_EXECUTION_MODE == 'repair'
+      - name: Checkout trusted static public FMRL helper
+        if: env.FMRL_EXECUTION_MODE == 'repair' || env.FMRL_EXECUTION_MODE == 'direct'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
@@ -280,7 +280,7 @@ jobs:
                 output)
               print('FMRL last observed nested script: '+(subgates[-1] if subgates else 'unknown'))
           SAFE
-          rm -f /tmp/fmrl-direct-raw.log
+          # Trusted post-step saves only bounded labels in the private PR.
           exit "$result"
 
       - name: Regenerate one lockfile without executing target scripts
@@ -329,6 +329,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/github/fmrl_lock_writer.py
+
+      - name: Deliver bounded test failure labels to exact private PR
+        if: always() && env.FMRL_EXECUTION_MODE == 'direct'
+        shell: bash
+        env:
+          FMRL_TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          FMRL_TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
+          FMRL_TARGET_BRANCH: ${{ secrets.FMRL_TARGET_BRANCH }}
+          FMRL_DIAGNOSTIC_WRITE_TOKEN: ${{ secrets.FMRL_DIAGNOSTIC_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 tools/github/fmrl_private_diagnostic.py
 
       - name: Remove private checkout
         if: always()
@@ -448,11 +460,12 @@ def main() -> int:
             "branch": "main",
         })
 
-        if args.mode == "repair":
-            writer = Path(__file__).with_name("fmrl_lock_writer.py").read_bytes()
-            api(f"/repos/{target}/contents/tools/github/fmrl_lock_writer.py", bearer, "PUT", {
-                "message": "chore: add static lockfile writeback helper",
-                "content": base64.b64encode(writer).decode(),
+        if args.mode in ("repair", "direct"):
+            filename = "fmrl_lock_writer.py" if args.mode == "repair" else "fmrl_private_diagnostic.py"
+            helper = Path(__file__).with_name(filename).read_bytes()
+            api(f"/repos/{target}/contents/tools/github/{filename}", bearer, "PUT", {
+                "message": "chore: add trusted static private CI helper",
+                "content": base64.b64encode(helper).decode(),
                 "branch": "main",
             })
 
@@ -470,6 +483,11 @@ def main() -> int:
             (("FMRL_TARGET_BRANCH", args.branch),
              ("FMRL_REPAIR_WRITE_TOKEN", bearer)) if args.mode == "repair" else ()
         )
+        diagnostic_secrets = (
+            (("FMRL_TARGET_BRANCH", args.branch),
+             ("FMRL_DIAGNOSTIC_WRITE_TOKEN", bearer))
+            if args.mode == "direct" and args.branch else ()
+        )
         for secret_name, secret_value in (
             ("PRIVATE_REPO_TOKEN", clone_token),
             ("FMRL_TARGET_REPOSITORY", args.source),
@@ -477,7 +495,7 @@ def main() -> int:
             ("FMRL_TARGET_EVENT", args.event),
             ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
             ("FMRL_EXECUTION_MODE", args.mode),
-        ) + repair_secrets:
+        ) + repair_secrets + diagnostic_secrets:
           for attempt in range(4):
             try:
                 subprocess.run(
