@@ -55,13 +55,19 @@ async function dispatch(a,_db,p,ctx){
   clean[k]=v;
  }
  const data=await git(ctx.fetcher,'/repos/'+repo,account.token);
- if(data.private!==false)throw Error('Private-target Actions are disabled; use separately authorized FMRL runner, never the ATAX control plane');
- await git(ctx.fetcher,'/repos/'+repo+'/actions/workflows/'+segment(a.workflow),account.token);
+ if(typeof data.full_name!=='string'||data.full_name.toLowerCase()!==repo.toLowerCase()||
+    typeof data.private!=='boolean')throw Error('GitHub repository identity is not verified');
+ if(data.archived===true||data.disabled===true)throw Error('GitHub repository is not available for CI');
+ if(data.permissions && data.permissions.push===false && data.permissions.admin!==true)throw Error('Selected GitHub account lacks repository write permission');
+ const workflow=await git(ctx.fetcher,'/repos/'+repo+'/actions/workflows/'+segment(a.workflow),account.token);
+ if(workflow.state!=='active')throw Error('Selected GitHub Actions workflow is not active');
  await git(ctx.fetcher,'/repos/'+repo+'/actions/workflows/'+segment(a.workflow)+'/dispatches',
   account.token,'POST',{ref:a.ref,inputs:clean});
- return {repository:repo,account:account.alias,workflow:a.workflow,ref:a.ref,
+ return {repository:data.full_name,visibility:data.private?'private':'public',
+  account:account.alias,workflow:a.workflow,ref:a.ref,
   state:'dispatch_accepted_not_executed',verification_tool:'atax_github_actions_run_status',
-  note:'Discover the matching run, verify head SHA, all jobs, and any deployment result separately.'};
+  execution_boundary:'GitHub Actions in the developer-owned repository, never shared ATAX Actions',
+  note:'Discover matching run, verify head SHA, all jobs and any deployment result separately.'};
 }
 export const githubActionTools=[
  tool('atax_github_actions_workflows_list',
@@ -71,7 +77,7 @@ export const githubActionTools=[
   'Inspect one real GitHub Actions run, exact head SHA, jobs and steps. Never treats dispatch acknowledgement as successful execution.',
   'atax:github:read',one('Exact run inspection',{...common,run_id:{type:'integer',minimum:1,description:'Known workflow run ID'}},['repository','run_id']),inspectRun),
  tool('atax_github_actions_dispatch',
-  'Explicitly dispatch an authorized PUBLIC repository workflow. Private target execution requires per-user isolated FMRL, not the owner shared ATAX controller.',
+  'Explicitly dispatch a workflow in an authorized GitHub repository (PUBLIC or PRIVATE) using the invited developer account. Execution occurs in that repository GitHub Actions, never ATAX.',
   'atax:github:ci',one('Confirmed workflow dispatch',{...common,workflow:s('Workflow YAML filename',105),ref:s('Git branch/tag ref',100),
    inputs:{type:'object',description:'Up to 10 primitive typed inputs; no credentials'},
    confirm:{type:'boolean',description:'Must be true after explicit user approval'}},['repository','workflow','ref','confirm']),dispatch),
