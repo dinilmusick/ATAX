@@ -107,6 +107,15 @@ function allowedOrigin(req, env){
   return allowed.includes(origin);
 }
 function allowedScope(principal,scope){return principal.scopes.has(scope)||principal.scopes.has('atax:admin');}
+const providerToolNames=new Set(providerTools.map(t=>t.name));
+function canonicalOwner(principal,env){
+  if(principal.authMethod==='shared')return !!env.MCP_SHARED_TOKEN_SHA256&&principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
+  const jwtOwner=String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'').trim();
+  return principal.authMethod==='jwt'&&jwtOwner.length>=3&&principal.id===jwtOwner;
+}
+function toolAllowed(principal,env,tool){
+  return allowedScope(principal,tool.scope)&&(providerToolNames.has(tool.name)||canonicalOwner(principal,env));
+}
 function supabase(env,fetcher){
   const url=String(env.SUPABASE_URL||'').replace(/\/$/,'');
   const key=String(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY||'');
@@ -133,7 +142,7 @@ function supabase(env,fetcher){
 async function runCall(name,args,principal,env,fetcher){
   const match=byName.get(name);
   if(!match)return {isError:true,content:[{type:'text',text:'Unknown tool'}]};
-  if(!allowedScope(principal,match.scope))return {isError:true,content:[{type:'text',text:'Permission denied: '+match.scope+' required'}]};
+  if(!toolAllowed(principal,env,match))return {isError:true,content:[{type:'text',text:'Principal or scope not authorized for this tool'}]};
   if(!isObj(args))return {isError:true,content:[{type:'text',text:'Tool arguments must be an object'}]};
   const schema=match.inputSchema;
   for(const field of schema.required||[]){if(args[field]===undefined)return {isError:true,content:[{type:'text',text:'Missing required argument: '+field}]};}
@@ -163,16 +172,16 @@ async function routeRpc(msg,principal,env,fetcher){
     return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
-  if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>allowedScope(principal,t.scope)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
+  if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
   if(msg.method==='tools/call'){
     if(typeof params.name!=='string')return err(id,-32602,'Missing tool name');
     return ok(id,await runCall(params.name,params.arguments??{},principal,env,fetcher));
   }
-  if(msg.method==='resources/list')return ok(id,{resources:resourceDefs});
-  if(msg.method==='resources/templates/list')return ok(id,{resourceTemplates:[{uriTemplate:'atax://skills/{slug}',name:'Canonical skill instructions',description:'Current published Supabase skill version',mimeType:'application/json'}]});
+  if(msg.method==='resources/list')return ok(id,{resources:canonicalOwner(principal,env)?resourceDefs:[]});
+  if(msg.method==='resources/templates/list')return ok(id,{resourceTemplates:canonicalOwner(principal,env)?[{uriTemplate:'atax://skills/{slug}',name:'Canonical skill instructions',description:'Current published Supabase skill version',mimeType:'application/json'}]:[]});
   if(msg.method==='resources/read'){
     if(typeof params.uri!=='string')return err(id,-32602,'Resource URI required');
-    if(!allowedScope(principal,'atax:read'))return err(id,-32003,'Read scope required');
+    if(!canonicalOwner(principal,env)||!allowedScope(principal,'atax:read'))return err(id,-32003,'Canonical ATAX owner and read scope required');
     try {
       const db=supabase(env,fetcher);
       let result;
@@ -185,8 +194,9 @@ async function routeRpc(msg,principal,env,fetcher){
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
     }catch(error){return err(id,-32001,String(error.message).slice(0,180));}
   }
-  if(msg.method==='prompts/list')return ok(id,{prompts:[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]});
+  if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]:[]});
   if(msg.method==='prompts/get'){
+    if(!canonicalOwner(principal,env))return err(id,-32003,'Canonical ATAX owner required');
     if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
     return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
   }

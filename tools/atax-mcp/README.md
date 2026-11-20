@@ -79,6 +79,12 @@ Cloudflare `atax_cloudflare_accounts_list` discovers account IDs reachable with 
 
 For the existing bootstrap bearer, **verified shared-token authentication provenance** plus `MCP_SHARED_SUBJECT` identifies the owner principal and allows configured aliases subject to the MCP tool scopes (e.g. `atax:github:read`, `atax:github:create`, `atax:cloudflare:read`, `atax:vercel:read`). A signed JWT bearing the **same** `sub` as `MCP_SHARED_SUBJECT` is **not** a bootstrap bearer and receives no owner wildcard; it needs an explicit grant like every other JWT identity. Any other signed JWT subject is **denied by default** and requires an explicit, non-secret `MCP_PROVIDER_ACCOUNT_GRANTS` JSON binding, for example `{"developer-2":{"github":["WORK"],"cloudflare":["WORK"],"vercel":["WORK"]}}`. Never distribute the owner's bootstrap bearer to other users. Provider-native OAuth connections remain separate from these owner-controlled Worker secrets. Prefer provider-scoped limited permissions over full-access tokens.
 
+## Canonical ATAX ledger owner admission
+
+ATAX's Supabase RPCs currently use a privileged server-side key to read and mutate the **owner's canonical ledger**. A JWT's `atax:read`, `atax:write`, `atax:verify`, or `atax:admin` scope alone **must never authorize another subject to access that ledger**. The Worker admits those RPC tools, canonical resources and FMRL/GitHub owner-controller tools only after one of two owner checks: (1) the actually verified shared bootstrap bearer with matching `MCP_SHARED_SUBJECT`, or (2) a verified JWT with `sub` equal to the **single** explicitly configured `MCP_ATAX_OWNER_JWT_SUBJECT`. If that optional binding is absent, no JWT can access the canonical ledger.
+
+Other JWT principals may discover and call their separately granted `atax_provider_accounts_list`, `atax_cloudflare_*`, and `atax_vercel_*` provider read-only tools (subject to their actual scopes and `MCP_PROVIDER_ACCOUNT_GRANTS`). They cannot read canonical Supabase context, tasks, skills, resources, or use the owner's GitHub/FMRL controller. Prefer provider-native GitHub/Cloudflare/Vercel OAuth for each user's code and cloud operations. **This gating is defense-in-depth, not completed multi-tenant Supabase RLS or production certification.** Do not widen `MCP_ATAX_OWNER_JWT_SUBJECT` to many users as a substitute for durable tenant isolation.
+
 ## MCP client configuration
 
 Configure your MCP client with a remote Streamable HTTP URL and a bearer Authorization header:
