@@ -374,5 +374,18 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("FMRL Skipo rule IDs:", controller)
         self.assertNotIn("print(output)", runner)
 
+
+    def test_private_migration_details_are_classified_not_copied(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("dependency_patterns={", runner)
+        self.assertIn("'installed-lock-mismatch'", runner)
+        self.assertIn("'missing-provider-contract'", runner)
+        self.assertIn("FMRL dependency migration categories:", runner)
+        self.assertIn("FMRL Skipo migration categories:", runner)
+        self.assertIn("approved_classifiers={", runner)
+        self.assertIn("FMRL dependency migration categories:", controller)
+        self.assertNotIn("print(output)", runner)
+
 if __name__ == "__main__":
     unittest.main()

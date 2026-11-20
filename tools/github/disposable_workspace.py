@@ -299,6 +299,43 @@ jobs:
               seen=set(re.findall(r'\\bSKIPO_[A-Z0-9_-]+\\b',output))
               safe=sorted(seen.intersection(approved))
               print('FMRL Skipo rule IDs: '+(','.join(safe) if safe else 'none'))
+              # Publish only fixed labels for dependency-migration failures,
+              # not package names, paths, exception messages, source or credentials.
+              dependency_patterns={
+                  'missing-shipped-contract':r'Missing package-shipped migration contract',
+                  'missing-provider-contract':r'No migration contract shipped by',
+                  'bad-contract-schema':r'Invalid migration contract identity/schema|Migration contract .* must contain',
+                  'skipo-range-not-met':r'migration contract requires Skipo|requires Skipo',
+                  'pending-journal':r'Pending migration journal',
+                  'unapplied-steps':r'Unapplied dependency migrations',
+                  'installed-identity':r'Installed package identity mismatch',
+                  'installed-lock-mismatch':r'Manifest/installed/lockfile mismatch',
+                  'invalid-importer':r'Missing or inconsistent pnpm importer entry',
+                  'unsupported-lock':r'Unsupported pnpm lockfile',
+                  'invalid-version':r'Invalid exact dependency version',
+                  'bad-specifier':r'Unsupported or ambiguous package specifier',
+                  'missing-declaration':r'Required migration dependency not declared|Migration provider not declared',
+                  'incompatible-requirement':r'violates required range',
+                  'conflicting-requirements':r'Conflicting dependency constraints',
+                  'ambiguous-terminals':r'Ambiguous applied terminal migrations',
+                  'missing-package-file':r'FileNotFoundError|No such file or directory',
+              }
+              labels=[name for name,pattern in sorted(dependency_patterns.items())
+                      if re.search(pattern,output,re.I)]
+              # The Frnes verifier independently normalizes raw dependency
+              # migration messages into fixed labels before the public bridge.
+              approved_classifiers={
+                  'missing-contract','unapplied','lockfile','installed',
+                  'migration-path','unsafe-path','deprecated-pattern',
+                  'integrity','version','unclassified',
+              }
+              for reported in re.findall(
+                  r'(?m)^FMRL Skipo migration categories: ([a-z,-]{1,180})$',
+                  output):
+                  labels.extend(label for label in reported.split(',')
+                                if label in approved_classifiers)
+              labels=sorted(set(labels))
+              print('FMRL dependency migration categories: '+(','.join(labels) if labels else 'none'))
               subgates=re.findall(
                 r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
                 output)
