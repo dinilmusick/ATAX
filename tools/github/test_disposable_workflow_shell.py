@@ -49,6 +49,7 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("codes=", workflow)
         self.assertIn("FMRL lockfile parse cause:", workflow)
         self.assertIn("multiple-documents", workflow)
+        self.assertIn("FMRL pinned pnpm version: 10.33.0", workflow)
         self.assertIn("FMRL lockfile parse cause:", controller)
         self.assertIn("for attempt in $(seq 1 15)", controller)
         self.assertIn("grep -E '^(FMRL coverage:", controller)
