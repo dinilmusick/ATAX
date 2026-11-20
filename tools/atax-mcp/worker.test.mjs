@@ -118,6 +118,37 @@ test('JWKS bearer validation verifies RSA signature, issuer, audience, expiry an
   const h=createHandler(remote);
   async function invoke(jwt){return h(new Request('https://atax.example/mcp',{method:'POST',headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})}),jwksEnv);}
   assert.equal((await invoke(await sign())).status,200);
+  // A trusted-scope JWT is not automatically the owner of the service-role ATAX ledger.
+  const jwt=await sign();
+  const scoped=await(await invoke(jwt)).json();
+  const scopedNames=scoped.result.tools.map(x=>x.name);
+  assert.ok(scopedNames.includes('atax_provider_accounts_list'));
+  assert.ok(!scopedNames.includes('atax_context'));
+  assert.ok(!scopedNames.includes('atax_task_claim_next'));
+  assert.ok(!scopedNames.includes('atax_github_repository_inspect'));
+  const rpc=async(method,params={},config=jwksEnv)=>h(new Request('https://atax.example/mcp',{
+    method:'POST',headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json'},
+    body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})
+  }),config);
+  const resources=await(await rpc('resources/list')).json();
+  assert.deepEqual(resources.result.resources,[]);
+  const denied=await(await rpc('resources/read',{uri:'atax://context/overview'})).json();
+  assert.equal(denied.error.code,-32003);
+  const deniedCall=await(await rpc('tools/call',{name:'atax_context',arguments:{}})).json();
+  assert.equal(deniedCall.result.isError,true);
+  const prompts=await(await rpc('prompts/list')).json();
+  assert.deepEqual(prompts.result.prompts,[]);
+  const permittedProvider=await(await rpc('tools/call',{name:'atax_provider_accounts_list',arguments:{}})).json();
+  assert.equal(permittedProvider.result.isError,undefined);
+  assert.deepEqual(permittedProvider.result.structuredContent.result.accounts.map(x=>x.aliases),[[],[],[]]);
+  const explicitOwner={...jwksEnv,MCP_ATAX_OWNER_JWT_SUBJECT:'test-jwks-user'};
+  const admitted=await(await rpc('tools/list',{},explicitOwner)).json();
+  assert.ok(admitted.result.tools.some(t=>t.name==='atax_context'));
+  const admittedRead=await(await rpc('resources/read',{uri:'atax://context/overview'},explicitOwner)).json();
+  assert.equal(JSON.parse(admittedRead.result.contents[0].text).rpc,'agent_context_overview');
+  const wrongOwner={...jwksEnv,MCP_ATAX_OWNER_JWT_SUBJECT:'somebody-else'};
+  const nonOwner=await(await rpc('tools/list',{},wrongOwner)).json();
+  assert.ok(!nonOwner.result.tools.some(t=>t.name==='atax_context'));
   assert.equal((await invoke(await sign({aud:'wrong'}))).status,401);
   assert.equal((await invoke(await sign({exp:1}))).status,401);
   assert.equal((await invoke((await sign())+'t')).status,401);
