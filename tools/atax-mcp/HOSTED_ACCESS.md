@@ -34,7 +34,7 @@ On a **trusted owner-controlled machine** with Cloudflare Wrangler authenticated
 
 ```bash
 # Create an access key for one developer; default validity 30 days, max 365 days.
-node tools/atax-mcp/invite-cli.mjs issue guest-01 atax:read,atax:write,atax:github:read,atax:github:create,atax:github:ci,atax:cloudflare:read,atax:vercel:read 30
+node tools/atax-mcp/invite-cli.mjs issue guest-01 atax:read,atax:write,atax:github:read,atax:github:create,atax:github:ci,atax:cloudflare:read,atax:vercel:read,atax:vercel:deploy 30
 
 # Revoke immediately, remove all keys and encrypted provider connections.
 node tools/atax-mcp/invite-cli.mjs revoke guest-01
@@ -72,11 +72,11 @@ Provider connection names use uppercase aliases, e.g. `PERSONAL` or `WORK`. One 
 | Supabase | `url` exactly `https://<project>.supabase.co`, `token` as a server-side `sb_secret_...` key (or legacy service role), alias `DEFAULT` | Calls go only to this developer's project; missing entry **never** falls back to the owner's canonical DB |
 | GitHub | `token` (scoped OAuth/PAT), aliases `PERSONAL`, `WORK`, etc. | The Worker verifies token's `/user` account on registration and the GitHub API enforces its permissions |
 | Cloudflare | `token`, optional `account_id` and alias | Script/observability reads use only that token and its optional account pin |
-| Vercel | `token`, optional `team_id` and alias | Project/deployment reads use only that token and its optional team pin |
+| Vercel | `token`, optional `team_id` and alias | Project/build-event reads and explicitly confirmed Git-linked deployments use only that developer's token and optional team pin. Deployment writes additionally require `atax:vercel:deploy`, with separate confirmation for production. |
 
 **Security warning:** A Supabase secret/service-role key is highly privileged within the developer's own project. Use a dedicated ATAX project, never provide the owner's canonical project key, and review access revocation and project scope. Every developer must independently install the ATAX Supabase schema/migrations in their own project; providing a Data API key does **not** create database tables or functions.
 
-Tenant provider operations include governed GitHub repository actions, **GitHub Actions workflow discovery plus public/private-repository CI dispatch and exact run checks (execution inside each developer's own GitHub repository)**, **Cloudflare Worker deployment and observability summaries**, and **Vercel deployment build-event diagnostics**; separate provider-native OAuth connections are needed for more advanced deployment-management operations. Private-target FMRL CI on the owner's controller is deliberately **disabled** for hosted tenants until their own disposable-controller lifecycle is independently certified. The platform must never run unknown users' private code inside ATAX Actions.
+Tenant provider operations include governed GitHub repository actions, **GitHub Actions workflow discovery plus public/private-repository CI dispatch and exact run checks (execution inside each developer's own GitHub repository)**, **Cloudflare Worker deployment and observability summaries**, and **Vercel Git-linked build creation plus build-event diagnostics**; separate provider-native OAuth connections are needed for more advanced deployment-management operations. Private-target FMRL CI on the owner's controller is deliberately **disabled** for hosted tenants until their own disposable-controller lifecycle is independently certified. The platform must never run unknown users' private code inside ATAX Actions.
 
 ## Operator verification gate
 
