@@ -69,7 +69,37 @@ async function dispatch(a,_db,p,ctx){
   execution_boundary:'GitHub Actions in the developer-owned repository, never shared ATAX Actions',
   note:'Discover matching run, verify head SHA, all jobs and any deployment result separately.'};
 }
+
+const redactDiagnostic=(text,env)=>{
+ let value=String(text??'').slice(0,1200);
+ for(const [key,secret] of Object.entries(env)){
+  if(!/(?:^GH_TOKEN_|^CLOUDFLARE_TOKEN_|^VERCEL_TOKEN_|^SUPABASE_SECRET_KEY$)/.test(key)||
+     typeof secret!=='string'||secret.length<15)continue;
+  value=value.split(secret).join('[REDACTED]');
+ }
+ return value.replace(/Bearer\\s+[^\\s"'<>,]+/gi,'Bearer [REDACTED]')
+   .replace(/(?:gh[pousr]_|sb_secret_)[A-Za-z0-9_=-]{12,}/g,'[REDACTED]')
+   .replace(/\\b(token|secret|password|api[_-]?key)\\s*[=:]\\s*[^\\s,;'"]+/gi,'$1=[REDACTED]').slice(0,800);
+};
+async function checkAnnotations(a,_db,p,ctx){
+ const repo=repoOf(a.repository),account=accountFor(a,p,ctx);
+ if(!Number.isSafeInteger(a.check_run_id)||a.check_run_id<1)throw Error('Invalid GitHub check run ID');
+ const result=await git(ctx.fetcher,'/repos/'+repo+'/check-runs/'+a.check_run_id+'/annotations?per_page=50',account.token);
+ if(!Array.isArray(result))throw Error('GitHub annotations response invalid');
+ return {repository:repo,account:account.alias,check_run_id:a.check_run_id,
+   annotations:result.slice(0,50).map(x=>({
+     path:String(x.path||'').slice(0,260),start_line:x.start_line,end_line:x.end_line,
+     level:x.annotation_level,title:redactDiagnostic(x.title,ctx.env),
+     message:redactDiagnostic(x.message,ctx.env)
+   })),
+   truncated:result.length>=50,
+   note:'Annotations provide bounded compiler/test failure diagnostics; inspect full trusted logs locally if needed.'};
+}
+
 export const githubActionTools=[
+ tool('atax_github_actions_check_annotations',
+  'Read bounded and redacted failure annotations for a developer-owned GitHub check run (e.g. compiler and test errors).',
+  'atax:github:read',one('GitHub check diagnostics',{...common,check_run_id:{type:'integer',minimum:1,description:'GitHub check run ID'}},['repository','check_run_id']),checkAnnotations),
  tool('atax_github_actions_workflows_list',
   'List available GitHub Actions workflows using the invited developer GitHub account.',
   'atax:github:read',one('Workflow discovery',common,['repository']),workflowsList),
