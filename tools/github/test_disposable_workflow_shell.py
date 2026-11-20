@@ -37,10 +37,11 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
 
     def test_node_heredoc_closes_at_scalar_baseline(self):
         script = MODULE.WORKFLOW.split(
-            "      - name: Run portable private-suite checks", 1
+            "      - name: Prepare isolated portable stage runner", 1
         )[1].split("      - name: Remove private checkout", 1)[0]
         self.assertIn("\n          NODE\n", script)
         self.assertNotIn("\n            NODE\n", script)
+        self.assertIn("\n          STAGE\n", script)
         self.assertIn("FMRL direct suite:", script)
 
 
