@@ -36,6 +36,12 @@ jobs:
     env:
       FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}
     steps:
+      - name: Checkout trusted static public FMRL writeback helper
+        if: env.FMRL_EXECUTION_MODE == 'repair'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
       - name: Verify secret-bound private identity and exact commit
         env:
           TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}

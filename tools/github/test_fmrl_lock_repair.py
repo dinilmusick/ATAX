@@ -21,6 +21,8 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn("npm install --package-lock-only --ignore-scripts", repair)
         self.assertIn("npm ci --ignore-scripts", repair)
         self.assertIn("python3 tools/github/fmrl_lock_writer.py", repair)
+        self.assertIn("Checkout trusted static public FMRL writeback helper", wf)
+        self.assertIn("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", wf)
         self.assertIn("secrets.FMRL_REPAIR_WRITE_TOKEN", repair)
         direct = wf.split("      - name: Run portable private-suite checks", 1)[1].split(
             "      - name: Regenerate one lockfile", 1
