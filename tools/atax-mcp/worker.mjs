@@ -73,7 +73,7 @@ async function authenticate(request,env, fetcher){
     if(/^[a-f0-9]{64}$/.test(target)&&timingEq(digest,Uint8Array.from(target.match(/../g),x=>parseInt(x,16)))){
       const id=String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
       if(!/^[\w.@:-]{3,120}$/.test(id))throw new Error('Invalid configured subject');
-      return {id,scopes:new Set(String(env.MCP_SHARED_SCOPES||'atax:read').split(/\s+/))};
+      return {id,authMethod:'shared',scopes:new Set(String(env.MCP_SHARED_SCOPES||'atax:read').split(/\s+/))};
     }
   }
   if(!env.MCP_AUTH_JWKS_URL||!env.MCP_AUTH_ISSUER||!env.MCP_AUTH_AUDIENCE)return null;
@@ -99,7 +99,7 @@ async function authenticate(request,env, fetcher){
     if(!valid)return null;
   }catch{return null;}
   const scopes=String(claims.scope||'').split(/\s+/).filter(Boolean);
-  return {id:claims.sub,scopes:new Set(scopes)};
+  return {id:claims.sub,authMethod:'jwt',scopes:new Set(scopes)};
 }
 function allowedOrigin(req, env){
   const origin=req.headers.get('origin'); if(!origin)return true;

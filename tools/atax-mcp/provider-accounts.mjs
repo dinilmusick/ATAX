@@ -9,7 +9,7 @@ const accountSchema = (other={},required=[])=>schema({account:accountArg,...othe
 
 function grantsFor(env, principal, provider) {
   const owner=String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
-  if (principal && principal.id===owner && env.MCP_SHARED_TOKEN_SHA256) return '*';
+  if (principal?.authMethod==='shared' && principal.id===owner && env.MCP_SHARED_TOKEN_SHA256) return '*';
   // Non-owner JWT identities must have an explicit grant. The mapping is non-secret.
   let grants;
   try { grants=JSON.parse(String(env.MCP_PROVIDER_ACCOUNT_GRANTS||'{}')); }
@@ -32,7 +32,7 @@ export function resolveProviderAccount(env,principal,provider,requested,{legacyK
   const alias=requested===undefined?(names.length===1?names[0]:null):requested.toUpperCase();
   if(alias && names.includes(alias))return {alias,token:env[PREFIX[provider]+alias],legacy:false};
   if (!names.length && provider==='github' && (!requested||requested==='DEFAULT') && legacyKey && env[legacyKey] &&
-      principal?.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator'))
+      principal?.authMethod==='shared' && principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator'))
     return {alias:'DEFAULT',token:String(env[legacyKey]),legacy:true};
   if (!alias && names.length>1)throw new Error('Specify an account alias when multiple accounts are configured');
   throw new Error('Provider account unavailable or not authorized');

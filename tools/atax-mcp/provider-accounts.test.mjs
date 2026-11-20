@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {availableAccounts,resolveProviderAccount,providerTools} from './provider-accounts.mjs';
 
-const owner={id:'owner'};
-const client={id:'client'};
+const owner={id:'owner',authMethod:'shared'};
+const client={id:'client',authMethod:'jwt'};
 const env={
   MCP_SHARED_SUBJECT:'owner',
   MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',
@@ -43,9 +43,22 @@ test('account suffix selects exact credential and never falls back to different 
 test('single secret works without account argument; legacy token preserved for bootstrap',()=>{
   const single={...env,GH_TOKEN_WORK:undefined,CLOUDFLARE_TOKEN_WORK:undefined,VERCEL_TOKEN_WORK:undefined};
   assert.equal(resolveProviderAccount(single,owner,'github').alias,'PERSONAL');
-  const legacy={MCP_SHARED_SUBJECT:'owner',GITHUB_REPOSITORY_TOKEN:'old-github-token'};
+  const legacy={MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',GITHUB_REPOSITORY_TOKEN:'old-github-token'};
   assert.equal(resolveProviderAccount(legacy,owner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}).token,'old-github-token');
   assert.throws(()=>resolveProviderAccount(legacy,client,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}));
+});
+
+test('JWT identity cannot impersonate bootstrap owner by reusing the same subject',()=>{
+  const forgedOwner={id:'owner',authMethod:'jwt'};
+  assert.deepEqual(availableAccounts(env,forgedOwner,'github'),[]);
+  assert.deepEqual(availableAccounts(env,forgedOwner,'cloudflare'),[]);
+  assert.deepEqual(availableAccounts(env,forgedOwner,'vercel'),[]);
+  assert.throws(()=>resolveProviderAccount(env,forgedOwner,'github','WORK'),/not authorized/);
+  assert.throws(()=>resolveProviderAccount(env,forgedOwner,'github','PERSONAL'),/not authorized/);
+  assert.throws(()=>resolveProviderAccount(env,{id:'owner'},'github','PERSONAL'),/not authorized/);
+  const legacy={MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',GITHUB_REPOSITORY_TOKEN:'old-github-token'};
+  assert.throws(()=>resolveProviderAccount(legacy,forgedOwner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}),/not authorized/);
+  assert.equal(resolveProviderAccount(legacy,owner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}).token,'old-github-token');
 });
 
 test('Cloudflare calls selected token; response strips provider secrets and extra fields',async()=>{
