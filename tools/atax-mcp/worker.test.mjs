@@ -131,3 +131,34 @@ test('browser CORS preflight for allowlisted origins and resource template list'
   const templates=await(await post('resources/templates/list')).json();
   assert.equal(templates.result.resourceTemplates[0].uriTemplate,'atax://skills/{slug}');
 });
+
+
+test('governed creation, dependencies and loop contract use canonical RPCs with token identity', async()=>{
+  const base={title:'Test goal',description:'Isolated fake execution',acceptance_criteria:['Checked'],goal_loop_definition:{enabled:false},task_definitions:[{name:'Unit test',actions:[{description:'Check'}]}]};
+  const bounded=await call('atax_goal_create_bounded',base);
+  assert.equal(bounded.payload.result.structuredContent.result.rpc,'goal_ledger_create_hierarchical');
+  assert.equal(bounded.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
+  const vision=await call('atax_vision_create',{title:'Test vision',description:'Example',target:{type:'system',id:'test'}});
+  assert.equal(vision.payload.result.structuredContent.result.rpc,'vision_ledger_create');
+  const omni=await call('atax_goal_create_omni',{...base,goal_type:'implementation',target:{type:'system',id:'test'},behavior_inputs:{},expected_outputs:{},metadata:{vision_id:'v',vision_target_id:'vt'}});
+  assert.equal(omni.payload.result.structuredContent.result.rpc,'goal_ledger_create_omni_hierarchical');
+  assert.equal(omni.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
+  const contract=await call('atax_task_loop_contract',{task_id:'task-test',claim_token:'claim-test',loop_definition:{enabled:true},parameter_contract:{},completion_parameters:[],checkpoints:[]});
+  assert.equal(contract.payload.result.structuredContent.result.rpc,'task_ledger_finalize_loop_script');
+  const dependent=await call('atax_goal_add_dependency',{goal_key:'a',prerequisite_goal_key:'b',dependency_type:'blocking'});
+  assert.equal(dependent.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
+  const pending=await call('atax_verification_pending');
+  assert.equal(pending.payload.result.structuredContent.result.rpc,'task_ledger_pending_verification');
+});
+test('creation schemas reject invalid task arrays, acceptance arrays and priority',async()=>{
+  const empty=await call('atax_goal_create_bounded',{title:'Empty',description:'No tasks',acceptance_criteria:['One'],goal_loop_definition:{},task_definitions:[]});
+  assert.equal(empty.payload.result.isError,true);
+  const bad=await call('atax_goal_priority',{goal_key:'abc',priority:5});
+  assert.equal(bad.payload.result.isError,true);
+  const invalid=await call('atax_goal_create_bounded',{title:'Oops',description:'No acceptance',acceptance_criteria:[],goal_loop_definition:{},task_definitions:[{}]});
+  assert.equal(invalid.payload.result.isError,true);
+  const limited=await call('atax_goal_create_bounded',{title:'A',description:'B',acceptance_criteria:['X'],goal_loop_definition:{},task_definitions:Array.from({length:5},()=>({name:'A'}))});
+  assert.equal(limited.payload.result.isError,true);
+  const readonly={...env,MCP_SHARED_SCOPES:'atax:read'};
+  assert.equal((await call('atax_goal_create_omni',{},{env:readonly})).payload.result.isError,true);
+});
