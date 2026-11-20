@@ -370,6 +370,18 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("state=receipts[-1] if receipts", runner)
         self.assertIn("throw new Error('Direct CI failed: '+name+' exit='+r.status)", runner)
 
+    def test_frnes_verifier_exception_class_receipt_is_closed_enum(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("FMRL Frnes verifier JSON:", runner)
+        self.assertIn("FMRL Frnes exception class:", runner)
+        self.assertIn("FMRL Frnes verifier JSON:", controller)
+        self.assertIn("FMRL Frnes exception class:", controller)
+        self.assertIn("['exec','skipo','verify','.']", runner)
+        self.assertIn("fixedTypes=new Set(['FileNotFoundError'", runner)
+        self.assertIn("approved_errors={'FileNotFoundError'", runner)
+        self.assertIn("fixedTypes.has(code)?code:'none'", runner)
+
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)
