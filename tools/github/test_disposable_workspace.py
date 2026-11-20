@@ -346,7 +346,7 @@ class FmrlTests(unittest.TestCase):
         assert "throw new Error('Direct CI failed: '+name+' exit='+r.status)" in workflow
         assert "FMRL Skipo migration categories:" in workflow
         assert "rm -f /tmp/fmrl-direct-raw.log" in workflow
-        assert "console.log('FMRL diagnostic unavailable')" in workflow
+        assert "console.log('FMRL Frnes diagnostic state: '+state)" in workflow
 
     def test_frnes_skipo_status_classes_are_fixed_and_public_safe(self):
         source = (ROOT / "disposable_workspace.py").read_text()
@@ -379,7 +379,7 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("FMRL Frnes exception class:", controller)
         self.assertIn("['exec','skipo','verify','.']", runner)
         self.assertIn("fixedTypes=new Set(['FileNotFoundError'", runner)
-        self.assertIn("approved_errors={'FileNotFoundError'", runner)
+        self.assertIn("allowed_errors={'FileNotFoundError'", runner)
         self.assertIn("fixedTypes.has(code)?code:'none'", runner)
 
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
