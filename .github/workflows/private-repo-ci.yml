@@ -127,6 +127,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FMRL_DISPATCH_TOKEN || secrets.FMRL_SECRETS_TOKEN }}
           FMRL_CONTENTS_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          FMRL_LOGS_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}
           BRIDGE: ${{ steps.bridge.outputs.repository }}
         shell: bash
         run: |
@@ -202,25 +203,29 @@ jobs:
                   first_job="$(printf '%s' "$jobs" | jq -r '.jobs[0].id // empty' 2>/dev/null || true)"
                   if [[ "$first_job" =~ ^[0-9]+$ ]]; then
                     safe_log="$(mktemp)"
+                    # Check only the static FMRL sanitizer receipts. Token scopes
+                    # differ: the repository Contents token can lack Actions:read
+                    # even when it was authorized to provision a disposable repo.
+                    # None of the credentials are passed to private target scripts.
                     for attempt in $(seq 1 15); do
-                      # GitHub Actions job logs require a scoped Actions-read credential
-                      # on some repositories; an anonymous request can return 403.
-                      # Never print the token or raw private-target log.
-                      if curl -fsSL --connect-timeout 10 --max-time 25 \
-                        -H "Authorization: Bearer $FMRL_CONTENTS_TOKEN" \
-                        -H "Accept: application/vnd.github+json" \
-                        "https://api.github.com/repos/$BRIDGE/actions/jobs/$first_job/logs" \
-                        -o "$safe_log" 2>/dev/null; then
-                        # Only accept fixed-prefix receipts emitted by the trusted
-                        # bridge sanitizer, never arbitrary private target lines.
-                        summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
-                          | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
-                          | tail -n 8 || true)"
-                        if [[ -n "$summary" ]]; then
-                          printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
-                          break
+                      for reader_token in "$FMRL_LOGS_TOKEN" "$GH_TOKEN" "$FMRL_CONTENTS_TOKEN"; do
+                        [[ -n "$reader_token" ]] || continue
+                        if curl -fsSL --connect-timeout 10 --max-time 25 \
+                          -H "Authorization: Bearer $reader_token" \
+                          -H "Accept: application/vnd.github+json" \
+                          "https://api.github.com/repos/$BRIDGE/actions/jobs/$first_job/logs" \
+                          -o "$safe_log" 2>/dev/null; then
+                          # Only exact, allowlisted sanitizer prefixes are eligible.
+                          # Raw logs remain transient and are deleted below.
+                          summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
+                            | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
+                            | tail -n 8 || true)"
+                          if [[ -n "$summary" ]]; then
+                            printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
+                            break 2
+                          fi
                         fi
-                      fi
+                      done
                       sleep 4
                     done
                     if [[ -z "${summary:-}" ]]; then
