@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       worker_url:
-        description: 'Optional exact public Worker URL for health probe (no credentials)'
+        description: 'Required exact public Worker URL for health and auth probe (no credentials)'
         required: true
         type: string
 
