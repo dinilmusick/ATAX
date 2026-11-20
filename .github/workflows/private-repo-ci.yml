@@ -214,7 +214,7 @@ jobs:
                         # Only accept fixed-prefix receipts emitted by the trusted
                         # bridge sanitizer, never arbitrary private target lines.
                         summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
-                          | grep -E '^(FMRL direct suite:|FMRL coverage:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
+                          | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
                           | tail -n 8 || true)"
                         if [[ -n "$summary" ]]; then
                           printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
