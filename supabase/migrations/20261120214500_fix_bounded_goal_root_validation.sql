@@ -1,3 +1,12 @@
+-- Preserve canonical governance columns when reconstructing a new disposable
+-- database from the repository migration chain. These fields already exist
+-- in live ATAX, but were omitted from its resettable migrations.
+ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS request_mode text;
+ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS work_modality text;
+ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS deadline_at timestamptz;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS request_mode text;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS work_modality text;
+
 -- Root goals are not leaf tasks: validate the goal loop as a goal and
 -- preserve mandatory 1..4 actions on each actual direct task.
 -- Reproduced in production and isolated SQL fixtures: a synthetic goal object
