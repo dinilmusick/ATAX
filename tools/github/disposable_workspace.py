@@ -237,9 +237,14 @@ jobs:
                 'typescript':r'TS[0-9]{4}',
                 'module':r'cannot find module|module not found',
                 'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror'}
-              print('FMRL failure categories: '+', '.join(
+              codes=sorted(set(re.findall(
+                r'ERR_PNPM_[A-Z0-9_]+|(?<=npm error code )[A-Z0-9_]+|(?<=npm ERR! code )[A-Z0-9_]+',
+                output,re.I)))
+              summary=', '.join(
                 key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
-                if re.search(pat,output,re.I))[:250])
+                if re.search(pat,output,re.I))
+              if codes: summary+=' codes='+','.join(codes[:8])
+              print('FMRL failure categories: '+summary[:250])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
           SAFE
