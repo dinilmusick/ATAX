@@ -270,6 +270,13 @@ jobs:
                 r'ERR_PNPM_[A-Z0-9_]+|(?<=npm error code )[A-Z0-9_-]+|(?<=npm ERR! code )[A-Z0-9_-]+',
                 output,re.I)))
               print('Safe error identifiers: '+(','.join(codes[:12]) if codes else 'none'))
+              # Fixed-format error codes and allowlisted test-script stages only.
+              ts_codes=sorted(set(re.findall(r'\\bTS[0-9]{4}\\b',output)))
+              print('FMRL TypeScript codes: '+(','.join(ts_codes[:12]) if ts_codes else 'none'))
+              subgates=re.findall(
+                r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
+                output)
+              print('FMRL last observed nested script: '+(subgates[-1] if subgates else 'unknown'))
           SAFE
           rm -f /tmp/fmrl-direct-raw.log
           exit "$result"
