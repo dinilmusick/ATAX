@@ -21,11 +21,11 @@ test('GitHub Actions uses only invited account, returns exact SHA and bounded jo
  assert.ok(!JSON.stringify(run).includes('NEVER_RETURN'));
  assert.ok(called.every(r=>r.config.headers.authorization==='Bearer '+env.GH_TOKEN_WORK));
 });
-test('Dispatch demands explicit intent, public repo, safe typed inputs and returns only acknowledgement',async()=>{
+test('Dispatch accepts developer-owned public and private repositories, refuses cross-repo identity and requires confirmation',async()=>{
  const observed=[];
  const fetcher=async(url,options={})=>{
   observed.push({url,options});
-  if(url==='https://api.github.com/repos/org/app')return Response.json({private:false});
+  if(url==='https://api.github.com/repos/org/app')return Response.json({full_name:'org/app',private:false,permissions:{push:true}});
   if(url.endsWith('/actions/workflows/test.yml'))return Response.json({id:4,state:'active'});
   if(url.endsWith('/dispatches'))return new Response(null,{status:204});
   throw Error('Unexpected request: '+url);
@@ -35,7 +35,17 @@ test('Dispatch demands explicit intent, public repo, safe typed inputs and retur
  await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true,inputs:{api_key:'unsafe'}},fetcher),/Unsupported CI input key/);
  const result=await invoke('atax_github_actions_dispatch',{...base,confirm:true},fetcher);
  assert.equal(result.state,'dispatch_accepted_not_executed');
+ assert.equal(result.visibility,'public');
  const posted=observed.find(x=>x.url.endsWith('/dispatches'));
  assert.deepEqual(JSON.parse(posted.options.body),{ref:'main',inputs:base.inputs});
- await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true},async()=>Response.json({private:true})),/Private-target Actions are disabled/);
+ const privateFetcher=async(url)=>{
+   if(url==='https://api.github.com/repos/org/app')return Response.json({full_name:'org/app',private:true,permissions:{push:true}});
+   if(url.endsWith('/actions/workflows/test.yml'))return Response.json({id:4,state:'active'});
+   if(url.endsWith('/dispatches'))return new Response(null,{status:204});
+   throw Error('Unexpected URL '+url);
+ };
+ const privateResult=await invoke('atax_github_actions_dispatch',{...base,confirm:true},privateFetcher);
+ assert.equal(privateResult.visibility,'private');
+ assert.match(privateResult.execution_boundary,/developer-owned repository/);
+ await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true},async()=>Response.json({full_name:'another-org/private',private:true})),/identity is not verified/);
 });
