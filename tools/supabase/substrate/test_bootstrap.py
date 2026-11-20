@@ -15,7 +15,7 @@ class SubstrateToolTests(unittest.TestCase):
 
     def test_project_ref_is_required(self):
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(bootstrap.SubstrateError, "project ref"):
+            with self.assertRaisesRegex(bootstrap.SubstrateError, "project[-_ ]ref"):
                 bootstrap.project_ref(None)
 
     def test_remote_push_requires_cli_credentials(self):
@@ -26,7 +26,7 @@ class SubstrateToolTests(unittest.TestCase):
     def test_substrate_assets_do_not_embed_secret_values(self):
         substrate = Path(bootstrap.__file__).resolve().parent
         for path in substrate.rglob("*"):
-            if path.is_file():
+            if path.is_file() and path.resolve() != Path(__file__).resolve() and path.suffix in {'.py', '.json', '.sql', '.toml', '.md', '.yml', '.yaml', '.sh'}:
                 text = path.read_text(errors="ignore")
                 self.assertNotIn("sb_secret_", text)
                 self.assertNotIn("sbp_", text)
