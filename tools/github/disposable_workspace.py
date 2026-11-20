@@ -174,72 +174,111 @@ jobs:
         with:
           version: 10.33.0
 
-      - name: Run portable private-suite checks (not full workflow parity)
+      - name: Prepare isolated portable stage runner
         if: env.FMRL_EXECUTION_MODE == 'direct'
         shell: bash
         run: |
           set -euo pipefail
+          cat > /tmp/fmrl-direct-stage <<'STAGE'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          stage="$1"
+          [[ "$stage" =~ ^(install|static|test|build|artifacts)$ ]] || exit 3
           set +e
           (
             set -euo pipefail
             cd target
             test -f package.json
             if [[ -f pnpm-lock.yaml ]]; then
-              pnpm install --frozen-lockfile
-              export FMRL_PACKAGE_MANAGER=pnpm
+              manager=pnpm
             elif [[ -f package-lock.json ]]; then
-              npm ci --include=optional --no-audit --no-fund
-              export FMRL_PACKAGE_MANAGER=npm
+              manager=npm
             else
               exit 42
             fi
-            node --input-type=module <<'NODE'
-            import fs from 'node:fs';
-            import {spawnSync} from 'node:child_process';
-            const p=JSON.parse(fs.readFileSync('package.json','utf8'));
-            const scripts=p.scripts || {};
-            const manager=process.env.FMRL_PACKAGE_MANAGER;
-            if (!scripts.test || !scripts.build || !(scripts.typecheck || scripts.lint))
-              throw new Error('Direct CI requires test, build and lint/typecheck');
-            const ordered=['check:canonical-ui','lint','typecheck','validate:api',
-              'verify:ecosystem-package-chain','verify:architecture','verify:bundle',
-              'test','build','verify:build-artifacts'];
-            const executed=[];
-            for (const name of ordered) {
-              if (!scripts[name]) continue;
-              const r=spawnSync(manager,['run',name],{cwd:process.cwd(),
-                stdio:'inherit',env:process.env});
-              if (r.error) throw r.error;
-              if (r.status !== 0) throw new Error('Direct CI failed: '+name+' exit='+r.status);
-              executed.push(name);
-            }
-            if (!executed.includes('test') || !executed.includes('build'))
-              throw new Error('Missing mandatory direct CI gates');
-            console.log('FMRL portable checks passed: '+executed.join(','));
-            NODE
-          ) >/tmp/fmrl-direct-raw.log 2>&1
-          result=$?
+            if [[ "$stage" == install ]]; then
+              if [[ "$manager" == pnpm ]]; then
+                pnpm install --frozen-lockfile
+              else
+                npm ci --include=optional --no-audit --no-fund
+              fi
+            else
+              FMRL_MANAGER="$manager" FMRL_STAGE="$stage" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {spawnSync} from 'node:child_process';
+          const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+          const scripts=p.scripts||{};
+          const stage=process.env.FMRL_STAGE;
+          const manager=process.env.FMRL_MANAGER;
+          if (!scripts.test || !scripts.build || !(scripts.typecheck || scripts.lint))
+            throw Error('Missing mandatory private suite gates');
+          const names=stage==='static'
+            ? ['check:canonical-ui','lint','typecheck','validate:api',
+               'verify:ecosystem-package-chain','verify:architecture','verify:bundle']
+            : stage==='artifacts' ? ['verify:build-artifacts'] : [stage];
+          let executed=0;
+          for (const name of names) {
+            if (!scripts[name]) continue;
+            const r=spawnSync(manager,['run',name],{cwd:process.cwd(),
+              stdio:'inherit',env:process.env});
+            if (r.error) throw r.error;
+            if (r.status!==0) throw Error('Private suite failed');
+            executed++;
+          }
+          if ((stage==='test'||stage==='build'||stage==='static') && executed===0)
+            throw Error('Missing mandatory stage');
+          NODE
+            fi
+          ) > /tmp/fmrl-stage-raw.log 2>&1
+          status=$?
           set -e
-          python3 - "$result" <<'SAFE'
+          python3 - "$stage" "$status" <<'SAFE'
           from pathlib import Path
           import re,sys
-          output=Path('/tmp/fmrl-direct-raw.log').read_text(errors='replace')
-          code=int(sys.argv[1])
-          print('FMRL direct suite: '+('PASS' if code==0 else 'FAIL')+'; exit='+str(code))
-          print('FMRL coverage: frozen install plus portable package scripts; NOT full workflow parity')
-          receipt=re.findall(r'FMRL portable checks passed: ([A-Za-z0-9:_, -]+)',output)
-          if receipt: print('FMRL verified script names: '+receipt[-1][:250])
+          stage,code=sys.argv[1],int(sys.argv[2])
+          raw=Path('/tmp/fmrl-stage-raw.log').read_text(errors='replace')
+          print('FMRL direct suite: '+('PASS' if code==0 else 'FAIL')+
+                '; stage='+stage+'; exit='+str(code))
+          print('FMRL coverage: frozen install, separate static, test, build and artifact stages; not full workflow parity')
           if code:
-              categories={'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+',
-                'typescript':r'TS[0-9]{4}', 'network':r'getaddrinfo|econnreset|etimedout',
-                'module':r'cannot find module|module not found',
-                'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror'}
+              categories={
+                'dependency':r'ERESOLVE|ERR_PNPM_[A-Z0-9_]+|ERR!|npm error',
+                'typescript':r'TS[0-9]{4}',
+                'network':r'getaddrinfo|econnreset|etimedout',
+                'missing-module':r'cannot find module|module not found',
+                'runtime':r'typeerror|syntaxerror|referenceerror|assertionerror',
+                'lockfile':r'outdated lockfile|not up.to.date with|missing from lock file',
+              }
               print('FMRL failure categories: '+', '.join(
-                key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
-                if re.search(pat,output,re.I))[:250])
+                key+'='+str(len(re.findall(pattern,raw,re.I)))
+                for key,pattern in categories.items() if re.search(pattern,raw,re.I))[:250])
+              codes=sorted(set(re.findall(r'TS[0-9]{4}|ERR_PNPM_[A-Z0-9_]+',raw)))
+              print('Safe error identifiers: '+', '.join(codes[:10]))
           SAFE
-          rm -f /tmp/fmrl-direct-raw.log
-          exit "$result"
+          rm -f /tmp/fmrl-stage-raw.log
+          exit "$status"
+          STAGE
+          chmod 0700 /tmp/fmrl-direct-stage
+
+      - name: Direct frozen dependency installation
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        run: /tmp/fmrl-direct-stage install
+
+      - name: Direct static and architecture checks
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        run: /tmp/fmrl-direct-stage static
+
+      - name: Direct security and integration tests
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        run: /tmp/fmrl-direct-stage test
+
+      - name: Direct application build
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        run: /tmp/fmrl-direct-stage build
+
+      - name: Direct build-artifact checks
+        if: env.FMRL_EXECUTION_MODE == 'direct'
+        run: /tmp/fmrl-direct-stage artifacts
 
       - name: Remove private checkout
         if: always()
