@@ -396,7 +396,7 @@
       "id": 39,
       "name": "Private Repository CI Workspace Runner",
       "slug": "private-repo-ci-workspace-runner",
-      "version": "1.1.2",
+      "version": "2.0.1",
       "status": "active",
       "path": "skills/private-repo-ci-workspace-runner/SKILL.md",
       "tools": [
@@ -412,7 +412,7 @@
       "id": 40,
       "name": "GitHub Development Workspace",
       "slug": "github-development-workspace",
-      "version": "1.1.2",
+      "version": "1.4.1",
       "status": "active",
       "path": "skills/github-development-workspace/SKILL.md",
       "tools": [
