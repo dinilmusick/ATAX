@@ -20,6 +20,9 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn("pnpm install --frozen-lockfile --ignore-scripts", repair)
         self.assertIn("npm install --package-lock-only --ignore-scripts", repair)
         self.assertIn("npm ci --ignore-scripts", repair)
+        self.assertIn("dinilmusick/Frnes", repair)
+        self.assertIn("test -f target/package.json", repair)
+        self.assertIn('ls-files", "--others", "--exclude-standard', (ROOT / "fmrl_lock_writer.py").read_text())
         self.assertIn("python3 tools/github/fmrl_lock_writer.py", repair)
         self.assertIn("Checkout trusted static public FMRL writeback helper", wf)
         self.assertIn("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", wf)
@@ -51,6 +54,10 @@ class FmrlLockRepairContract(unittest.TestCase):
         controller = (ROOT.parent.parent / ".github/workflows/owner-authorized-private-ci.yml").read_text()
         self.assertIn("github.event.issue.user.id == 155351357", controller)
         self.assertIn("[atax-fmrl] repair-lockfile", controller)
+        # The public owner-authorization issue uses ONLY an opaque PR ID.
+        self.assertNotIn("dinilmusick/Frnes", controller)
+        source = (ROOT / "disposable_workspace.py").read_text()
+        self.assertIn('"dinilmusick/Frnes"', source)
         self.assertIn("candidate_repo", controller)
         self.assertIn("source_branch", controller)
 
