@@ -27,3 +27,5 @@ jobs:
         run: |
           node --check tools/atax-mcp/worker.mjs
           node --test tools/atax-mcp/worker.test.mjs
+      - name: Cloudflare Worker packaging dry-run
+        run: npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-mcp-dry-run
