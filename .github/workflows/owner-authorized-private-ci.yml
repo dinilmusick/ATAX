@@ -22,7 +22,7 @@ jobs:
       - name: Resolve private pull request without publishing target metadata
         id: lookup
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
           OPAQUE_PR_ID: ${{ github.event.issue.body }}
         shell: bash
         run: |
@@ -30,9 +30,9 @@ jobs:
           [[ -n "$GH_TOKEN" ]] || { echo 'Private read-only token unavailable'; exit 1; }
           pr_id="$(printf '%s' "$OPAQUE_PR_ID" | tr -d '\r\n[:space:]')"
           [[ "$pr_id" =~ ^PR_[A-Za-z0-9_-]{8,90}$ ]] || { echo 'Invalid opaque pull request id'; exit 1; }
-          # The read-only fine-grained credential does not authorize GraphQL
-          # node lookup. Resolve only across its authorized private repos via
-          # REST without putting repository names or source SHA in public logs.
+          # Use coding-token metadata permissions for private pull requests.
+          # The FMRL checkout still receives only its separate read-only token.
+          # Neither private names nor SHAs are emitted in public logs.
           candidates="$(mktemp)"
           trap 'rm -f "$candidates"' EXIT
           if ! gh api --paginate \
@@ -48,7 +48,8 @@ jobs:
             match="$(gh api --paginate \
               "repos/$repo/pulls?state=open&per_page=100" 2>/dev/null \
               | jq -sr --arg requested "$pr_id" '
-                map(.[] | select(.node_id == $requested and .state == "open"))
+                [ .[] | if type == "array" then .[] else empty end
+                  | select(.node_id == $requested and .state == "open") ]
                 | .[0].head.sha // empty
               ' || true)"
             if [[ "$match" =~ ^[0-9a-f]{40}$ ]]; then
