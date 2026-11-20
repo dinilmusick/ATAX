@@ -208,9 +208,11 @@ jobs:
             const manager=process.env.FMRL_PACKAGE_MANAGER;
             if (!scripts.test || !scripts.build || !(scripts.typecheck || scripts.lint))
               throw new Error('Direct CI requires test, build and lint/typecheck');
+            // Verify generated bundle/artifacts only AFTER building the app.
+            // Running verify:bundle against a missing dist/ is a false CI failure.
             const ordered=['check:canonical-ui','lint','typecheck','validate:api',
-              'verify:ecosystem-package-chain','verify:architecture','verify:bundle',
-              'test','build','verify:build-artifacts'];
+              'verify:ecosystem-package-chain','verify:architecture','build',
+              'verify:bundle','test','verify:build-artifacts'];
             const executed=[];
             for (const name of ordered) {
               if (!scripts[name]) continue;
