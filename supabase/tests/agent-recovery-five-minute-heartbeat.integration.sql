@@ -23,7 +23,7 @@ begin
   where id<>registered.id and status in ('queued','running');
 
   update public.tasks
-  set goal_id=fixture_goal_id, required_capabilities=array['heartbeat-hardening']::text[], task_role='loop_authoring'
+  set goal_id=fixture_goal_id, target=(select target from public.goals where id=fixture_goal_id), required_capabilities=array['heartbeat-hardening']::text[], task_role='loop_authoring'
   where id=registered.id;
 
   select * into first_claim from public.task_ledger_claim_next(
