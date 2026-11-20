@@ -275,6 +275,30 @@ jobs:
               # Fixed-format error codes and allowlisted test-script stages only.
               ts_codes=sorted(set(re.findall(r'\\bTS[0-9]{4}\\b',output)))
               print('FMRL TypeScript codes: '+(','.join(ts_codes[:12]) if ts_codes else 'none'))
+              # Only these audited Skipo invariant codes may leave the
+              # private runner; no raw diagnostics, paths, strings or tokens.
+              approved={
+                  'SKIPO_CANONICAL_DEPENDENCY_MISMATCH',
+                  'SKIPO_DEPENDENCY_STATE_MISMATCH',
+                  'SKIPO_VERSION_MISMATCH',
+                  'SKIPO_MIGRATION_NOT_APPLIED',
+                  'SKIPO_MIGRATION_PENDING',
+                  'SKIPO_MIGRATION_STATE_INVALID',
+                  'SKIPO_GENERATED_MISSING',
+                  'SKIPO_CHECKSUM_MISMATCH',
+                  'SKIPO_PROVIDER_OWNERSHIP_MISMATCH',
+                  'SKIPO_ARCHITECTURE_AMBIGUOUS',
+                  'SKIPO_NONCANONICAL_SOURCE',
+                  'SKIPO_CONSTRAINT_ENV-001',
+                  'SKIPO_CONSTRAINT_VALIDATOR_FAILED',
+                  'SKIPO_DEPENDENCY_MIGRATION_INCOMPLETE',
+                  'SKIPO_FORBIDDEN_ENVIRONMENT_VARIABLE',
+                  'SKIPO_CANONICAL_SHELL_INVALID',
+                  'SKIPO_ARCHITECTURAL_DRIFT_RETIRE',
+              }
+              seen=set(re.findall(r'\\bSKIPO_[A-Z0-9_-]+\\b',output))
+              safe=sorted(seen.intersection(approved))
+              print('FMRL Skipo rule IDs: '+(','.join(safe) if safe else 'none'))
               subgates=re.findall(
                 r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
                 output)
