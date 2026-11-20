@@ -54,11 +54,11 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
     def test_safe_python_diagnostics_parse_without_raw_log_exposure(self):
         import ast
         workflow = MODULE.WORKFLOW
-        embedded = workflow.split("          python3 - \\"$result\\" <<'SAFE'\\n", 1)[1].split(
-            "\\n          SAFE\\n", 1)[0]
-        source = "\\n".join(
+        marker = """          python3 - "$result" <<'SAFE'\n"""
+        embedded = workflow.split(marker, 1)[1].split("\n          SAFE\n", 1)[0]
+        source = "\n".join(
             line[10:] if line.startswith("          ") else line
-            for line in embedded.split("\\n")
+            for line in embedded.split("\n")
         )
         ast.parse(source)
         self.assertIn("FMRL TypeScript codes:", source)
