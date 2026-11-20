@@ -35,6 +35,17 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
             checked += 1
         self.assertGreaterEqual(checked, 5)
 
+    def test_safe_failure_categories_survive_control_plane_cleanup(self):
+        workflow = MODULE.WORKFLOW
+        controller = (Path(__file__).parents[2] / ".github" /
+                      "workflows" / "private-repo-ci.yml").read_text()
+        self.assertIn("FMRL failure categories:", workflow)
+        self.assertIn("FMRL failing gate:", workflow)
+        self.assertIn("lockfile", workflow)
+        self.assertIn("for attempt in $(seq 1 15)", controller)
+        self.assertIn("grep -E '^(FMRL coverage:", controller)
+        self.assertIn("ALWAYS delete FMRL and verify absence", controller)
+
     def test_node_heredoc_closes_at_scalar_baseline(self):
         script = MODULE.WORKFLOW.split(
             "      - name: Run portable private-suite checks", 1
