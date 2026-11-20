@@ -12,12 +12,14 @@ jobs:
   resolve:
     if: >-
       github.event.issue.user.id == 155351357 &&
-      github.event.issue.title == '[atax-fmrl] verify'
+      (github.event.issue.title == '[atax-fmrl] verify' ||
+       github.event.issue.title == '[atax-fmrl] repair-lockfile')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       repository: ${{ steps.lookup.outputs.repository }}
       ref: ${{ steps.lookup.outputs.ref }}
+      branch: ${{ steps.lookup.outputs.branch }}
     steps:
       - name: Resolve private pull request without publishing target metadata
         id: lookup
@@ -43,6 +45,7 @@ jobs:
           fi
           name=""
           sha=""
+          source_branch=""
           while IFS= read -r repo; do
             [[ "$repo" =~ ^dinilmusick/[A-Za-z0-9_.-]+$ ]] || continue
             match="$(gh api --paginate \
@@ -50,11 +53,17 @@ jobs:
               | jq -sr --arg requested "$pr_id" '
                 [ .[] | if type == "array" then .[] else empty end
                   | select(.node_id == $requested and .state == "open") ]
-                | .[0].head.sha // empty
+                | .[0] | if . == null then empty
+                  else [.head.sha, .head.ref, .head.repo.full_name] | @tsv end
               ' || true)"
-            if [[ "$match" =~ ^[0-9a-f]{40}$ ]]; then
+            IFS=$'\t' read -r candidate_sha candidate_branch candidate_repo <<< "$match"
+            if [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ &&
+                  "$candidate_repo" == "$repo" &&
+                  "$candidate_branch" =~ ^[A-Za-z0-9_./-]{1,180}$ &&
+                  "$candidate_branch" != *..* ]]; then
               name="$repo"
-              sha="$match"
+              sha="$candidate_sha"
+              source_branch="$candidate_branch"
               break
             fi
           done < "$candidates"
@@ -63,7 +72,7 @@ jobs:
             exit 1
           }
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          printf 'repository=%s\nref=%s\n' "$name" "$sha" >> "$GITHUB_OUTPUT"
+          printf 'repository=%s\nref=%s\nbranch=%s\n' "$name" "$sha" "$source_branch" >> "$GITHUB_OUTPUT"
           echo 'Resolved exact private PR head using authorized owner and clone-only credential.' >> "$GITHUB_STEP_SUMMARY"
 
   verify:
@@ -74,6 +83,8 @@ jobs:
       ref: ${{ needs.resolve.outputs.ref }}
       event: push
       workflow: ""
+      mode: ${{ github.event.issue.title == '[atax-fmrl] repair-lockfile' && 'repair' || 'direct' }}
+      branch: ${{ needs.resolve.outputs.branch }}
     secrets: inherit
 
   report:

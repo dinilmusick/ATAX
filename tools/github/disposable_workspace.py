@@ -8,6 +8,7 @@ removes the checkout before the job ends.
 """
 from __future__ import annotations
 import argparse, base64, json, os, re, shutil, subprocess, time, uuid
+from pathlib import Path
 from urllib import error, request
 
 API_ROOT = "https://api.github.com"
@@ -44,7 +45,7 @@ jobs:
           set -euo pipefail
           [[ "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$TARGET_REF" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$FMRL_EXECUTION_MODE" =~ ^(direct|act)$ ]]
+          [[ "$FMRL_EXECUTION_MODE" =~ ^(direct|act|repair)$ ]]
 
       - name: Clone private target at runtime
         env:
@@ -163,13 +164,13 @@ jobs:
           exit "$nested_status"
 
       - name: Set up direct-suite Node host
-        if: env.FMRL_EXECUTION_MODE == 'direct'
+        if: env.FMRL_EXECUTION_MODE == 'direct' || env.FMRL_EXECUTION_MODE == 'repair'
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
       - name: Set up frozen pnpm host
-        if: env.FMRL_EXECUTION_MODE == 'direct'
+        if: env.FMRL_EXECUTION_MODE == 'direct' || env.FMRL_EXECUTION_MODE == 'repair'
         uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
@@ -257,6 +258,52 @@ jobs:
           rm -f /tmp/fmrl-direct-raw.log
           exit "$result"
 
+      - name: Regenerate one lockfile without executing target scripts
+        if: env.FMRL_EXECUTION_MODE == 'repair'
+        shell: bash
+        env:
+          TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          test -d target/.git
+          test ! -e target/.pnpmfile.cjs
+          test ! -e target/.pnpmfile.mjs
+          status=0
+          if [[ "$TARGET_REPOSITORY" == dinilmusick/Luth ]]; then
+            test -f target/pnpm-lock.yaml
+            (cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
+               pnpm install --frozen-lockfile --ignore-scripts) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
+          elif [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine ]]; then
+            test -f target/package-lock.json
+            (cd target && npm install --package-lock-only --ignore-scripts --no-audit --no-fund &&
+               npm ci --ignore-scripts --no-audit --no-fund) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
+          else
+            echo 'FMRL repair denied for unapproved target'
+            exit 1
+          fi
+          if [[ "$status" != 0 ]]; then
+            echo 'FMRL lockfile regeneration failed; target output suppressed'
+            grep -Eo 'ERR_PNPM_[A-Z0-9_]+|npm error code [A-Z0-9_]+' /tmp/fmrl-repair-raw.log \
+              | sort -u | head -n 8 | sed 's/^/FMRL safe package error: /' || true
+            rm -f /tmp/fmrl-repair-raw.log
+            exit 1
+          fi
+          rm -f /tmp/fmrl-repair-raw.log
+          git -C target diff --check >/dev/null
+          echo 'FMRL lockfile regenerated and frozen install independently passed'
+
+      - name: Atomically commit only the lockfile to exact private PR head
+        if: env.FMRL_EXECUTION_MODE == 'repair'
+        shell: bash
+        env:
+          FMRL_TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          FMRL_TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
+          FMRL_TARGET_BRANCH: ${{ secrets.FMRL_TARGET_BRANCH }}
+          FMRL_REPAIR_WRITE_TOKEN: ${{ secrets.FMRL_REPAIR_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 tools/github/fmrl_lock_writer.py
+
       - name: Remove private checkout
         if: always()
         run: |
@@ -321,7 +368,8 @@ def main() -> int:
     parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
     parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
     parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
-    parser.add_argument("--mode", choices=("direct", "act"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
+    parser.add_argument("--mode", choices=("direct", "act", "repair"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
+    parser.add_argument("--branch", default="", help="Exact private PR branch for lockfile repair.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -336,6 +384,12 @@ def main() -> int:
 
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
+    if args.mode == "repair":
+        if args.source not in ("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine"):
+            raise SystemExit("Repair target must be an allowlisted private authentication repository.")
+        if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
+            raise SystemExit("Repair requires a safe exact PR head branch.")
+
     if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", args.workflow):
         raise SystemExit("Unsafe workflow file.")
 
@@ -368,6 +422,14 @@ def main() -> int:
             "branch": "main",
         })
 
+        if args.mode == "repair":
+            writer = Path(__file__).with_name("fmrl_lock_writer.py").read_bytes()
+            api(f"/repos/{target}/contents/tools/github/fmrl_lock_writer.py", bearer, "PUT", {
+                "message": "chore: add static lockfile writeback helper",
+                "content": base64.b64encode(writer).decode(),
+                "branch": "main",
+            })
+
         if shutil.which("gh") is None:
             raise SystemExit("GitHub CLI (gh) is required to configure the encrypted Actions secret.")
 
@@ -378,6 +440,10 @@ def main() -> int:
         env["GH_TOKEN"] = secret_writer
         # Private repository name, exact SHA, and clone credential remain
         # encrypted runtime secrets, never public Git commit content.
+        repair_secrets = (
+            (("FMRL_TARGET_BRANCH", args.branch),
+             ("FMRL_REPAIR_WRITE_TOKEN", bearer)) if args.mode == "repair" else ()
+        )
         for secret_name, secret_value in (
             ("PRIVATE_REPO_TOKEN", clone_token),
             ("FMRL_TARGET_REPOSITORY", args.source),
@@ -385,7 +451,7 @@ def main() -> int:
             ("FMRL_TARGET_EVENT", args.event),
             ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
             ("FMRL_EXECUTION_MODE", args.mode),
-        ):
+        ) + repair_secrets:
           for attempt in range(4):
             try:
                 subprocess.run(
@@ -432,7 +498,8 @@ def main() -> int:
             "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
             "execution_mode": args.mode,
-            "coverage": "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act",
+            "coverage": ("lockfile-only repair and frozen install" if args.mode == "repair" else
+                         "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act"),
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
             "cleanup": f"python3 tools/github/repository_lifecycle.py delete --repository {target}",
         }, indent=2))
