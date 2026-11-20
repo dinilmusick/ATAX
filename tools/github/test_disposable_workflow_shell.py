@@ -62,6 +62,10 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("break 2", controller)
         self.assertIn("grep -E '^(FMRL coverage:", controller)
         self.assertIn("ALWAYS delete FMRL and verify absence", controller)
+        self.assertIn("GITHUB_INDEPENDENT_READ_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}", controller)
+        lifecycle = (Path(__file__).with_name("repository_lifecycle.py")).read_text()
+        self.assertIn("alternate_confirmed", lifecycle)
+        self.assertIn("if exc.code in (403, 429)", lifecycle)
 
     def test_safe_python_diagnostics_parse_without_raw_log_exposure(self):
         import ast
