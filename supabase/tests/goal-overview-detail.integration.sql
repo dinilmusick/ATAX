@@ -18,7 +18,7 @@ begin
     'overview-test-agent',
     jsonb_build_object(
       'name','Overview fixture task',
-      'actions',jsonb_build_array('Create the fixture goal','Read the global overview','Assert the full goal and task context'),
+      'actions',jsonb_build_array(jsonb_build_object('description','Create the fixture goal'),jsonb_build_object('description','Read the global overview'),jsonb_build_object('description','Assert the full goal and task context')),
       'general_pattern','create fixture → inspect overview → verify required context',
       'acceptance_criteria',jsonb_build_array('Task criterion is visible'),
       'verification_plan',jsonb_build_object('method','independent SQL assertion'),

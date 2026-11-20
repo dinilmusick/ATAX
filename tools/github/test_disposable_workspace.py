@@ -363,5 +363,29 @@ class FmrlTests(unittest.TestCase):
         self.assertNotIn('inputs[repository]', controller)
         self.assertIn('gh api -X POST "repos/$BRIDGE/actions/workflows/atax-private-ci.yml/dispatches" -f ref=main',controller)
 
+
+    def test_skipo_rule_diagnostics_are_bounded_public_identifiers(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("approved={", runner)
+        self.assertIn("SKIPO_CANONICAL_DEPENDENCY_MISMATCH", runner)
+        self.assertIn("seen.intersection(approved)", runner)
+        self.assertIn("FMRL Skipo rule IDs:", runner)
+        self.assertIn("FMRL Skipo rule IDs:", controller)
+        self.assertNotIn("print(output)", runner)
+
+
+    def test_skipo_migration_classes_cannot_expose_target_error_text(self):
+        runner = (ROOT / 'disposable_workspace.py').read_text()
+        controller = (ROOT.parent.parent / '.github/workflows/private-repo-ci.yml').read_text()
+        self.assertIn('allowed_categories={', runner)
+        self.assertIn('invalid-exact-version', runner)
+        self.assertIn('incompatible-range', runner)
+        self.assertIn('missing-provider-declaration', runner)
+        self.assertIn('items.intersection(allowed_categories)', runner)
+        self.assertIn('FMRL Skipo migration categories:', runner)
+        self.assertIn('FMRL Skipo migration categories:', controller)
+        self.assertNotIn('print(output)', runner)
+
 if __name__ == "__main__":
     unittest.main()

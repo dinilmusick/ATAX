@@ -3,12 +3,16 @@ begin;
 do $test$
 declare
   registered public.tasks;
+  fixture_goal_id uuid;
   first_claim public.tasks;
   early_claim public.tasks;
   recovered public.tasks;
   handoff public.task_events;
   old_token uuid;
 begin
+  insert into public.goals(name,created_by_agent_id,status)
+  values ('Fixture heartbeat-hardening ' || replace(gen_random_uuid()::text,'-',''),'heartbeat-hardening-orchestrator','ready')
+  returning id into fixture_goal_id;
   select * into registered from public.task_ledger_register(
     'heartbeat-hardening-test','Heartbeat Hardening Test','5-minute recovery leaf',
     'Disposable integration-test task',array['heartbeat-hardening']::text[],
@@ -19,7 +23,7 @@ begin
   where id<>registered.id and status in ('queued','running');
 
   update public.tasks
-  set required_capabilities=array['heartbeat-hardening']::text[]
+  set goal_id=fixture_goal_id, target=(select target from public.goals where id=fixture_goal_id), required_capabilities=array['heartbeat-hardening']::text[], task_role='loop_authoring'
   where id=registered.id;
 
   select * into first_claim from public.task_ledger_claim_next(

@@ -15,7 +15,7 @@ class SubstrateToolTests(unittest.TestCase):
 
     def test_project_ref_is_required(self):
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(bootstrap.SubstrateError, "project[-_ ]ref"):
+            with self.assertRaisesRegex(bootstrap.SubstrateError, "SUPABASE_PROJECT_ID|project ref"):
                 bootstrap.project_ref(None)
 
     def test_remote_push_requires_cli_credentials(self):
@@ -26,10 +26,12 @@ class SubstrateToolTests(unittest.TestCase):
     def test_substrate_assets_do_not_embed_secret_values(self):
         substrate = Path(bootstrap.__file__).resolve().parent
         for path in substrate.rglob("*"):
-            if path.is_file() and path.resolve() != Path(__file__).resolve() and path.suffix in {'.py', '.json', '.sql', '.toml', '.md', '.yml', '.yaml', '.sh'}:
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                # Construct marker fragments so the scanner doesn't flag its own
+                # test expectations; still reject those markers in every asset.
                 text = path.read_text(errors="ignore")
-                self.assertNotIn("sb_secret_", text)
-                self.assertNotIn("sbp_", text)
+                self.assertNotIn("sb_" + "secret_", text)
+                self.assertNotIn("sb" + "p_", text)
 
 
 
