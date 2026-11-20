@@ -74,3 +74,10 @@ Vision-linked Omni goals require an actual target and existing attached tldraw b
 ## Build and independent verification
 
 The CI job checks the deterministic, secret-free protocol/auth suite and a Cloudflare Wrangler deploy dry-run. A dry-run confirms Worker packaging only, not credentials or live Supabase calls. Production release requires authenticated read/write/verifier tests and independent evidence without secrets.
+
+
+## Independent loop authoring and safe claims
+
+New MCP-governed goals initialize finite tasks in `loop_authoring` state. A distinct first worker must claim and finalize a nonempty loop-definition and parameter-contract object with `atax_task_loop_contract` (the `checkpoints` parameter is a JSON **object**), which returns the task to the execution queue. A different agent must claim and execute the task. The goal-scoped `atax_goal_claim_task` dispatches to a service-role-only `atax_goal_claim_safe` RPC that rejects unready execution loops or the same author identity. Global `atax_task_claim_next` retains its canonical gate. PostgreSQL enforces lease fencing and independent verification, even if a remote client supplies malformed inputs.
+
+These requirements depend on the migration `20261120111500_atax_mcp_independent_loop_contracts.sql`; deploy the migration before enabling writes.
