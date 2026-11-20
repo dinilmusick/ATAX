@@ -48,6 +48,37 @@ Optional `MCP_ALLOWED_ORIGINS` (comma-separated exact HTTPS origin strings) enab
 
 The server exposes `atax_github_workflows_guide` (always read first), `atax_github_repository_create` and `atax_github_repository_inspect` for permanent repositories, plus `atax_fmrl_create_run_dispose` and `atax_fmrl_get_status` for **automatic provision → run → mandatory delete and independent 404**. The FMRL tools call the existing ATAX GitHub Actions *controller*, never run target code in ATAX. Tools have distinct operator permissions: `atax:github:read`, `atax:github:create` and `atax:fmrl:execute`. Set `MCP_GITHUB_OWNER`, `MCP_FMRL_ALLOWED_TARGETS`, `GITHUB_REPOSITORY_TOKEN` and `GITHUB_FMRL_DISPATCH_TOKEN` (tokens are Worker secrets). FMRL dispatch is disabled without an explicit target-repository allowlist. Full setup, security and agent examples: [GITHUB_TOOLS.md](GITHUB_TOOLS.md).
 
+
+## Named GitHub, Cloudflare, and Vercel accounts
+
+For a **single owner-operated ATAX server**, add as many Cloudflare Worker secrets as needed. The suffix is the account alias; the braces in GH_TOKEN_<ALIAS> are placeholders, not literal characters.
+
+| Worker secret | Use |
+| --- | --- |
+| GH_TOKEN_PERSONAL | GitHub personal token |
+| GH_TOKEN_WORK | GitHub work token |
+| CLOUDFLARE_TOKEN_PERSONAL | Cloudflare API token |
+| CLOUDFLARE_TOKEN_WORK | Second Cloudflare API token |
+| VERCEL_TOKEN_PERSONAL | Vercel personal token |
+| VERCEL_TOKEN_WORK | Second Vercel token |
+
+Run from this directory (the actual credential is entered securely in the terminal, never committed):
+
+```bash
+npx wrangler secret put GH_TOKEN_PERSONAL
+npx wrangler secret put GH_TOKEN_WORK
+npx wrangler secret put CLOUDFLARE_TOKEN_PERSONAL
+npx wrangler secret put VERCEL_TOKEN_PERSONAL
+```
+
+A new correctly named secret appears automatically through `atax_provider_accounts_list`; no code change is needed for additional aliases. If exactly one permitted credential exists for a provider, `account` can be omitted. If multiple accounts exist, pass `account: "WORK"` (or another alias). Values never appear in tools/list, tool responses, or logs.
+
+GitHub `atax_github_repository_inspect` and `atax_github_repository_create` use the named account credential and verify the resulting repository identity. Existing `GITHUB_REPOSITORY_TOKEN` remains as a legacy single-account fallback when no named GitHub tokens exist. FMRL CI dispatch continues to use `GITHUB_FMRL_DISPATCH_TOKEN` and its canonical allowlist.
+
+Cloudflare `atax_cloudflare_accounts_list` discovers account IDs reachable with the selected token; `atax_cloudflare_workers_list` accepts an `account_id`, or a non-secret `CLOUDFLARE_ACCOUNT_ID_WORK` binding can pin the WORK account. Vercel `atax_vercel_projects_list` and `atax_vercel_deployments_list` can be scoped to a Vercel team via non-secret `VERCEL_TEAM_ID_WORK`. They are **read-only diagnostic operations**. Authentication, provider permissions and sufficient token scopes are required; simply setting a token does not magically create write/deployment capabilities.
+
+For the existing bootstrap bearer, `MCP_SHARED_SUBJECT` identifies the owner principal and that owner can access configured aliases subject to the MCP tool scopes (e.g. `atax:github:read`, `atax:github:create`, `atax:cloudflare:read`, `atax:vercel:read`). Any other signed JWT subject is **denied by default** and requires an explicit, non-secret `MCP_PROVIDER_ACCOUNT_GRANTS` JSON binding, for example `{"developer-2":{"github":["WORK"],"cloudflare":["WORK"],"vercel":["WORK"]}}`. Never distribute the owner's bootstrap bearer to other users. Provider-native OAuth connections remain separate from these owner-controlled Worker secrets. Prefer provider-scoped limited permissions over full-access tokens.
+
 ## MCP client configuration
 
 Configure your MCP client with a remote Streamable HTTP URL and a bearer Authorization header:

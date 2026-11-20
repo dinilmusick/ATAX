@@ -275,3 +275,45 @@ test('FMRL incomplete and missing cleanup cannot be misreported as successful',a
   assert.equal(fail.structuredContent.result.conclusion,'failure');
   assert.match(fail.structuredContent.result.next,/blocker/i);
 });
+
+
+test('MCP named GitHub accounts use selected token and do not use canonical owner for alternate identities',async()=>{
+  const chosen={...gitEnv,GH_TOKEN_PERSONAL:'personal-token-value',GH_TOKEN_WORK:'work-token-value'};
+  const seen=[];
+  const remote=async(url,opts={})=>{
+    seen.push({url,opts});
+    if(url==='https://api.github.com/user')return Response.json({login:'other-developer'});
+    if(url==='https://api.github.com/user/repos')return Response.json({
+      full_name:'other-developer/newapp',html_url:'https://github.com/other-developer/newapp',private:true,default_branch:'main'
+    },{status:201});
+    if(url==='https://api.github.com/repos/other-developer/newapp')return Response.json({
+      full_name:'other-developer/newapp',html_url:'https://github.com/other-developer/newapp',private:true,default_branch:'main'
+    });
+    throw Error('unexpected GitHub '+url);
+  };
+  const created=await makeGitCall('atax_github_repository_create',{name:'newapp',account:'WORK'},{env:chosen,fetcher:remote});
+  assert.equal(created.isError,undefined);
+  assert.equal(created.structuredContent.result.repository,'other-developer/newapp');
+  assert.equal(created.structuredContent.result.account,'WORK');
+  assert.ok(seen.every(x=>x.opts.headers.authorization==='Bearer work-token-value'));
+  const denied=await makeGitCall('atax_github_repository_create',{name:'newapp'},{env:chosen,fetcher:remote});
+  assert.equal(denied.isError,true);
+  assert.equal(seen.length,3);
+});
+
+test('MCP exposes provider diagnostics only with correct scopes and authenticated aliases',async()=>{
+  const cfg={...gitEnv,
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read atax:vercel:read',
+    GH_TOKEN_WORK:'git-work-secret',
+    CLOUDFLARE_TOKEN_WORK:'cf-work-secret',
+    VERCEL_TOKEN_WORK:'vercel-work-secret'
+  };
+  const fetched=(await(await post('tools/list',{}, {env:cfg})).json()).result.tools.map(t=>t.name);
+  assert.ok(fetched.includes('atax_provider_accounts_list'));
+  assert.ok(fetched.includes('atax_cloudflare_accounts_list'));
+  assert.ok(fetched.includes('atax_vercel_projects_list'));
+  assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
+  const list=await makeGitCall('atax_provider_accounts_list',{}, {env:cfg});
+  assert.equal(list.structuredContent.result.accounts.find(x=>x.provider==='vercel').aliases[0],'WORK');
+  assert.equal((await makeGitCall('atax_cloudflare_accounts_list',{account:'WORK'},{env:gitEnv})).isError,true);
+});

@@ -29,7 +29,8 @@ jobs:
         run: |
           node --check tools/atax-mcp/worker.mjs
           node --check tools/atax-mcp/github-tools.mjs
-          node --test tools/atax-mcp/worker.test.mjs
+          node --check tools/atax-mcp/provider-accounts.mjs
+          node --test tools/atax-mcp/*.test.mjs
 
       - name: Independent live Cloudflare health and fail-closed probe
         if: github.event_name == 'pull_request' && github.head_ref == 'feat/atax-remote-mcp-gateway-20261120'
