@@ -219,7 +219,20 @@ jobs:
               const r=spawnSync(manager,['run',name],{cwd:process.cwd(),
                 stdio:'inherit',env:process.env});
               if (r.error) throw r.error;
-              if (r.status !== 0) throw new Error('Direct CI failed: '+name+' exit='+r.status);
+              if (r.status !== 0) {
+                // The mandatory gate has already failed. The diagnostic is
+                // strictly additive, owner-scoped, and read-only. Its entire
+                // output remains in the ephemeral private raw log; only the
+                // static allowlisted categories below leave this runner.
+                if (name === 'validate:api' && p.name === 'frnes' &&
+                    scripts['validate:diagnostic'] === 'node scripts/frnes-validate-skipo.mjs') {
+                  const diagnostic=spawnSync(manager,['run','validate:diagnostic'],{
+                    cwd:process.cwd(),stdio:'inherit',env:process.env,timeout:40000,
+                  });
+                  if (diagnostic.error) console.log('FMRL diagnostic unavailable');
+                }
+                throw new Error('Direct CI failed: '+name+' exit='+r.status);
+              }
               executed.push(name);
             }
             if (!executed.includes('test') || !executed.includes('build'))
