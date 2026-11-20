@@ -16,7 +16,7 @@ begin
     'Disposable integration-test task',array['recovery-threshold']::text[],
     'recovery-threshold-session','worker',3::smallint,'Testing heartbeat-based recovery','{}'::jsonb,null
   );
-  update public.tasks set goal_id=fixture_goal_id, required_capabilities=array['recovery-threshold']::text[], task_role='loop_authoring' where id=registered.id;
+  update public.tasks set goal_id=fixture_goal_id, target=(select target from public.goals where id=fixture_goal_id), required_capabilities=array['recovery-threshold']::text[], task_role='loop_authoring' where id=registered.id;
   select * into first_claim from public.task_ledger_claim_next(
     'recovery-threshold-old','Old Worker','worker',array['recovery-threshold']::text[],900
   );
