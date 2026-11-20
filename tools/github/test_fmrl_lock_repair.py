@@ -21,6 +21,7 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn("npm install --package-lock-only --ignore-scripts", repair)
         self.assertIn("npm ci --ignore-scripts", repair)
         self.assertIn("dinilmusick/Frnes", repair)
+        self.assertIn("dinilmusick/Embr", repair)
         self.assertIn("test -f target/package.json", repair)
         self.assertIn('ls-files", "--others", "--exclude-standard', (ROOT / "fmrl_lock_writer.py").read_text())
         self.assertIn("python3 tools/github/fmrl_lock_writer.py", repair)
@@ -58,6 +59,8 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertNotIn("dinilmusick/Frnes", controller)
         source = (ROOT / "disposable_workspace.py").read_text()
         self.assertIn('"dinilmusick/Frnes"', source)
+        self.assertIn('"dinilmusick/Embr"', source)
+        self.assertIn('"dinilmusick/Embr": "package-lock.json"', (ROOT / "fmrl_lock_writer.py").read_text())
         self.assertIn("candidate_repo", controller)
         self.assertIn("source_branch", controller)
 
