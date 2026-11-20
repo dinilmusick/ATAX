@@ -242,6 +242,12 @@ jobs:
                 if re.search(pat,output,re.I))[:250])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
+              # Restrict public diagnostics to package-manager error identifiers.
+              # Do not print dependency names, private paths, source, or raw logs.
+              codes=sorted(set(re.findall(
+                r'ERR_PNPM_[A-Z0-9_]+|(?<=npm error code )[A-Z0-9_-]+|(?<=npm ERR! code )[A-Z0-9_-]+',
+                output,re.I)))
+              print('Safe error identifiers: '+(','.join(codes[:12]) if codes else 'none'))
           SAFE
           rm -f /tmp/fmrl-direct-raw.log
           exit "$result"
