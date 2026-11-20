@@ -54,8 +54,23 @@ jobs:
               break
             fi
           done
+          if [[ "$dispatched" != 1 ]]; then
+            [[ -n "$CODING_TOKEN" ]] || {
+              echo 'Neither Actions:write nor Contents:write release dispatch is configured' >&2
+              exit 1
+            }
+            jq -n --arg source "$expected" '{
+              event_type: "atax-kloks-npm-release",
+              client_payload: {publish: true, expected_head: $source}
+            }' > /tmp/release-request.json
+            if GH_TOKEN="$CODING_TOKEN" gh api -X POST \
+              repos/dinilmusick/Kloks/dispatches \
+              --input /tmp/release-request.json >/dev/null 2>/tmp/repository-dispatch.err; then
+              dispatched=1
+            fi
+          fi
           [[ "$dispatched" == 1 ]] || {
-            echo 'Actions:write authorization unavailable; trusted publisher not dispatched' >&2
+            echo 'Both approved dispatch transports denied; release not started' >&2
             exit 1
           }
           echo 'outcome=dispatched' >> "$GITHUB_OUTPUT"
