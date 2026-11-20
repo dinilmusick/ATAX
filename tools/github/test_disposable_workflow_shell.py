@@ -42,6 +42,8 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("FMRL failure categories:", workflow)
         self.assertIn("FMRL failing gate:", workflow)
         self.assertIn("lockfile", workflow)
+        self.assertIn("ERR_PNPM_[A-Z0-9_]+", workflow)
+        self.assertIn("codes=", workflow)
         self.assertIn("for attempt in $(seq 1 15)", controller)
         self.assertIn("grep -E '^(FMRL coverage:", controller)
         self.assertIn("ALWAYS delete FMRL and verify absence", controller)
