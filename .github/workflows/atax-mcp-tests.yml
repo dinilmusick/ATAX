@@ -1,0 +1,29 @@
+name: ATAX MCP gateway tests
+
+on:
+  pull_request:
+    paths:
+      - 'tools/atax-mcp/**'
+      - '.github/workflows/atax-mcp-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/atax-mcp/**'
+      - '.github/workflows/atax-mcp-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stateless-mcp-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and protocol/auth tests (ATAX gateway only)
+        run: |
+          node --check tools/atax-mcp/worker.mjs
+          node --test tools/atax-mcp/worker.test.mjs
