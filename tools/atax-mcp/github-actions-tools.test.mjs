@@ -49,3 +49,20 @@ test('Dispatch accepts developer-owned public and private repositories, refuses 
  assert.match(privateResult.execution_boundary,/developer-owned repository/);
  await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true},async()=>Response.json({full_name:'another-org/private',private:true})),/identity is not verified/);
 });
+
+test('GitHub check annotations expose bounded compiler errors without disclosing saved provider tokens',async()=>{
+ const secret=env.GH_TOKEN_WORK;
+ const fetcher=async(url,options)=>{
+  assert.equal(url,'https://api.github.com/repos/org/app/check-runs/556/annotations?per_page=50');
+  assert.equal(options.headers.authorization,'Bearer '+secret);
+  return Response.json([{path:'src/index.ts',start_line:17,end_line:17,
+    annotation_level:'failure',title:'TypeScript compiler error',
+    message:'Invalid type on line 17; token='+secret}]);
+ };
+ const result=await invoke('atax_github_actions_check_annotations',{repository:'org/app',account:'WORK',check_run_id:556},fetcher);
+ assert.equal(result.annotations.length,1);
+ assert.equal(result.annotations[0].path,'src/index.ts');
+ assert.ok(result.annotations[0].message.includes('[REDACTED]'));
+ assert.ok(!JSON.stringify(result).includes(secret));
+ await assert.rejects(invoke('atax_github_actions_check_annotations',{repository:'org/app',account:'WORK',check_run_id:-1},fetcher),/Invalid GitHub check run ID/);
+});
