@@ -137,11 +137,21 @@ test('governed creation, dependencies and loop contract use canonical RPCs with 
   const bounded=await call('atax_goal_create_bounded',base);
   assert.equal(bounded.payload.result.structuredContent.result.rpc,'atax_goal_create_system_bounded');
   assert.equal(bounded.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
+  assert.deepEqual(
+    Object.keys(bounded.payload.result.structuredContent.result.params).sort(),
+    ['system_key_in','title_in','description_in','context_in','instructions_in','acceptance_criteria_in','tags_in','goal_loop_definition_in','task_definitions_in','created_by_agent_id_in','metadata_in'].sort(),
+    'bounded System RPC arguments must exactly match canonical Supabase identity signature'
+  );
   const vision=await call('atax_vision_create',{title:'Test vision',description:'Example',target:{type:'system',id:'test'}});
   assert.equal(vision.payload.result.structuredContent.result.rpc,'vision_ledger_create');
   const omni=await call('atax_goal_create_omni',{...base,goal_type:'implementation',target:{type:'system',id:'test'},behavior_inputs:{},expected_outputs:{},metadata:{vision_id:'v',vision_target_id:'vt'}});
   assert.equal(omni.payload.result.structuredContent.result.rpc,'atax_goal_create_system_omni');
   assert.equal(omni.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
+  assert.deepEqual(
+    Object.keys(omni.payload.result.structuredContent.result.params).sort(),
+    ['system_key_in','title_in','description_in','context_in','instructions_in','acceptance_criteria_in','tags_in','goal_type_in','target_in','behavior_inputs_in','expected_outputs_in','goal_loop_definition_in','task_definitions_in','created_by_agent_id_in','metadata_in'].sort(),
+    'Omni System RPC arguments must exactly match canonical Supabase identity signature'
+  );
   const contract=await call('atax_task_loop_contract',{task_id:'task-test',claim_token:'claim-test',loop_definition:{enabled:true},parameter_contract:{},completion_parameters:[],checkpoints:{}});
   assert.equal(contract.payload.result.structuredContent.result.rpc,'task_ledger_finalize_loop_script');
   const claim=await call('atax_goal_claim_task',{goal_key:'test-goal'});
