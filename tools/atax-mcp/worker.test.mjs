@@ -143,8 +143,10 @@ test('governed creation, dependencies and loop contract use canonical RPCs with 
   const omni=await call('atax_goal_create_omni',{...base,goal_type:'implementation',target:{type:'system',id:'test'},behavior_inputs:{},expected_outputs:{},metadata:{vision_id:'v',vision_target_id:'vt'}});
   assert.equal(omni.payload.result.structuredContent.result.rpc,'atax_goal_create_system_omni');
   assert.equal(omni.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
-  const contract=await call('atax_task_loop_contract',{task_id:'task-test',claim_token:'claim-test',loop_definition:{enabled:true},parameter_contract:{},completion_parameters:[],checkpoints:[]});
+  const contract=await call('atax_task_loop_contract',{task_id:'task-test',claim_token:'claim-test',loop_definition:{enabled:true},parameter_contract:{},completion_parameters:[],checkpoints:{}});
   assert.equal(contract.payload.result.structuredContent.result.rpc,'task_ledger_finalize_loop_script');
+  const claim=await call('atax_goal_claim_task',{goal_key:'test-goal'});
+  assert.equal(claim.payload.result.structuredContent.result.rpc,'atax_goal_claim_safe');
   const dependent=await call('atax_goal_add_dependency',{goal_key:'a',prerequisite_goal_key:'b',dependency_type:'blocking'});
   assert.equal(dependent.payload.result.structuredContent.result.params.created_by_agent_id_in,'test-external-agent');
   const pending=await call('atax_verification_pending');
