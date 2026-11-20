@@ -15,6 +15,25 @@ A new permanent repository (plain or Skipo) is a different lifecycle from dispos
 
 Repository creation: `create_repository.py` or `create-repository.sh`. Skipo scaffolding: `scaffold-skipo-app.sh`. Disposable private CI: `disposable_workspace.py` (FMRL only). ATAX Actions control-plane entry: `.github/workflows/private-repo-ci.yml`. Cleanup: `repository_lifecycle.py delete --repository <owner/FMRL-...>` followed by independent absence verification.
 
+## Private pull-request lockfile repair — owner-authorized FMRL
+
+The implemented private lockfile regeneration/writeback workflow is documented in both
+[GitHub Development Workspace](../../skills/github-development-workspace/SKILL.md) and
+[FMRL Private Repository CI Runner](../../skills/private-repo-ci-workspace-runner/SKILL.md).
+These two skills are also published in the canonical ATAX Supabase Skills Database
+(skills 40 and 39 respectively).
+
+**Request a repair:**
+
+1. Resolve an existing private GitHub PR and retrieve its exact opaque REST `node_id` (starting with `PR_`) from the authorized `GET /repos/{owner}/{repo}/pulls/{number}` metadata; never paste tokens or source files into the issue.
+2. In `dinilmusick/ATAX`, create an owner-authored issue with title **`[atax-fmrl] repair-lockfile`** and body containing **only** that PR node ID. The owner-gated `.github/workflows/owner-authorized-private-ci.yml` resolves the current exact head SHA and PR branch.
+3. The called `.github/workflows/private-repo-ci.yml` provisions a disposable public `FMRL-*` bridge, containing only static workflow and trusted tooling. The private repo is cloned at its exact SHA inside the transient runner, never into ATAX or the public repository's Git history.
+4. Mode `repair` regenerates **only** `pnpm-lock.yaml` for Luth or `package-lock.json` for Srkl-Engine/Aiko, with lifecycle scripts disabled; then independently proves the frozen install. The standalone `tools/github/fmrl_lock_writer.py` receives a scoped write token only in its later step, atomically advances the exact private PR ref without forcing, and rechecks the resulting blob digest. For its GitHub API, GET uses `/git/ref/heads/...`, while PATCH uses **`/git/refs/heads/...`** (plural).
+5. Inspect both the ATAX controller and bridge job. Require a successful lockfile-only writeback, independently verify the PR SHA/file diff, deletion of the disposable repository, and an unauthenticated **404**. **Do not treat locked installation as successful writeback.** For error classification, use the bridge's limited safe diagnostics, never raw private logs.
+6. Request a second owner issue with title **`[atax-fmrl] verify`** and the same opaque PR node ID. The direct mode reruns frozen install, package tests, builds and typechecks against the *new* exact PR head. Direct-mode PASS is not full original workflow parity; complete native E2E, protected environment and real OAuth login/logout/revocation/authorization verification before merging or deploying.
+
+Allowed repair repositories are currently `dinilmusick/Luth`, `dinilmusick/Srkl-Engine` and `dinilmusick/Aiko`. Other repositories require a reviewed, explicitly allowlisted contract change. No public issue content, bridge git commit or artifact may contain private source, source SHA, repository credentials or secret-bearing logs. All FMRL repositories must be cleaned up even after failure.
+
 ## Direct suite vs complete workflow evidence
 
 The FMRL bridge defaults to an explicitly labeled **direct portable suite** when nested `act` cannot produce reliable target results. It runs only in a disposable public FMRL runner and uses the private checkout strictly in the ephemeral worktree. The direct suite requires a frozen npm/pnpm lockfile install, a manifest-declared test, build and typecheck/lint gate, plus available architecture/security/build-artifact scripts. Raw target output is held only in the runner, never echoed or archived; a bounded classification and script names are emitted.
