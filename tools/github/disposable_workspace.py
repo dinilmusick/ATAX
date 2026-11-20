@@ -292,8 +292,9 @@ jobs:
           test ! -e target/.pnpmfile.cjs
           test ! -e target/.pnpmfile.mjs
           status=0
-          if [[ "$TARGET_REPOSITORY" == dinilmusick/Luth ]]; then
-            test -f target/pnpm-lock.yaml
+          if [[ "$TARGET_REPOSITORY" == dinilmusick/Luth || "$TARGET_REPOSITORY" == dinilmusick/Frnes ]]; then
+            # Frnes may be introducing its first lockfile; the package manifest is authoritative.
+            test -f target/package.json
             (cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
                pnpm install --frozen-lockfile --ignore-scripts) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
           elif [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine ]]; then
@@ -408,7 +409,7 @@ def main() -> int:
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
     if args.mode == "repair":
-        if args.source not in ("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine"):
+        if args.source not in ("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine", "dinilmusick/Frnes"):
             raise SystemExit("Repair target must be an allowlisted private authentication repository.")
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")

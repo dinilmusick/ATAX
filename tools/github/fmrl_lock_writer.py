@@ -19,6 +19,7 @@ ALLOWED = {
     "dinilmusick/Luth": "pnpm-lock.yaml",
     "dinilmusick/Aiko": "package-lock.json",
     "dinilmusick/Srkl-Engine": "package-lock.json",
+    "dinilmusick/Frnes": "pnpm-lock.yaml",
 }
 ROOT = Path("target")
 API = "https://api.github.com"
@@ -63,10 +64,16 @@ def main() -> None:
     head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     if head != expected:
         fail("Private checkout does not match approved PR head")
-    changed = subprocess.check_output(
+    modified = subprocess.check_output(
         ["git", "-C", str(ROOT), "diff", "--name-only", "HEAD", "--"],
         text=True,
     ).splitlines()
+    # First-time pnpm lock creation is untracked and must not be mistaken for no change.
+    untracked = subprocess.check_output(
+        ["git", "-C", str(ROOT), "ls-files", "--others", "--exclude-standard"],
+        text=True,
+    ).splitlines()
+    changed = sorted(set(modified + untracked))
     if any(item != path for item in changed):
         fail("Lockfile repair mutated a non-allowlisted source file")
     branch_path = "/repos/" + repo + "/git/ref/heads/" + parse.quote(branch, safe="/")
