@@ -103,3 +103,37 @@ test('expired permissions, missing bindings, provider errors and invalid respons
   await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'PERSONAL'},owner,env),/account ID required/);
   assert.deepEqual(availableAccounts({...env,GH_TOKEN_HIDDEN:''},owner,'github'),['PERSONAL','WORK']);
 });
+
+test('Cloudflare Worker deployments and issue summary remain account pinned and return metadata only',async()=>{
+ const requested=[];
+ const fetcher=async(url,opts)=>{
+  requested.push({url,opts});
+  if(url.endsWith('/deployments'))return Response.json({success:true,result:{deployments:[{
+   id:'deployment-1',created_on:'2026-11-20',source:'api',
+   versions:[{version_id:'version-1',percentage:100,secret:'NEVER_RETURN'}],
+   secret:'NEVER_RETURN'
+  }]}});
+  if(url.endsWith('/issues/summary'))return Response.json({success:true,result:{activeIssues:3,activeOccurrences:8,resolvedIssues:5,secret:'NEVER_RETURN'}});
+  throw Error('Unexpected Cloudflare URL '+url);
+ };
+ const data=await invoke('atax_cloudflare_worker_deployments',{account:'WORK',script:'example-worker'},client,env,fetcher);
+ assert.equal(data.deployments[0].versions[0].percentage,100);
+ assert.ok(!JSON.stringify(data).includes('NEVER_RETURN'));
+ assert.ok(requested.every(x=>x.url.includes('/accounts/abc12345/')));
+ const errors=await invoke('atax_cloudflare_issue_summary',{account:'WORK'},client,env,fetcher);
+ assert.equal(errors.active_issues,3);
+ await assert.rejects(invoke('atax_cloudflare_worker_deployments',{account:'WORK',script:'../secret'},client,env,fetcher),/Invalid Cloudflare Worker/);
+});
+test('Vercel logs are bounded, redacted, and reject unapproved deployment identifiers',async()=>{
+ const privateValue=['unit','private','never','print'].join('-');
+ const fetcher=async(url,opts)=>{
+  assert.ok(url.includes('/v3/deployments/dpl_12345678901234567/events?builds=1'));
+  assert.ok(url.includes('teamId=team_work'));
+  return Response.json([{type:'stderr',level:'error',text:'Build failed. token='+privateValue,created:3}]);
+ };
+ const logs=await invoke('atax_vercel_build_events',{account:'WORK',deployment_id:'dpl_12345678901234567'},client,env,fetcher);
+ assert.equal(logs.events.length,1);
+ assert.ok(!JSON.stringify(logs).includes(privateValue));
+ assert.match(logs.events[0].message,/REDACTED/);
+ await assert.rejects(invoke('atax_vercel_build_events',{account:'WORK',deployment_id:'../other'},client,env,fetcher),/Invalid Vercel deployment ID/);
+});

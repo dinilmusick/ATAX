@@ -1,5 +1,8 @@
 import {githubTools, githubGuide} from './github-tools.mjs';
+import {githubActionTools} from './github-actions-tools.mjs';
 import {providerTools} from './provider-accounts.mjs';
+import {isHosted,hostedConfigured,authorizeHostedPrincipal,authenticateHostedInviteKey,scopedTenantEnvironment} from './tenant-store.mjs';
+import {tenantApi,setupPage} from './tenant-http.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-06-18', '2025-03-26']);
@@ -47,8 +50,11 @@ const TOOLS = [
   tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
 ];
-TOOLS.push(...githubTools,...providerTools);
+TOOLS.push(...githubTools,...providerTools,...githubActionTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
+/** Module-only assertions for isolated tests; not reachable through HTTP. */
+export const testToolDescriptors = Object.freeze(TOOLS.map(t=>({name:t.name,scope:t.scope})));
+
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
   {uri:'atax://goals/overview',name:'Goal and task ledger',mimeType:'application/json',description:'Live canonical goal/task graph'},
@@ -67,7 +73,8 @@ async function authenticate(request,env, fetcher){
   const header=request.headers.get('authorization')||'';
   if(!/^Bearer [\x21-\x7E]{12,8192}$/.test(header))return null;
   const token=header.slice(7);
-  if(env.MCP_SHARED_TOKEN_SHA256){
+  if(isHosted(env) && token.startsWith('atax_'))return authenticateHostedInviteKey(env,token);
+  if(!isHosted(env) && env.MCP_SHARED_TOKEN_SHA256){
     const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(token)));
     const target=String(env.MCP_SHARED_TOKEN_SHA256).toLowerCase();
     if(/^[a-f0-9]{64}$/.test(target)&&timingEq(digest,Uint8Array.from(target.match(/../g),x=>parseInt(x,16)))){
@@ -102,19 +109,28 @@ async function authenticate(request,env, fetcher){
   return {id:claims.sub,authMethod:'jwt',scopes:new Set(scopes)};
 }
 function allowedOrigin(req, env){
-  const origin=req.headers.get('origin'); if(!origin)return true;
+  const origin=req.headers.get('origin'); if(!origin||origin===new URL(req.url).origin)return true;
   const allowed=String(env.MCP_ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
   return allowed.includes(origin);
 }
 function allowedScope(principal,scope){return principal.scopes.has(scope)||principal.scopes.has('atax:admin');}
+// Single-owner mode preserves the established owner-only guard.
+// Hosted mode always verifies JWT + invitation before this is called, then routes
+// every DB and provider call through the invited principal's own connections.
 const providerToolNames=new Set(providerTools.map(t=>t.name));
+const independentToolNames=new Set([...githubTools,...providerTools,...githubActionTools].map(t=>t.name));
 function canonicalOwner(principal,env){
   if(principal.authMethod==='shared')return !!env.MCP_SHARED_TOKEN_SHA256&&principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
   const jwtOwner=String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'').trim();
   return principal.authMethod==='jwt'&&jwtOwner.length>=3&&principal.id===jwtOwner;
 }
-function toolAllowed(principal,env,tool){
-  return allowedScope(principal,tool.scope)&&(providerToolNames.has(tool.name)||canonicalOwner(principal,env));
+function toolAllowed(principal,env,match){
+  if(!allowedScope(principal,match.scope))return false;
+  if(isHosted(env))return ['jwt','invitation'].includes(principal.authMethod)&&!match.name.startsWith('atax_fmrl_');
+  return providerToolNames.has(match.name)||canonicalOwner(principal,env);
+}
+function resourceAllowed(principal,env){
+  return allowedScope(principal,'atax:read')&&(isHosted(env)?['jwt','invitation'].includes(principal.authMethod):canonicalOwner(principal,env));
 }
 function supabase(env,fetcher){
   const url=String(env.SUPABASE_URL||'').replace(/\/$/,'');
@@ -156,7 +172,7 @@ async function runCall(name,args,principal,env,fetcher){
     if(spec.type==='object'&&!isObj(val))return {isError:true,content:[{type:'text',text:'Invalid object: '+key}]};
     if(spec.enum&&!spec.enum.includes(val))return {isError:true,content:[{type:'text',text:'Unsupported value: '+key}]};
   }
-  try{const result=await match.invoke(args,supabase(env,fetcher),principal,{env,fetcher});return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:{result}};}
+  try{const result=await match.invoke(args,independentToolNames.has(name)?null:supabase(env,fetcher),principal,{env,fetcher});return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:{result}};}
   catch(error){return {isError:true,content:[{type:'text',text:String(error?.message||'Database operation failed').slice(0,180)}]};}
 }
 async function routeRpc(msg,principal,env,fetcher){
@@ -169,21 +185,23 @@ async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
     if(params.protocolVersion&&!SUPPORTED.has(params.protocolVersion))return err(id,-32602,'Unsupported MCP protocol version');
-    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
+    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hosted installations require invite-only JWT identity and per-principal Supabase and provider connections; configure them at /setup. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
   if(msg.method==='tools/call'){
     if(typeof params.name!=='string')return err(id,-32602,'Missing tool name');
-    return ok(id,await runCall(params.name,params.arguments??{},principal,env,fetcher));
+    if(isHosted(env)&&params.name.startsWith('atax_fmrl_'))return ok(id,{isError:true,content:[{type:'text',text:'Hosted FMRL requires a separately authorized per-user controller; owner controller is prohibited'}]});
+    const scoped=await scopedTenantEnvironment(env,principal);
+    return ok(id,await runCall(params.name,params.arguments??{},principal,scoped,fetcher));
   }
-  if(msg.method==='resources/list')return ok(id,{resources:canonicalOwner(principal,env)?resourceDefs:[]});
-  if(msg.method==='resources/templates/list')return ok(id,{resourceTemplates:canonicalOwner(principal,env)?[{uriTemplate:'atax://skills/{slug}',name:'Canonical skill instructions',description:'Current published Supabase skill version',mimeType:'application/json'}]:[]});
+  if(msg.method==='resources/list')return ok(id,{resources:resourceAllowed(principal,env)?resourceDefs:[]});
+  if(msg.method==='resources/templates/list')return ok(id,{resourceTemplates:resourceAllowed(principal,env)?[{uriTemplate:'atax://skills/{slug}',name:'Canonical skill instructions',description:'Current published Supabase skill version',mimeType:'application/json'}]:[]});
   if(msg.method==='resources/read'){
     if(typeof params.uri!=='string')return err(id,-32602,'Resource URI required');
-    if(!canonicalOwner(principal,env)||!allowedScope(principal,'atax:read'))return err(id,-32003,'Canonical ATAX owner and read scope required');
+    if(!resourceAllowed(principal,env))return err(id,-32003,'Read scope required');
     try {
-      const db=supabase(env,fetcher);
+      const db=supabase(await scopedTenantEnvironment(env,principal),fetcher);
       let result;
       if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
@@ -194,9 +212,9 @@ async function routeRpc(msg,principal,env,fetcher){
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
     }catch(error){return err(id,-32001,String(error.message).slice(0,180));}
   }
-  if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]:[]});
+  if(msg.method==='prompts/list')return ok(id,{prompts:!isHosted(env)&&canonicalOwner(principal,env)?[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]:[]});
   if(msg.method==='prompts/get'){
-    if(!canonicalOwner(principal,env))return err(id,-32003,'Canonical ATAX owner required');
+    if(isHosted(env)||!canonicalOwner(principal,env))return err(id,-32003,'Owner-only workflow prompt unavailable');
     if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
     return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
   }
@@ -211,13 +229,19 @@ export function createHandler(fetcher=fetch){
       const servers=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'');
       return json({resource,authorization_servers:servers?[servers]:[],bearer_methods_supported:['header']});
     }
-    if(url.pathname!=='/mcp')return json({error:'Not found'},404);
+    if(url.pathname==='/setup'&&req.method==='GET')return setupPage();
+    if(url.pathname!=='/mcp'&&!url.pathname.startsWith('/api/'))return json({error:'Not found'},404);
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, OPTIONS'}});
     if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET'});
-    if(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
+    if(isHosted(env)?!hostedConfigured(env):(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL)))return json({error:'ATAX MCP not configured'},503);
     let principal;try{principal=await authenticate(req,env,fetcher);}catch{return json({error:'Authentication unavailable'},503);}
     if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource',req.url).toString()+'"'});
+    if(isHosted(env)){
+      try{principal=await authorizeHostedPrincipal(env,principal);}catch{return json({error:'Hosted principal authorization unavailable'},503);}
+      if(!principal)return json({error:'Not invited or insufficient permission'},403);
+    }
+    if(url.pathname.startsWith('/api/'))return tenantApi(req,env,principal,fetcher);
     if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
     if(req.method==='DELETE')return json({error:'No sessions to terminate'},405,{allow:'POST'});
     if(!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))return json({error:'Content-Type must be application/json'},415);
