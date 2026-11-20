@@ -43,6 +43,11 @@ Optional `MCP_ALLOWED_ORIGINS` (comma-separated exact HTTPS origin strings) enab
 
 **Important:** Current ATAX is a single-owner Supabase project. This adapter must **not** be advertised as multi-tenant without proper per-owner authorization, JWT/RLS boundaries, and tenant isolation. `SUPABASE_SECRET_KEY`/service-role credentials must remain server-side only.
 
+
+## First-class GitHub and disposable FMRL tools
+
+The server exposes `atax_github_workflows_guide` (always read first), `atax_github_repository_create` and `atax_github_repository_inspect` for permanent repositories, plus `atax_fmrl_create_run_dispose` and `atax_fmrl_get_status` for **automatic provision → run → mandatory delete and independent 404**. The FMRL tools call the existing ATAX GitHub Actions *controller*, never run target code in ATAX. Tools have distinct operator permissions: `atax:github:read`, `atax:github:create` and `atax:fmrl:execute`. Set `MCP_GITHUB_OWNER`, `MCP_FMRL_ALLOWED_TARGETS`, `GITHUB_REPOSITORY_TOKEN` and `GITHUB_FMRL_DISPATCH_TOKEN` (tokens are Worker secrets). FMRL dispatch is disabled without an explicit target-repository allowlist. Full setup, security and agent examples: [GITHUB_TOOLS.md](GITHUB_TOOLS.md).
+
 ## MCP client configuration
 
 Configure your MCP client with a remote Streamable HTTP URL and a bearer Authorization header:
@@ -63,21 +68,3 @@ Production acceptance requires, on the *selected* Cloudflare account: bound secr
 ## Boundaries
 
 ATAX is only a coordination control plane and tooling provider. This gateway neither creates external agents nor schedules them. It never executes target code; ATAX's existing container-first and disposable FMRL compute boundary remains in force. Remote MCP outages must not affect GitHub-native agents.
-## Governed work authoring (MCP-only agents)
-
-The server supports canonical creation and maintenance through named, **allowlisted** PostgreSQL RPCs. `atax:write` permits Vision creation/target/board association, bounded and Omni goal creation, goal and task dependencies, goal priority, and loop contracts. `atax:read` exposes goal resumes, blockers and self-improvement context, while `atax:verify` exposes pending verification. These do not spawn or schedule agents, execute arbitrary SQL, or bypass database acceptance and fencing guards.
-
-Vision-linked Omni goals require an actual target and existing attached tldraw board, as enforced by Supabase.
-
-**Canonical System association:** New MCP goals require a `system_key` and call the additive, service-role-only `atax_goal_create_system_bounded` / `atax_goal_create_system_omni` RPCs. Each delegates to the original goal-creation RPC, then atomically attaches the goal and its finite tasks to a real active System. `atax_goal_attach_system` also safely repairs existing unlinked, non-running goals. The database rejects reassignment to another System. The checked-in SQL migration must be applied before enabling the corresponding MCP tools.
-
-## Build and independent verification
-
-The CI job checks the deterministic, secret-free protocol/auth suite and a Cloudflare Wrangler deploy dry-run. A dry-run confirms Worker packaging only, not credentials or live Supabase calls. Production release requires authenticated read/write/verifier tests and independent evidence without secrets.
-
-
-## Independent loop authoring and safe claims
-
-New MCP-governed goals initialize finite tasks in `loop_authoring` state. A distinct first worker must claim and finalize a nonempty loop-definition and parameter-contract object with `atax_task_loop_contract` (the `checkpoints` parameter is a JSON **object**), which returns the task to the execution queue. A different agent must claim and execute the task. The goal-scoped `atax_goal_claim_task` dispatches to a service-role-only `atax_goal_claim_safe` RPC that rejects unready execution loops or the same author identity. Global `atax_task_claim_next` retains its canonical gate. PostgreSQL enforces lease fencing and independent verification, even if a remote client supplies malformed inputs.
-
-These requirements depend on the migration `20261120111500_atax_mcp_independent_loop_contracts.sql`; deploy the migration before enabling writes.

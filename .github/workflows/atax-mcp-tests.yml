@@ -5,11 +5,13 @@ on:
     paths:
       - 'tools/atax-mcp/**'
       - '.github/workflows/atax-mcp-tests.yml'
+      - '.github/workflows/private-repo-ci.yml'
   push:
     branches: [main]
     paths:
       - 'tools/atax-mcp/**'
       - '.github/workflows/atax-mcp-tests.yml'
+      - '.github/workflows/private-repo-ci.yml'
 
 permissions:
   contents: read
@@ -26,6 +28,7 @@ jobs:
       - name: Syntax and protocol/auth tests (ATAX gateway only)
         run: |
           node --check tools/atax-mcp/worker.mjs
+          node --check tools/atax-mcp/github-tools.mjs
           node --test tools/atax-mcp/worker.test.mjs
       - name: Cloudflare Worker packaging dry-run
         run: npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-mcp-dry-run

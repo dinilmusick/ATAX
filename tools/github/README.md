@@ -1,5 +1,10 @@
 # ATAX GitHub tools
 
+
+## Optional remote MCP GitHub interface
+
+Agents **without ATAX GitHub repository access** can use first-class authenticated ATAX MCP tools: `atax_github_workflows_guide`, `atax_github_repository_create` and `atax_github_repository_inspect` for permanent repositories, plus `atax_fmrl_create_run_dispose` followed by `atax_fmrl_get_status` for automatic disposable CI. The FMRL controller remains the **existing** `.github/workflows/private-repo-ci.yml` and still owns unconditional cleanup and independent 404 verification. MCP clients must read `tools/atax-mcp/GITHUB_TOOLS.md`; no arbitrary repo mutation and no target code executed on ATAX. Native scripts remain supported.
+
 ## Mandatory FMRL execution boundary
 
 ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.

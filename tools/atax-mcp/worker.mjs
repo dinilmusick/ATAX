@@ -1,3 +1,4 @@
+import {githubTools, githubGuide} from './github-tools.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-06-18', '2025-03-26']);
@@ -45,11 +46,13 @@ const TOOLS = [
   tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
 ];
+TOOLS.push(...githubTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
   {uri:'atax://goals/overview',name:'Goal and task ledger',mimeType:'application/json',description:'Live canonical goal/task graph'},
   {uri:'atax://skills/catalog',name:'Active skills catalogue',mimeType:'application/json',description:'Canonical Supabase skills registry'},
+  {uri:'atax://guides/github-workflows',name:'ATAX GitHub repository and disposable FMRL workflows',mimeType:'application/json',description:'Choose permanent repositories or auto-disposed FMRL control-plane dispatch; security and verification rules'},
 ];
 const safeHeaders = {'cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'"};
 function json(value,status=200,extra={}) { return new Response(JSON.stringify(value),{status,headers:{...safeHeaders,'content-type':'application/json; charset=utf-8',...extra}}); }
@@ -143,7 +146,7 @@ async function runCall(name,args,principal,env,fetcher){
     if(spec.type==='object'&&!isObj(val))return {isError:true,content:[{type:'text',text:'Invalid object: '+key}]};
     if(spec.enum&&!spec.enum.includes(val))return {isError:true,content:[{type:'text',text:'Unsupported value: '+key}]};
   }
-  try{const result=await match.invoke(args,supabase(env,fetcher),principal);return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:{result}};}
+  try{const result=await match.invoke(args,supabase(env,fetcher),principal,{env,fetcher});return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:{result}};}
   catch(error){return {isError:true,content:[{type:'text',text:String(error?.message||'Database operation failed').slice(0,180)}]};}
 }
 async function routeRpc(msg,principal,env,fetcher){
@@ -156,7 +159,7 @@ async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
     if(params.protocolVersion&&!SUPPORTED.has(params.protocolVersion))return err(id,-32602,'Unsupported MCP protocol version');
-    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents.'});
+    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>allowedScope(principal,t.scope)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
@@ -174,13 +177,18 @@ async function routeRpc(msg,principal,env,fetcher){
       let result;
       if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
+      else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
       else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
       else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
       else return err(id,-32002,'Unknown resource URI');
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
     }catch(error){return err(id,-32001,String(error.message).slice(0,180));}
   }
-  if(msg.method==='prompts/list')return ok(id,{prompts:[]});
+  if(msg.method==='prompts/list')return ok(id,{prompts:[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]});
+  if(msg.method==='prompts/get'){
+    if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
+    return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
+  }
   return err(id,-32601,'Method not found');
 }
 export function createHandler(fetcher=fetch){

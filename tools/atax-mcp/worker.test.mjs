@@ -96,7 +96,7 @@ test('independent verification uses distinct scope and identity, never self-auth
   assert.equal(r.payload.result.structuredContent.result.params.verified_in,true);
 });
 test('resources, notifications, malformed JSON-RPC and batch requests',async()=>{
-  const list=await(await post('resources/list')).json();assert.equal(list.result.resources.length,3);
+  const list=await(await post('resources/list')).json();assert.equal(list.result.resources.length,4);
   const read=await(await post('resources/read',{uri:'atax://context/overview'})).json();
   assert.equal(JSON.parse(read.result.contents[0].text).rpc,'agent_context_overview');
   const n=await post('notifications/initialized',{}, {body:{jsonrpc:'2.0',method:'notifications/initialized'}});
@@ -132,7 +132,6 @@ test('browser CORS preflight for allowlisted origins and resource template list'
   assert.equal(templates.result.resourceTemplates[0].uriTemplate,'atax://skills/{slug}');
 });
 
-
 test('governed creation, dependencies and loop contract use canonical RPCs with token identity', async()=>{
   const base={system_key:'atax',title:'Test goal',description:'Isolated fake execution',acceptance_criteria:['Checked'],goal_loop_definition:{enabled:false},task_definitions:[{name:'Unit test',actions:[{description:'Check'}]}]};
   const bounded=await call('atax_goal_create_bounded',base);
@@ -163,4 +162,116 @@ test('creation schemas reject invalid task arrays, acceptance arrays and priorit
   assert.equal(limited.payload.result.isError,true);
   const readonly={...env,MCP_SHARED_SCOPES:'atax:read'};
   assert.equal((await call('atax_goal_create_omni',{},{env:readonly})).payload.result.isError,true);
+});
+
+const gitEnv={...env,MCP_SHARED_SCOPES:'atax:read atax:github:read atax:github:create atax:fmrl:execute',MCP_GITHUB_OWNER:'dinilmusick',
+  GITHUB_REPOSITORY_TOKEN:'git-create-sample-test-only',GITHUB_FMRL_DISPATCH_TOKEN:'git-actions-sample-test-only',
+  MCP_FMRL_ALLOWED_TARGETS:'dinilmusick/Skipo,dinilmusick/Kone'};
+const fakeGitHub=(records=[])=>async(url,options={})=>{
+  records.push({url,options});
+  if(url==='https://api.github.com/user/repos' && options.method==='POST'){
+    const body=JSON.parse(options.body);
+    return Response.json({full_name:'dinilmusick/'+body.name,html_url:'https://github.com/dinilmusick/'+body.name,private:body.private,default_branch:'main'}, {status:201});
+  }
+  if(url.startsWith('https://api.github.com/repos/dinilmusick/') && !url.includes('/actions/')){
+    if(url.includes('FMRL-'))return Response.json({message:'Not Found'},{status:404});
+    const repo=url.split('/repos/')[1];
+    return Response.json({full_name:repo,html_url:'https://github.com/'+repo,private:true,default_branch:'main'});
+  }
+  if(url.endsWith('/dispatches') && options.method==='POST')return new Response(null,{status:204});
+  return upstream(url,options);
+};
+const makeGitCall=async(name,args={},config={})=>{
+  const req=new Request('https://atax.example/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({jsonrpc:'2.0',id:19,method:'tools/call',params:{name,arguments:args}})});
+  const res=await createHandler(config.fetcher||fakeGitHub())(req,config.env||gitEnv);
+  const payload=await res.json();return payload.result;
+};
+
+test('first-class Github tools are documented discoverable, and separately scope gated',async()=>{
+  const names=(await (await post('tools/list',{}, {env:gitEnv})).json()).result.tools.map(x=>x.name);
+  for(const item of ['atax_github_workflows_guide','atax_github_repository_create','atax_github_repository_inspect','atax_fmrl_create_run_dispose','atax_fmrl_get_status'])assert.ok(names.includes(item),item);
+  const readOnly=(await (await post('tools/list',{}, {env})).json()).result.tools.map(x=>x.name);
+  assert.ok(readOnly.includes('atax_github_workflows_guide'));
+  assert.ok(!readOnly.includes('atax_github_repository_create'));
+  const guide=await makeGitCall('atax_github_workflows_guide',{}, {env});
+  assert.ok(guide.structuredContent.result.order.some(x=>x.includes('FMRL')));
+  const resources=await (await post('resources/read',{uri:'atax://guides/github-workflows'})).json();
+  assert.match(resources.result.contents[0].text,/container/i);
+  const prompts=await (await post('prompts/list')).json();
+  assert.equal(prompts.result.prompts[0].name,'atax-github-workflow');
+  const guided=await (await post('prompts/get',{name:'atax-github-workflow'})).json();
+  assert.match(guided.result.messages[0].content.text,/FMRL/);
+});
+test('permanent GitHub repository creation uses correct API and verifies exact owner visibility',async()=>{
+  const calls=[];
+  const outcome=await makeGitCall('atax_github_repository_create',{name:'TestPermanent',description:'Private development'},{fetcher:fakeGitHub(calls)});
+  assert.equal(outcome.structuredContent.result.repository,'dinilmusick/TestPermanent');
+  assert.equal(outcome.structuredContent.result.disposable,false);
+  assert.equal(outcome.structuredContent.result.verified,true);
+  const creation=calls.find(x=>x.url.endsWith('/user/repos'));
+  assert.equal(JSON.parse(creation.options.body).private,true);
+  assert.equal(JSON.parse(creation.options.body).auto_init,true);
+  assert.equal(creation.options.headers.authorization,'Bearer git-create-sample-test-only');
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'FMRL-danger'})).isError,true);
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'ATAX'})).isError,true);
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'.git'})).isError,true);
+});
+test('permanent repository path never skips github-specific auth or dispatch allowlist',async()=>{
+  const denied=await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,MCP_SHARED_SCOPES:'atax:read atax:write'}});
+  assert.equal(denied.isError,true);
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,GITHUB_REPOSITORY_TOKEN:''}})).isError,true);
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,MCP_GITHUB_OWNER:'malicious'}})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'a'.repeat(40)},{env:{...gitEnv,MCP_FMRL_ALLOWED_TARGETS:''}})).isError,true);
+});
+test('FMRL dispatch is controller-only, allowlisted, pinned exact SHA, correlates without leaking tokens',async()=>{
+  const calls=[]; const ref='f'.repeat(40);
+  const result=await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,event:'pull_request',workflow:'ci.yml'},{fetcher:fakeGitHub(calls)});
+  assert.equal(result.isError,undefined);
+  assert.equal(result.structuredContent.result.state,'dispatch_accepted_not_executed');
+  assert.match(result.structuredContent.result.request_id,/^[0-9a-f-]{36}$/);
+  const dispatch=calls.find(x=>x.url.endsWith('/actions/workflows/private-repo-ci.yml/dispatches'));
+  const payload=JSON.parse(dispatch.options.body);
+  assert.equal(payload.ref,'main');
+  assert.equal(payload.inputs.ref,ref);
+  assert.equal(payload.inputs.request_id,result.structuredContent.result.request_id);
+  assert.equal(payload.inputs.repository,'dinilmusick/Skipo');
+  assert.ok(!JSON.stringify(result).includes('git-actions-sample-test-only'));
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/ATAX',ref})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Unknown',ref})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'bad'})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,workflow:'../ci.yml'})).isError,true);
+});
+test('FMRL status requires terminal controller and successful cleanup + anonymous independent 404',async()=>{
+  const id='12e43a92-822d-4a30-82a5-5ecb9dd11acf';
+  const done={id:98765,display_title:`ATAX FMRL ${id}`,status:'completed',conclusion:'success',run_attempt:2,html_url:'https://github.com/dinilmusick/ATAX/actions/runs/98765'};
+  const seen=[];
+  const remote=async(url,options)=>{
+    seen.push({url,options});
+    if(url.includes('/runs?'))return Response.json({workflow_runs:[done]});
+    if(url.endsWith('/jobs?per_page=100'))return Response.json({jobs:[{steps:[{name:'Provision disposable FMRL public repository',conclusion:'success'},{name:'ALWAYS delete FMRL and verify absence',conclusion:'success'}]}]});
+    if(url.endsWith('/FMRL-98765-2'))return Response.json({message:'Not Found'},{status:404});
+    throw Error('Unexpected FMRL status upstream '+url);
+  };
+  const result=await makeGitCall('atax_fmrl_get_status',{request_id:id},{fetcher:remote});
+  assert.equal(result.structuredContent.result.cleanup_verified,true);
+  assert.equal(result.structuredContent.result.conclusion,'success');
+  const check=seen.find(x=>x.url.endsWith('/FMRL-98765-2'));
+  assert.equal(check.options.headers.authorization,undefined);
+});
+test('FMRL incomplete and missing cleanup cannot be misreported as successful',async()=>{
+  const id='12e43a92-822d-4a30-82a5-5ecb9dd11acf';
+  const noRun=async()=>Response.json({workflow_runs:[]});
+  const waiting=await makeGitCall('atax_fmrl_get_status',{request_id:id},{fetcher:noRun});
+  assert.equal(waiting.structuredContent.result.state,'awaiting_github_run_discovery');
+  assert.equal(waiting.structuredContent.result.cleanup_verified,false);
+  const broken=async(url)=>{
+    if(url.includes('/runs?'))return Response.json({workflow_runs:[{id:5,display_title:`ATAX FMRL ${id}`,status:'completed',conclusion:'failure',run_attempt:1}]});
+    if(url.includes('/jobs?'))return Response.json({jobs:[{steps:[{name:'Provision disposable FMRL public repository',conclusion:'success'},{name:'ALWAYS delete FMRL and verify absence',conclusion:'failure'}]}]});
+    throw Error('Unexpected endpoint');
+  };
+  const fail=await makeGitCall('atax_fmrl_get_status',{request_id:id},{fetcher:broken});
+  assert.equal(fail.structuredContent.result.cleanup_verified,false);
+  assert.equal(fail.structuredContent.result.conclusion,'failure');
+  assert.match(fail.structuredContent.result.next,/blocker/i);
 });

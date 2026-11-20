@@ -1,4 +1,5 @@
 name: FMRL CI controller (no target code in ATAX)
+run-name: ATAX FMRL ${{ inputs.request_id || github.run_id }}
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +18,11 @@ on:
         type: string
       workflow:
         description: Optional target workflow filename
+        required: false
+        default: ""
+        type: string
+      request_id:
+        description: Opaque MCP correlation UUID (no private target data)
         required: false
         default: ""
         type: string
@@ -44,6 +50,10 @@ on:
         required: false
         default: ""
         type: string
+      request_id:
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -68,6 +78,7 @@ jobs:
           INPUT_WORKFLOW: ${{ inputs.workflow }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_REQUEST_ID: ${{ inputs.request_id }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -78,7 +89,8 @@ jobs:
             'event':os.environ.get('INPUT_EVENT','push'),
             'workflow':os.environ.get('INPUT_WORKFLOW',''),
             'mode':os.environ.get('INPUT_MODE','direct'),
-            'branch':os.environ.get('INPUT_BRANCH','')
+            'branch':os.environ.get('INPUT_BRANCH',''),
+            'request_id':os.environ.get('INPUT_REQUEST_ID','')
           }
           repo=data.get('repository') or ''
           ref=data.get('ref') or ''
@@ -86,11 +98,13 @@ jobs:
           workflow=data.get('workflow') or ''
           mode=data.get('mode') or 'direct'
           branch=data.get('branch') or ''
+          request_id=data.get('request_id') or ''
           assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo)
           assert re.fullmatch(r'[0-9a-f]{40}',ref)
           assert event in ('push','pull_request','workflow_dispatch')
           assert not workflow or re.fullmatch(r'[A-Za-z0-9_.-]+\.ya?ml',workflow)
           assert mode in ('direct','repair')
+          assert not request_id or re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',request_id)
           assert not branch or (re.fullmatch(r'[A-Za-z0-9_./-]{1,180}',branch) and '..' not in branch)
           assert mode != 'repair' or (repo in ('dinilmusick/Luth','dinilmusick/Srkl-Engine','dinilmusick/Aiko','dinilmusick/Frnes') and branch)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
