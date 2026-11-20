@@ -137,3 +137,35 @@ test('Vercel logs are bounded, redacted, and reject unapproved deployment identi
  assert.match(logs.events[0].message,/REDACTED/);
  await assert.rejects(invoke('atax_vercel_build_events',{account:'WORK',deployment_id:'../other'},client,env,fetcher),/Invalid Vercel deployment ID/);
 });
+
+test('Vercel Git-linked deployment uses only selected developer project and separately confirmed write scope',async()=>{
+ const requested=[];
+ const fetcher=async(url,opts)=>{
+  requested.push({url,opts});
+  if(url.includes('/v9/projects/prj_abcdef123456'))return Response.json({
+    id:'prj_abcdef123456',name:'tenant-web',link:{type:'github',repoId:123456}
+  });
+  if(url.includes('/v13/deployments'))return Response.json({id:'dpl_abcdef123456789',url:'tenant-web.vercel.app'});
+  throw Error('Unexpected Vercel request '+url);
+ };
+ const base={account:'WORK',project_id:'prj_abcdef123456',ref:'feature/tenant',confirm:true};
+ const preview=await invoke('atax_vercel_deployment_create',base,client,env,fetcher);
+ assert.equal(preview.state,'deployment_accepted_not_built');
+ assert.equal(preview.target,'preview');
+ assert.equal(preview.project_id,base.project_id);
+ assert.ok(requested.every(r=>r.opts.headers.authorization==='Bearer vercel-work-secret'));
+ assert.ok(requested.every(r=>r.url.includes('teamId=team_work')));
+ const submitted=requested.find(r=>r.opts.method==='POST');
+ assert.deepEqual(JSON.parse(submitted.opts.body),{
+   name:'tenant-web',project:'prj_abcdef123456',
+   gitSource:{type:'github',repoId:123456,ref:'feature/tenant'}
+ });
+ await assert.rejects(invoke('atax_vercel_deployment_create',{...base,confirm:false},client,env,fetcher),/confirmation required/);
+ await assert.rejects(invoke('atax_vercel_deployment_create',{...base,target:'production'},client,env,fetcher),/separate explicit confirmation/);
+ const production=await invoke('atax_vercel_deployment_create',{...base,target:'production',confirm_production:true},client,env,fetcher);
+ assert.equal(production.target,'production');
+ const posted=requested.filter(r=>r.opts.method==='POST').at(-1);
+ assert.equal(JSON.parse(posted.opts.body).target,'production');
+ await assert.rejects(invoke('atax_vercel_deployment_create',{...base,ref:'../danger'},client,env,fetcher),/Invalid Git ref/);
+ await assert.rejects(invoke('atax_vercel_deployment_create',base,client,env,async()=>Response.json({id:'prj_other',name:'other',link:{type:'github',repoId:123}})),/linked to a GitHub/);
+});
