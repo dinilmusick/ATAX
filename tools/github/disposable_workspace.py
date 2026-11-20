@@ -256,11 +256,14 @@ jobs:
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
               # Only fixed-format error identifiers and npm script names are public.
               # Source lines, paths, stack traces and arbitrary target stdout remain private.
-              ts_codes=sorted(set(re.findall(r'\\bTS[0-9]{4}\\b',output)))
+              ts_codes=sorted(set(re.findall(r'\bTS[0-9]{4}\b',output)))
               if ts_codes:
                   print('FMRL TypeScript codes: '+','.join(ts_codes[:12]))
               nested=re.findall(
-                  r'^> [^\\r\\n]{1,120}\\s(test:[A-Za-z0-9:_-]+|verify:[A-Za-z0-9:_-]+|check:[A-Za-z0-9:_-]+|build(?::[A-Za-z0-9:_-]+)?|typecheck)\\s*
+                  r'^> [^\r\n]{1,120}\s(test:[A-Za-z0-9:_-]+|verify:[A-Za-z0-9:_-]+|check:[A-Za-z0-9:_-]+|build(?::[A-Za-z0-9:_-]+)?|typecheck)\s*$',
+                  output,re.M)
+              if nested:
+                  print('FMRL last observed nested script: '+nested[-1])
               # Restrict public diagnostics to package-manager error identifiers.
               # Do not print dependency names, private paths, source, or raw logs.
               codes=sorted(set(re.findall(
