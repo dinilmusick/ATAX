@@ -7,6 +7,8 @@ on:
       - ".github/workflows/private-repo-ci-tests.yml"
       - "tools/github/disposable_workspace.py"
       - "tools/github/fmrl_lock_writer.py"
+      - "tools/github/fmrl_private_diagnostic.py"
+      - "tools/github/test_fmrl_private_diagnostic.py"
       - "tools/github/test_fmrl_lock_repair.py"
       - "tools/github/test_disposable_workspace.py"
       - "tools/agent-bootstrap/**"
@@ -17,6 +19,8 @@ on:
       - ".github/workflows/private-repo-ci.yml"
       - ".github/workflows/private-repo-ci-tests.yml"
       - "tools/github/fmrl_lock_writer.py"
+      - "tools/github/fmrl_private_diagnostic.py"
+      - "tools/github/test_fmrl_private_diagnostic.py"
       - "tools/github/test_fmrl_lock_repair.py"
       - "tools/github/disposable_workspace.py"
       - "tools/agent-bootstrap/**"
@@ -36,12 +40,13 @@ jobs:
           persist-credentials: false
       - name: Compile updated tooling
         run: |
-          python3 -m py_compile tools/github/disposable_workspace.py tools/github/repository_lifecycle.py tools/github/fmrl_lock_writer.py tools/agent-bootstrap/bootstrap.py
+          python3 -m py_compile tools/github/disposable_workspace.py tools/github/repository_lifecycle.py tools/github/fmrl_lock_writer.py tools/github/fmrl_private_diagnostic.py tools/agent-bootstrap/bootstrap.py
       - name: Test FMRL isolation and local target bootstrap
         run: |
           python3 -m unittest discover -s tools/github -p test_disposable_workspace.py -v
           python3 -m unittest discover -s tools/github -p test_disposable_workflow_shell.py -v
           python3 -m unittest discover -s tools/github -p test_fmrl_lock_repair.py -v
+          python3 -m unittest discover -s tools/github -p test_fmrl_private_diagnostic.py -v
           python3 -m unittest discover -s tools/agent-bootstrap -p test_bootstrap.py -v
       - name: Enforce ATAX control-plane boundary
         run: |
