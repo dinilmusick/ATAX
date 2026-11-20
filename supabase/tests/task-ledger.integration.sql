@@ -125,8 +125,9 @@ begin
       and verified_by_agent_id='integration-test-verifier'
   ) then raise exception 'Verified bounded-v2 completion was not persisted'; end if;
   if not exists(
-    select 1 from public.task_events
-    where task_id=task_id and payload->>'event_kind'='loop_contract_ready'
+    select 1 from public.task_events e
+    where e.task_id=(created->>'root_task_id')::uuid
+      and e.payload->>'event_kind'='loop_contract_ready'
   ) then raise exception 'Independent loop authoring event was not recorded'; end if;
   raise notice 'PASS: global claim, independent loop authoring, fenced executor, predicate-backed checkpoints and verifier';
 end;
