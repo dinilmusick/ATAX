@@ -13,7 +13,8 @@ jobs:
     if: >-
       github.event.issue.user.id == 155351357 &&
       (github.event.issue.title == '[atax-fmrl] verify' ||
-       github.event.issue.title == '[atax-fmrl] repair-lockfile')
+       github.event.issue.title == '[atax-fmrl] repair-lockfile' ||
+       github.event.issue.title == '[atax-fmrl] repair-artifact')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -83,7 +84,7 @@ jobs:
       ref: ${{ needs.resolve.outputs.ref }}
       event: push
       workflow: ""
-      mode: ${{ github.event.issue.title == '[atax-fmrl] repair-lockfile' && 'repair' || 'direct' }}
+      mode: ${{ github.event.issue.title == '[atax-fmrl] repair-lockfile' && 'repair' || github.event.issue.title == '[atax-fmrl] repair-artifact' && 'artifact' || 'direct' }}
       branch: ${{ needs.resolve.outputs.branch }}
     secrets: inherit
 
