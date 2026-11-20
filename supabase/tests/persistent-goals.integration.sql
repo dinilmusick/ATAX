@@ -12,6 +12,7 @@ declare
   verifier public.tasks;
   final_goal public.goals;
   resumed jsonb;
+  checkpoint_index integer;
 begin
   created := public.goal_ledger_create_with_tasks(
     goal_name,'Rollback-only end-to-end direct-task goal test',
@@ -76,6 +77,25 @@ begin
     jsonb_build_array(jsonb_build_object('type','test','result','passed')),
     'pass','Smoke check passed'
   );
+  -- Bounded-v2 completion additionally requires every registered checkpoint
+  -- to pass its own predicate with independently traceable evidence.
+  for checkpoint_index in 0..jsonb_array_length(claimed.checkpoints)-1 loop
+    perform public.record_checkpoint_predicate_result(
+      claimed.id,
+      checkpoint_index::smallint,
+      'builtin.evidence_present',1,
+      jsonb_build_object('task_id',claimed.id,'checkpoint',checkpoint_index),
+      jsonb_build_object('ok',true,'checkpoint',checkpoint_index),
+      true,
+      jsonb_build_array(jsonb_build_object(
+        'type','test',
+        'checkpoint',checkpoint_index,
+        'result','passed'
+      )),
+      'smoke-worker',claimed.claim_token::text
+    );
+  end loop;
+
   perform public.task_ledger_submit_result(
     claimed.id,'smoke-worker',claimed.claim_token,
     jsonb_build_object('ok',true),'Smoke direct task completed',
