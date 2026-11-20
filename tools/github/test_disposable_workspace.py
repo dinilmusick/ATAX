@@ -359,6 +359,17 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("items.intersection(allowed_categories)", source)
         self.assertIn("FMRL Skipo migration categories:", source)
 
+    def test_frnes_diagnostic_state_receipt_is_fixed_and_nonsecret(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("FMRL Frnes diagnostic state:", runner)
+        self.assertIn("FMRL Frnes diagnostic state:", controller)
+        self.assertIn("stdio:['ignore','pipe','pipe']", runner)
+        self.assertIn("maxBuffer:16*1024*1024", runner)
+        self.assertIn("allowed_states={'spawn-error','process-unavailable'", runner)
+        self.assertIn("state=receipts[-1] if receipts", runner)
+        self.assertIn("throw new Error('Direct CI failed: '+name+' exit='+r.status)", runner)
+
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)

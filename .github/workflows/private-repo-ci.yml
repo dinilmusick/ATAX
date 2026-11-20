@@ -232,7 +232,7 @@ jobs:
                           # Only exact, allowlisted sanitizer prefixes are eligible.
                           # Raw logs remain transient and are deleted below.
                           summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
-                            | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL Skipo rule IDs:|FMRL Skipo migration categories:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
+                            | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL Skipo rule IDs:|FMRL Skipo migration categories:|FMRL Frnes diagnostic state:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
                             | tail -n 8 || true)"
                           if [[ -n "$summary" ]]; then
                             printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
