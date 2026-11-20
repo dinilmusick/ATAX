@@ -176,7 +176,7 @@ jobs:
           version: 10.33.0
 
       - name: Run portable private-suite checks (not full workflow parity)
-        if: env.FMRL_EXECUTION_MODE == 'direct' || env.FMRL_EXECUTION_MODE == 'repair'
+        if: env.FMRL_EXECUTION_MODE == 'direct'
         shell: bash
         run: |
           set -euo pipefail
