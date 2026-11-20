@@ -266,6 +266,8 @@ jobs:
         run: |
           set -euo pipefail
           test -d target/.git
+          test ! -e target/.pnpmfile.cjs
+          test ! -e target/.pnpmfile.mjs
           status=0
           if [[ "$TARGET_REPOSITORY" == dinilmusick/Luth ]]; then
             test -f target/pnpm-lock.yaml
