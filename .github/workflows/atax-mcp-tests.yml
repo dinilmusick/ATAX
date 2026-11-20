@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error --retry 3 --max-time 20 "$HEALTH_URL" | grep -F '"status":"ok"'
           code="$(curl --silent --show-error --max-time 20 -o /tmp/atax-mcp-unauth.json -w '%{http_code}' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci-probe","version":"1"}}}' "$MCP_URL")"
+          echo "Unauthenticated MCP initialize observed HTTP $code (expected 401 or 503)"
           if [ "$code" != "503" ] && [ "$code" != "401" ]; then
             echo "Expected auth/config failure, got HTTP $code" >&2; cat /tmp/atax-mcp-unauth.json >&2; exit 1
           fi
