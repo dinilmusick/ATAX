@@ -203,12 +203,18 @@ jobs:
                   if [[ "$first_job" =~ ^[0-9]+$ ]]; then
                     safe_log="$(mktemp)"
                     for attempt in $(seq 1 15); do
+                      # GitHub Actions job logs require a scoped Actions-read credential
+                      # on some repositories; an anonymous request can return 403.
+                      # Never print the token or raw private-target log.
                       if curl -fsSL --connect-timeout 10 --max-time 25 \
-                        "https://api.github.com/repos/$BRIDGE/actions/jobs/$first_job/logs" -o "$safe_log" 2>/dev/null; then
+                        -H "Authorization: Bearer $FMRL_CONTENTS_TOKEN" \
+                        -H "Accept: application/vnd.github+json" \
+                        "https://api.github.com/repos/$BRIDGE/actions/jobs/$first_job/logs" \
+                        -o "$safe_log" 2>/dev/null; then
                         # Only accept fixed-prefix receipts emitted by the trusted
                         # bridge sanitizer, never arbitrary private target lines.
                         summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
-                          | grep -E '^(FMRL coverage:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:|FMRL TypeScript codes:|FMRL last observed nested script:)' \
+                          | grep -E '^(FMRL direct suite:|FMRL coverage:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
                           | tail -n 8 || true)"
                         if [[ -n "$summary" ]]; then
                           printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -217,6 +223,9 @@ jobs:
                       fi
                       sleep 4
                     done
+                    if [[ -z "${summary:-}" ]]; then
+                      echo "FMRL failure receipts unavailable; job-step name remains authoritative." >> "$GITHUB_STEP_SUMMARY"
+                    fi
                     rm -f "$safe_log"
                   fi
                 fi
