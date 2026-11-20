@@ -302,7 +302,13 @@ jobs:
               # Frnes emits only fixed private migration error categories.
               allowed_categories={'missing-contract','unapplied','lockfile',
                   'installed','migration-path','unsafe-path','deprecated-pattern',
-                  'integrity','version','unclassified'}
+                  'integrity','version','unclassified',
+                  'invalid-exact-version','unsupported-specifier',
+                  'invalid-requirement','invalid-package-declaration',
+                  'required-dependency','conflicting-constraints',
+                  'incompatible-range','skipo-version-requirement',
+                  'invalid-contract','missing-provider-declaration',
+                  'invalid-baseline','version-other'}
               observed=re.findall(
                   r'(?m)^FMRL Skipo migration categories: ([a-z,-]{1,160})$',
                   output)
