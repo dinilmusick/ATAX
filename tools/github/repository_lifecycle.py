@@ -65,6 +65,15 @@ def main():
     if a.op=="delete":
         if target.lower() == "dinilmusick/atax":
             raise SystemExit("Refusing to delete ATAX control-plane repository")
+        # A second reader must verify the repository existed before deletion,
+        # so its later 404 cannot be mistaken for a missing permission.
+        alternate = os.environ.get("GITHUB_INDEPENDENT_READ_TOKEN", "")
+        alternate_confirmed = False
+        if alternate and alternate != tok:
+            before = api("/repos/"+target, alternate)
+            if before.get("full_name", "").lower() != target.lower():
+                raise RuntimeError("Independent reader did not confirm repository before deletion")
+            alternate_confirmed = True
         api("/repos/"+target,tok,"DELETE")
         try: api("/repos/"+target,tok)
         except RuntimeError as exc:
@@ -82,6 +91,16 @@ def main():
                 if exc.code == 404:
                     verified_404 = True
                     break
+                if exc.code in (403, 429) and alternate_confirmed:
+                    # Anonymous GitHub rate limiting is not proof of existence.
+                    # Only the separately preauthorized reader's 404 suffices.
+                    try:
+                        api("/repos/"+target, alternate)
+                    except RuntimeError as second:
+                        if "not found" in str(second).lower():
+                            verified_404 = True
+                            break
+                    raise RuntimeError("Independent authenticated deletion check failed") from None
                 raise RuntimeError(f"Independent deletion check failed: HTTP {exc.code}") from None
             if attempt < 4:
                 import time; time.sleep(2)

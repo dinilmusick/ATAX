@@ -246,6 +246,7 @@ jobs:
         if: always() && steps.bridge.outputs.repository != ''
         env:
           GITHUB_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+          GITHUB_INDEPENDENT_READ_TOKEN: ${{ secrets.FMRL_SECRETS_TOKEN }}
           BRIDGE: ${{ steps.bridge.outputs.repository }}
         shell: bash
         run: |
