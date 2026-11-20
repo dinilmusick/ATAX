@@ -35,6 +35,13 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
             checked += 1
         self.assertGreaterEqual(checked, 5)
 
+    def test_build_precedes_bundle_and_artifact_dependent_test_gates(self):
+        workflow = MODULE.WORKFLOW
+        ordered = workflow.split("const ordered=[", 1)[1].split("];", 1)[0]
+        self.assertLess(ordered.index("'build'"), ordered.index("'verify:bundle'"))
+        self.assertLess(ordered.index("'build'"), ordered.index("'test'"))
+        self.assertLess(ordered.index("'build'"), ordered.index("'verify:build-artifacts'"))
+
     def test_safe_failure_categories_survive_control_plane_cleanup(self):
         workflow = MODULE.WORKFLOW
         controller = (Path(__file__).parents[2] / ".github" /
