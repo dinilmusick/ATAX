@@ -1,4 +1,5 @@
 import {githubTools, githubGuide} from './github-tools.mjs';
+import {providerTools} from './provider-accounts.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-06-18', '2025-03-26']);
@@ -46,7 +47,7 @@ const TOOLS = [
   tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
 ];
-TOOLS.push(...githubTools);
+TOOLS.push(...githubTools,...providerTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
