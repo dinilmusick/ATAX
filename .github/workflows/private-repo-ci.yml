@@ -36,6 +36,14 @@ on:
         required: false
         default: ""
         type: string
+      mode:
+        required: false
+        default: direct
+        type: string
+      branch:
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -58,6 +66,8 @@ jobs:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_EVENT: ${{ inputs.event }}
           INPUT_WORKFLOW: ${{ inputs.workflow }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_BRANCH: ${{ inputs.branch }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -66,18 +76,22 @@ jobs:
             'repository':os.environ.get('INPUT_REPOSITORY',''),
             'ref':os.environ.get('INPUT_REF',''),
             'event':os.environ.get('INPUT_EVENT','push'),
-            'workflow':os.environ.get('INPUT_WORKFLOW','')
+            'workflow':os.environ.get('INPUT_WORKFLOW',''),
+            'mode':os.environ.get('INPUT_MODE','direct'),
+            'branch':os.environ.get('INPUT_BRANCH','')
           }
           repo=data.get('repository') or ''
           ref=data.get('ref') or ''
           event=data.get('event') or 'push'
           workflow=data.get('workflow') or ''
+          mode=data.get('mode') or 'direct'
+          branch=data.get('branch') or ''
           assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo)
           assert re.fullmatch(r'[0-9a-f]{40}',ref)
           assert event in ('push','pull_request','workflow_dispatch')
           assert not workflow or re.fullmatch(r'[A-Za-z0-9_.-]+\.ya?ml',workflow)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-            for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow)]:
+            for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow),('mode',mode),('branch',branch)]:
               print(key+'='+val,file=out)
           PY
 
@@ -91,18 +105,20 @@ jobs:
           TARGET_REF: ${{ steps.request.outputs.ref }}
           TARGET_EVENT: ${{ steps.request.outputs.event }}
           TARGET_WORKFLOW: ${{ steps.request.outputs.workflow }}
+          TARGET_MODE: ${{ steps.request.outputs.mode }}
+          TARGET_BRANCH: ${{ steps.request.outputs.branch }}
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/github/disposable_workspace.py --source "$TARGET" \
             --target "FMRL-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             --ref "$TARGET_REF" --event "$TARGET_EVENT" --workflow "$TARGET_WORKFLOW" \
-            --mode direct > /tmp/fmrl.json
+            --mode "$TARGET_MODE" --branch "$TARGET_BRANCH" > /tmp/fmrl.json
           bridge="$(python3 -c 'import json;print(json.load(open("/tmp/fmrl.json"))["disposable_repository"])')"
           [[ "$bridge" =~ ^[A-Za-z0-9_.-]+/FMRL-[A-Za-z0-9-]+$ ]]
           echo "repository=$bridge" >> "$GITHUB_OUTPUT"
           echo "Provisioned disposable bridge: $bridge" >> "$GITHUB_STEP_SUMMARY"
-          echo "FMRL mode: exact-head portable direct suite. This verifies only locked install, typed checks, tests and builds; NOT the complete source GitHub Actions workflow." >> "$GITHUB_STEP_SUMMARY"
+          echo "FMRL mode: ${TARGET_MODE} (exact private revision; no raw source logs or artifacts)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch FMRL runner and independently inspect result
         env:
