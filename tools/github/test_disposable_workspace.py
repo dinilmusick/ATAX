@@ -321,19 +321,30 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("secrets.FMRL_TARGET_REF", generated)
 
 
-    def test_direct_suite_is_frozen_fail_closed_and_explicitly_not_full_workflow_parity(self):
+    def test_direct_suite_has_separate_sanitized_install_static_test_build_stages(self):
         workflow = MODULE.WORKFLOW
         self.assertIn("FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}", workflow)
-        direct = workflow.split("      - name: Run portable private-suite checks")[1].split(
+        direct = workflow.split("      - name: Prepare isolated portable stage runner")[1].split(
             "      - name: Remove private checkout")[0]
+        for step in (
+            "Direct frozen dependency installation", "Direct static and architecture checks",
+            "Direct security and integration tests", "Direct application build",
+            "Direct build-artifact checks",
+        ):
+            self.assertIn("      - name: " + step, direct)
         self.assertIn("pnpm install --frozen-lockfile", direct)
         self.assertIn("npm ci --include=optional --no-audit --no-fund", direct)
         self.assertIn("scripts.test || !scripts.build", direct)
-        self.assertIn("NOT full workflow parity", direct)
-        self.assertIn(">/tmp/fmrl-direct-raw.log 2>&1", direct)
-        self.assertIn("rm -f /tmp/fmrl-direct-raw.log", direct)
+        self.assertIn("not full workflow parity", direct)
+        self.assertIn("> /tmp/fmrl-stage-raw.log 2>&1", direct)
+        self.assertIn("rm -f /tmp/fmrl-stage-raw.log", direct)
+        self.assertIn("FMRL direct suite:", direct)
+        self.assertIn("FMRL failure categories:", direct)
+        self.assertIn("chmod 0700 /tmp/fmrl-direct-stage", direct)
         self.assertNotIn("PRIVATE_REPO_TOKEN", direct)
+        self.assertNotIn("CODING_REPO_TOKEN", direct)
         self.assertNotIn("upload-artifact", direct)
+        self.assertNotIn("cat /tmp/fmrl-stage-raw.log", direct)
         self.assertIn("if: env.FMRL_EXECUTION_MODE == 'direct'", workflow)
         self.assertIn("if: env.FMRL_EXECUTION_MODE == 'act'", workflow)
         self.assertIn("sudo rm -rf -- target", workflow)
