@@ -51,6 +51,20 @@ class GeneratedFmrlWorkflowShellTests(unittest.TestCase):
         self.assertIn("grep -E '^(FMRL coverage:", controller)
         self.assertIn("ALWAYS delete FMRL and verify absence", controller)
 
+    def test_safe_python_diagnostics_parse_without_raw_log_exposure(self):
+        import ast
+        workflow = MODULE.WORKFLOW
+        marker = """          python3 - "$result" <<'SAFE'\n"""
+        embedded = workflow.split(marker, 1)[1].split("\n          SAFE\n", 1)[0]
+        source = "\n".join(
+            line[10:] if line.startswith("          ") else line
+            for line in embedded.split("\n")
+        )
+        ast.parse(source)
+        self.assertIn("FMRL TypeScript codes:", source)
+        self.assertIn("FMRL last observed nested script:", source)
+        self.assertNotIn("print(output)", source)
+
     def test_node_heredoc_closes_at_scalar_baseline(self):
         script = MODULE.WORKFLOW.split(
             "      - name: Run portable private-suite checks", 1
