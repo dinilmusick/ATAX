@@ -77,9 +77,9 @@ const redactDiagnostic=(text,env)=>{
      typeof secret!=='string'||secret.length<15)continue;
   value=value.split(secret).join('[REDACTED]');
  }
- return value.replace(/Bearer\\s+[^\\s"'<>,]+/gi,'Bearer [REDACTED]')
+ return value.replace(/Bearer\s+[^\s"'<>,]+/gi,'Bearer [REDACTED]')
    .replace(/(?:gh[pousr]_|sb_secret_)[A-Za-z0-9_=-]{12,}/g,'[REDACTED]')
-   .replace(/\\b(token|secret|password|api[_-]?key)\\s*[=:]\\s*[^\\s,;'"]+/gi,'$1=[REDACTED]').slice(0,800);
+   .replace(/\b(token|secret|password|api[_-]?key)\s*[=:]\s*[^\s,;'"]+/gi,'$1=[REDACTED]').slice(0,800);
 };
 async function checkAnnotations(a,_db,p,ctx){
  const repo=repoOf(a.repository),account=accountFor(a,p,ctx);
