@@ -382,6 +382,8 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("'installed-lock-mismatch'", runner)
         self.assertIn("'missing-provider-contract'", runner)
         self.assertIn("FMRL dependency migration categories:", runner)
+        self.assertIn("FMRL Skipo migration categories:", runner)
+        self.assertIn("approved_classifiers={", runner)
         self.assertIn("FMRL dependency migration categories:", controller)
         self.assertNotIn("print(output)", runner)
 
