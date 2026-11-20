@@ -31,7 +31,8 @@ jobs:
       - name: Verify MCP gateway
         run: |
           node --check tools/atax-mcp/worker.mjs
-          node --test tools/atax-mcp/worker.test.mjs
+          node --check tools/atax-mcp/provider-accounts.mjs
+          node --test tools/atax-mcp/*.test.mjs
       - name: Deploy Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
