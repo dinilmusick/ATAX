@@ -28,7 +28,7 @@ def fail(reason: str) -> None:
     raise RuntimeError(reason)
 
 
-def api(path: str, token: str, method: str = "GET", payload=None):
+def api(path: str, token: str, method: str = "GET", payload=None, stage: str = "unspecified"):
     body = json.dumps(payload).encode() if payload is not None else None
     url = API + path
     req = request.Request(url, data=body, method=method, headers={
@@ -42,7 +42,7 @@ def api(path: str, token: str, method: str = "GET", payload=None):
         with request.urlopen(req, timeout=30) as response:
             return json.load(response) if response.status != 204 else None
     except error.HTTPError as exc:
-        raise RuntimeError("GitHub write/read gate failed: HTTP " + str(exc.code)) from None
+        raise RuntimeError("GitHub gate " + stage + " failed: HTTP " + str(exc.code)) from None
 
 
 def main() -> None:
@@ -70,7 +70,7 @@ def main() -> None:
     if any(item != path for item in changed):
         fail("Lockfile repair mutated a non-allowlisted source file")
     branch_path = "/repos/" + repo + "/git/ref/heads/" + parse.quote(branch, safe="/")
-    old_ref = api(branch_path, token)
+    old_ref = api(branch_path, token, stage="private-branch-preflight")
     if old_ref["object"]["sha"] != expected:
         fail("Private PR head advanced: refuse stale update")
     if not changed:
@@ -82,24 +82,24 @@ def main() -> None:
     fileblob = api("/repos/" + repo + "/git/blobs", token, "POST", {
         "content": base64.b64encode(contents).decode("ascii"),
         "encoding": "base64",
-    })["sha"]
-    base_commit = api("/repos/" + repo + "/git/commits/" + expected, token)
+    }, stage="create-lock-blob")["sha"]
+    base_commit = api("/repos/" + repo + "/git/commits/" + expected, token, stage="base-commit-read")
     base_tree = base_commit["tree"]["sha"]
     new_tree = api("/repos/" + repo + "/git/trees", token, "POST", {
         "base_tree": base_tree,
         "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": fileblob}],
-    })["sha"]
+    }, stage="create-lock-tree")["sha"]
     new_commit = api("/repos/" + repo + "/git/commits", token, "POST", {
         "message": "fix(auth): regenerate frozen dependency lockfile via isolated ATAX FMRL",
         "tree": new_tree,
         "parents": [expected],
-    })["sha"]
+    }, stage="create-lock-commit")["sha"]
     # Non-forced atomic fast-forward: fail instead of overwriting a concurrent PR update.
-    api(branch_path, token, "PATCH", {"sha": new_commit, "force": False})
-    updated = api(branch_path, token)
+    api(branch_path, token, "PATCH", {"sha": new_commit, "force": False}, stage="atomic-branch-update")
+    updated = api(branch_path, token, stage="branch-readback")
     if updated["object"]["sha"] != new_commit:
         fail("Independent branch readback differs from committed SHA")
-    published_blob = api("/repos/" + repo + "/git/blobs/" + fileblob, token)
+    published_blob = api("/repos/" + repo + "/git/blobs/" + fileblob, token, stage="blob-readback")
     if published_blob.get("encoding") != "base64":
         fail("Independent blob readback encoding invalid")
     if hashlib.sha256(base64.b64decode(published_blob["content"])).hexdigest() != local_digest:
