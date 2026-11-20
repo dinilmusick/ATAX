@@ -1,3 +1,4 @@
+import {resolveProviderAccount} from './provider-accounts.mjs';
 /** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */
 const OWNER = 'dinilmusick';
 const CONTROLLER = `${OWNER}/ATAX`;
@@ -34,8 +35,8 @@ export const githubGuide = Object.freeze({
   auth:{
     read:'atax:github:read', permanentCreation:'atax:github:create',
     disposableExecution:'atax:fmrl:execute',
-    serverSecrets:['GITHUB_REPOSITORY_TOKEN','GITHUB_FMRL_DISPATCH_TOKEN'],
-    serverBindings:['MCP_GITHUB_OWNER','MCP_FMRL_ALLOWED_TARGETS'],
+    serverSecrets:['GH_TOKEN_<ALIAS>','GITHUB_REPOSITORY_TOKEN (legacy fallback)','GITHUB_FMRL_DISPATCH_TOKEN'],
+    serverBindings:['MCP_GITHUB_OWNER (FMRL legacy controller)','MCP_FMRL_ALLOWED_TARGETS','MCP_PROVIDER_ACCOUNT_GRANTS'],
   },
   lifecycle:'The FMRL workflow owns provisioning, dispatch, log redaction, and unconditional delete + independent verify; the MCP Worker NEVER hosts source or schedules agents.',
 });
@@ -69,7 +70,7 @@ function targetAllowed(repo, env) {
   if (!values.includes(repo)) throw new Error('Target repository not approved for FMRL remote CI');
 }
 async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=false}={}) {
-  if (!url.startsWith(`${API}/repos/`) && url!==`${API}/user/repos`)
+  if (!url.startsWith(`${API}/repos/`) && url!==`${API}/user/repos` && url!==`${API}/user`)
     throw new Error('Unsupported GitHub API endpoint');
   const headers={'accept':'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'atax-mcp-control-plane'};
   if (!anonymous) headers.authorization=`Bearer ${token}`;
@@ -87,10 +88,13 @@ async function repositoryInfo(repo,ctx,token) {
   if (data.full_name!==repo)throw new Error('Repository identity mismatch');
   return {repository:data.full_name,url:data.html_url,visibility:data.private?'private':'public',default_branch:data.default_branch};
 }
-async function createRepository(a,_db,_p,ctx){
-  const env=ctx.env; const owner=assertOwner(env);
+async function createRepository(a,_db,p,ctx){
+  const env=ctx.env;
+  const selected=resolveProviderAccount(env,p,'github',a.account,{legacyKey:'GITHUB_REPOSITORY_TOKEN'});
+  const owner=selected.legacy?assertOwner(env):requireOk(await githubRequest(ctx.fetcher,`${API}/user`,selected.token),'GitHub identity lookup').login;
+  if(!owner||!/^[a-zA-Z0-9-]{1,39}$/.test(owner))throw new Error('Unable to verify token GitHub account');
   const name=ensureName(a.name,true);
-  const token=requireEnv(env,'GITHUB_REPOSITORY_TOKEN');
+  const token=selected.token;
   const description=a.description||'';
   const visibility=a.visibility||'private';
   const body={name,description,private:visibility==='private',auto_init:a.initialize??true};
@@ -98,12 +102,13 @@ async function createRepository(a,_db,_p,ctx){
   if(result.full_name!==`${owner}/${name}`)throw new Error('Created repository owner/name mismatch');
   const verified=await repositoryInfo(result.full_name,ctx,token);
   if(verified.visibility!==visibility)throw new Error('Created repository visibility mismatch');
-  return {operation:'create_permanent_repository',...verified,verified:true,disposable:false};
+  return {operation:'create_permanent_repository',account:selected.alias,...verified,verified:true,disposable:false};
 }
-async function inspectRepository(a,_db,_p,ctx){
-  const repo=parseRepo(a.repository,ctx.env);
-  const token=requireEnv(ctx.env,'GITHUB_REPOSITORY_TOKEN');
-  return {operation:'inspect_repository',...await repositoryInfo(repo,ctx,token)};
+async function inspectRepository(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account,{legacyKey:'GITHUB_REPOSITORY_TOKEN'});
+  const repo=selected.legacy?parseRepo(a.repository,ctx.env):String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  return {operation:'inspect_repository',account:selected.alias,...await repositoryInfo(repo,ctx,selected.token)};
 }
 function validateFmrlArgs(a,env){
   const repo=parseRepo(a.repository,env);
@@ -171,10 +176,10 @@ export const githubTools=[
     'atax:read',one('GitHub operations guide',{}),()=>githubGuide),
   tool('atax_github_repository_inspect',
     'Inspect an owner-scoped permanent GitHub repository and verify visibility/default branch without exposing credentials.',
-    'atax:github:read',one('Repository lookup',{repository:s('Canonical owner/name repository',205)},['repository']),inspectRepository),
+    'atax:github:read',one('Repository lookup',{repository:s('GitHub owner/name repository',205),account:{type:'string',maxLength:48,description:'Named GH_TOKEN_<ALIAS> credential; omit when exactly one is available'}},['repository']),inspectRepository),
   tool('atax_github_repository_create',
     'CREATE A PERMANENT GitHub repository using the existing ATAX GitHub repository-lifecycle contract. Defaults PRIVATE, README initialised, verifies created owner/visibility. Never use for FMRL; separate scope atax:github:create.',
-    'atax:github:create',one('Permanent GitHub repository',{name:s('New repository name (NOT FMRL-* or ATAX)',100),description:{type:'string',maxLength:300,description:'Public description; must contain no credentials or private content'},visibility:{type:'string',enum:['private','public'],description:'Defaults to private'},initialize:{type:'boolean',description:'Initialize repository with README (default true)'}},['name']),createRepository),
+    'atax:github:create',one('Permanent GitHub repository',{name:s('New repository name (NOT FMRL-* or ATAX)',100),account:{type:'string',maxLength:48,description:'Named GH_TOKEN_<ALIAS> credential; omit when exactly one is available'},description:{type:'string',maxLength:300,description:'Public description; must contain no credentials or private content'},visibility:{type:'string',enum:['private','public'],description:'Defaults to private'},initialize:{type:'boolean',description:'Initialize repository with README (default true)'}},['name']),createRepository),
   tool('atax_fmrl_create_run_dispose',
     'DISPOSABLE PRIVATE-TARGET CI FALLBACK, NOT permanent repo creation. Container first; only if local execution unavailable/insufficient. Dispatch canonical ATAX private-repo-ci.yml controller which provisions a public FMRL-* bridge, checks out exact private SHA inside isolated runner, runs checks, ALWAYS deletes FMRL even after failure and independently verifies 404. Returns correlation request_id, NOT job success. Never execute target code in ATAX. Requires explicit allowlisted target and atax:fmrl:execute scope.',
     'atax:fmrl:execute',one('Dispatch FMRL remote CI',{repository:s('Allowlisted private repository owner/name (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'}},['repository','ref']),dispatchFmrl),
