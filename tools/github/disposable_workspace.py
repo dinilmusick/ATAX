@@ -179,6 +179,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          found_pnpm="$(pnpm --version 2>/dev/null || true)"
+          [[ "$found_pnpm" == '10.33.0' ]] || { echo 'FMRL pinned pnpm version mismatch' >&2; exit 1; }
+          echo 'FMRL pinned pnpm version: 10.33.0'
           set +e
           (
             set -euo pipefail
@@ -247,6 +250,25 @@ jobs:
               print('FMRL failure categories: '+summary[:250])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
+              if 'ERR_PNPM_BROKEN_LOCKFILE' in output:
+                  signatures=(
+                    ('multiple-documents',r'expected a single document in the stream'),
+                    ('unexpected-scalar',r'unexpected event: expected string scalar'),
+                    ('duplicate-yaml-key',r'duplicated mapping key'),
+                    ('yaml-indentation',r'bad indentation|mapping values are not allowed'),
+                    ('yaml-document-boundary',r'end of the stream or a document separator is expected'),
+                    ('yaml-unexpected-end',r'unexpected end of the stream'),
+                    ('yaml-unknown-anchor',r'unidentified alias|unknown anchor'),
+                    ('invalid-lockfile-shape',r'cannot convert|invalid type|expected.*mapping|unexpected mapping'),
+                  )
+                  reason=next((name for name,pattern in signatures
+                      if re.search(pattern,output,re.I)), 'unclassified')
+                  mark=re.search(
+                    r'(?:broken|yaml|scalar|mapping)[^\n]{0,220}\(([0-9]{1,6}):([0-9]{1,5})\)',
+                    output,re.I)
+                  print('FMRL lockfile parse cause: '+reason+
+                    ('; line='+mark.group(1)+'; column='+mark.group(2) if mark else ''))
+
               # Restrict public diagnostics to package-manager error identifiers.
               # Do not print dependency names, private paths, source, or raw logs.
               codes=sorted(set(re.findall(
