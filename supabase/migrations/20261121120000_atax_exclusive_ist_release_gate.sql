@@ -108,6 +108,12 @@ begin
   observed_main := (provider_report_in->>'main_updates')::integer;
   observed_worker := (provider_report_in->>'worker_deployments')::integer;
 
+  if exists(select 1 from public.atax_release_days
+            where system_id=system_id_in and ist_day<>day_value
+              and state in ('reserved','reconcile_required')) then
+    raise exception 'a previous IST day has unresolved release ownership'
+      using errcode='55000';
+  end if;
   insert into public.atax_release_days(system_id,ist_day)
     values(system_id_in,day_value) on conflict do nothing;
   select * into record_value from public.atax_release_days
