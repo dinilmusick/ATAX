@@ -80,7 +80,7 @@ async function authenticate(request,env, fetcher){
   const parts=token.split('.'); if(parts.length!==3)return null;
   let head,claims;
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  if(!isObj(head)||!isObj(claims)||head.alg!=='RS256'||typeof head.kid!=='string')return null;
+  if(!isObj(head)||!isObj(claims)||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string')return null;
   const now=Math.floor(Date.now()/1000);
   if(claims.iss!==env.MCP_AUTH_ISSUER||!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)||!Number.isFinite(claims.exp)||claims.exp<=now||
      (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now))||
@@ -91,15 +91,33 @@ async function authenticate(request,env, fetcher){
   const response=await fetcher(jwksUrl.toString(),{redirect:'error',headers:{accept:'application/json'}});
   if(!response.ok)return null;
   const jwks=await response.json();
-  const jwk=Array.isArray(jwks.keys)?jwks.keys.find(k=>k.kty==='RSA'&&k.kid===head.kid&&(!k.alg||k.alg==='RS256')&&(!k.use||k.use==='sig')):null;
+  const jwk=Array.isArray(jwks.keys)?jwks.keys.find(k=>k.kid===head.kid&&(!k.alg||k.alg===head.alg)&&(!k.use||k.use==='sig')&&(
+    (head.alg==='RS256'&&k.kty==='RSA')||
+    (head.alg==='EdDSA'&&k.kty==='OKP'&&k.crv==='Ed25519')||
+    (head.alg==='ES256'&&k.kty==='EC'&&k.crv==='P-256')
+  )):null;
   if(!jwk)return null;
   try{
-    const key=await crypto.subtle.importKey('jwk',jwk,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);
-    const valid=await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,bytesFromB64Url(parts[2]),encoder.encode(parts[0]+'.'+parts[1]));
+    const algorithm=head.alg==='RS256'?{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'}:
+      head.alg==='EdDSA'?{name:'Ed25519'}:{name:'ECDSA',namedCurve:'P-256'};
+    const verifyParams=head.alg==='ES256'?{name:'ECDSA',hash:'SHA-256'}:algorithm;
+    const key=await crypto.subtle.importKey('jwk',jwk,algorithm,false,['verify']);
+    const valid=await crypto.subtle.verify(verifyParams,key,bytesFromB64Url(parts[2]),encoder.encode(parts[0]+'.'+parts[1]));
     if(!valid)return null;
   }catch{return null;}
-  const scopes=String(claims.scope||'').split(/\s+/).filter(Boolean);
-  return {id:claims.sub,authMethod:'jwt',scopes:new Set(scopes)};
+  const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
+  // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
+  // Only a pinned Luth owner subject may receive capabilities defined by server policy.
+  // Never map all authenticated Luth accounts to the owner or verifier role.
+  if(claims.sub===String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'') &&
+     typeof env.MCP_ATAX_OWNER_JWT_SUBJECT==='string' &&
+     env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
+     env.MCP_AUTH_OWNER_SCOPES) {
+    for(const scope of String(env.MCP_AUTH_OWNER_SCOPES).split(/\s+/)) {
+      if(/^atax:(read|write|verify|github:read|github:create|fmrl:execute)$/.test(scope))scopes.add(scope);
+    }
+  }
+  return {id:claims.sub,authMethod:'jwt',scopes};
 }
 function allowedOrigin(req, env){
   const origin=req.headers.get('origin'); if(!origin)return true;
@@ -206,10 +224,13 @@ export function createHandler(fetcher=fetch){
   async function dispatch(req,env={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL});
-    if(url.pathname==='/.well-known/oauth-protected-resource'&&req.method==='GET'){
+    if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
-      const servers=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'');
-      return json({resource,authorization_servers:servers?[servers]:[],bearer_methods_supported:['header']});
+      const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
+      // The authorization server (Luth) owns OAuth metadata and dynamic client registration.
+      // ATAX is a protected resource, never a second token issuer.
+      return json({resource,authorization_servers:server?[server]:[],bearer_methods_supported:['header'],
+        scopes_supported:['openid','profile','email','offline_access']});
     }
     if(url.pathname!=='/mcp')return json({error:'Not found'},404);
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
@@ -217,7 +238,7 @@ export function createHandler(fetcher=fetch){
     if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET'});
     if(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
     let principal;try{principal=await authenticate(req,env,fetcher);}catch{return json({error:'Authentication unavailable'},503);}
-    if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource',req.url).toString()+'"'});
+    if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
     if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
     if(req.method==='DELETE')return json({error:'No sessions to terminate'},405,{allow:'POST'});
     if(!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))return json({error:'Content-Type must be application/json'},415);
