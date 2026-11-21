@@ -1,52 +1,111 @@
-name: Deploy ATAX MCP Worker
+name: Deploy ATAX BYOC MCP Worker (guarded)
 
 on:
   workflow_dispatch:
     inputs:
       cloudflare_account_id:
-        description: 'Cloudflare account ID (the owner selects the destination explicitly)'
+        description: Explicit selected ATAX Cloudflare account
         required: true
         type: string
       worker_url:
-        description: 'Optional exact public Worker URL for health probe (no credentials)'
-        required: false
+        description: Exact public HTTPS Worker origin, not /mcp
+        required: true
         type: string
+      reviewed_source_sha:
+        description: Independently reviewed exact main SHA
+        required: true
+        type: string
+      release_reservation_token:
+        description: ATAX release reservation UUID verified by an independent reconciler
+        required: true
+        type: string
+      confirm_byoc_release:
+        description: I independently checked release history and approved this release
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: atax-mcp-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.confirm_byoc_release == true
     runs-on: ubuntu-latest
     environment: atax-mcp
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
-      - name: Verify MCP gateway
+      - name: Verify exact release source and guarded destination
+        env:
+          ACCOUNT: ${{ inputs.cloudflare_account_id }}
+          REVIEWED_SHA: ${{ inputs.reviewed_source_sha }}
+          LOCK_TOKEN: ${{ inputs.release_reservation_token }}
+          WORKER_URL: ${{ inputs.worker_url }}
+        shell: bash
         run: |
-          node --check tools/atax-mcp/worker.mjs
-          node --check tools/atax-mcp/provider-accounts.mjs
+          set -euo pipefail
+          test "$ACCOUNT" = "38bdf043bc4cb132cfc22b13d597ca2e" || { echo 'Wrong Cloudflare account'; exit 1; }
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]] && test "$REVIEWED_SHA" = "$GITHUB_SHA" || { echo 'Main SHA differs from reviewed candidate'; exit 1; }
+          [[ "$LOCK_TOKEN" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo 'ATAX reservation UUID absent'; exit 1; }
+          test "$WORKER_URL" = "https://atax-mcp.dextro1n1laevo.workers.dev" || { echo 'Unexpected Worker origin'; exit 1; }
+          grep -F 'ATAX_BYOC_MODE = "true"' tools/atax-mcp/wrangler.toml >/dev/null
+          if grep -E '^(SUPABASE_URL|SUPABASE_SECRET_KEY|GITHUB_REPOSITORY_TOKEN|MCP_VAULT_KEY_B64)' tools/atax-mcp/wrangler.toml; then
+            echo 'Operator-owned credential bindings forbidden' >&2; exit 1
+          fi
+          echo "ATAX source SHA $REVIEWED_SHA, receipt $LOCK_TOKEN" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Reservation validity and daily quota require independent Supabase/provider evidence from release reconciler.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Test source and dry-run Worker packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in tools/atax-mcp/*.mjs; do node --check "$f"; done
           node --test tools/atax-mcp/*.test.mjs
-      - name: Deploy Cloudflare Worker
+          npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-byoc-preflight
+      - name: Verify no operator-held Worker provider secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid Cloudflare account ID'; exit 1; }
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing ATAX_MCP_CLOUDFLARE_API_TOKEN repository secret'; exit 1; }
-          npx --yes wrangler@4 deploy --config tools/atax-mcp/wrangler.toml
-      - name: Verify health at explicit URL
-        if: inputs.worker_url != ''
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing scoped Worker deployment credential'; exit 1; }
+          payload="$(curl --fail-with-body --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/atax-mcp/secrets")"
+          jq -e '.success == true and (.result | length) == 0' <<<"$payload" >/dev/null || {
+            echo 'Operator provider secrets still bound to Worker; refusing release' >&2; exit 1;
+          }
+      - name: Deploy BYOC Worker only after independent release approval
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
+        run: npx --yes wrangler@4 deploy --config tools/atax-mcp/wrangler.toml
+      - name: Verify OAuth metadata and refuse anonymous MCP initialization
         env:
           WORKER_URL: ${{ inputs.worker_url }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$WORKER_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo 'Expected HTTPS Worker URL'; exit 1; }
-          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/health"
+          curl --fail --silent --show-error --max-time 30 "$WORKER_URL/health" |
+            jq -e '.service == "atax-mcp" and .status == "ok" and .mode == "byoc"' >/dev/null
+          curl --fail --silent --show-error --max-time 30 "$WORKER_URL/.well-known/oauth-authorization-server" |
+            jq -e --arg base "$WORKER_URL" '.issuer == $base and .registration_endpoint == ($base + "/register") and (.code_challenge_methods_supported | index("S256") != null)' >/dev/null
+          curl --fail --silent --show-error --max-time 30 "$WORKER_URL/.well-known/oauth-protected-resource/mcp" |
+            jq -e --arg base "$WORKER_URL" '.resource == ($base + "/mcp") and (.authorization_servers | index($base) != null)' >/dev/null
+          status="$(curl --silent --show-error --max-time 30 -o /tmp/atax-unauth.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"release-probe","version":"1"}}}' \
+            "$WORKER_URL/mcp")"
+          test "$status" = 401 || { echo "BYOC anonymous request must return 401 (got $status)" >&2; exit 1; }
+          echo 'BYOC OAuth metadata, health and unauthenticated rejection verified' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Live user onboarding and two-tenant certification remain separately required.' >> "$GITHUB_STEP_SUMMARY"
