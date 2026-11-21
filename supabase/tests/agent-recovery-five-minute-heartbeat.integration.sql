@@ -64,6 +64,15 @@ begin
   set heartbeat_at=now()-interval '5 minutes 1 second'
   where id=first_claim.id;
 
+  select * into early_claim from public.task_ledger_claim_next(
+    'heartbeat-hardening-preexpiry','Pre-expiry Worker','worker',array['heartbeat-hardening']::text[],600
+  );
+  if early_claim.id is not null then
+    raise exception 'Stale heartbeat allowed unexpired lease takeover';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered from public.task_ledger_claim_next(
     'heartbeat-hardening-new','Recovery Worker','worker',array['heartbeat-hardening']::text[],600
   );
