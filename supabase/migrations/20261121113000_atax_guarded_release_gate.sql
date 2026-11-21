@@ -1,3 +1,22 @@
+-- Restore the canonical GitHub check-run projection in resettable migrations.
+-- Production already contains this table; IF NOT EXISTS preserves existing data.
+create table if not exists public.github_check_runs (
+  id uuid primary key default gen_random_uuid(),
+  system_id uuid not null references public.systems(id) on delete cascade,
+  github_id bigint not null,
+  name text, workflow_name text, status text, conclusion text,
+  sha text, branch text, url text, started_at timestamptz,
+  completed_at timestamptz, source_updated_at timestamptz,
+  synced_at timestamptz not null default now(),
+  raw jsonb not null default '{}'::jsonb,
+  constraint github_check_runs_system_id_github_id_key unique(system_id, github_id)
+);
+create index if not exists github_check_runs_attention_idx
+  on public.github_check_runs(system_id, conclusion, status, completed_at desc);
+alter table public.github_check_runs enable row level security;
+revoke all on public.github_check_runs from public, anon, authenticated;
+grant select,insert,update on public.github_check_runs to service_role;
+
 -- ATAX release controller, fail-closed. A durable gate is coordination, not a
 -- scheduler: external agents perform operations and submit source evidence.
 -- No production data changes or releases occur merely by applying this schema.
