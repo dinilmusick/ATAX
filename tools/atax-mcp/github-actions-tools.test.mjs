@@ -1,0 +1,95 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {githubActionTools} from './github-actions-tools.mjs';
+const principal={id:'tenant-user',authMethod:'jwt'};
+const env={MCP_PROVIDER_ACCOUNT_GRANTS:JSON.stringify({'tenant-user':{github:['WORK']}}),MCP_SHARED_SUBJECT:'disabled',
+ GH_TOKEN_WORK:['fixture','github','actions','token','safe'].join('_'),MCP_MULTI_TENANT_ENABLED:'true'};
+const invoke=(name,args,fetcher)=>githubActionTools.find(t=>t.name===name).invoke(args,null,principal,{env,fetcher});
+test('GitHub Actions uses only invited account, returns exact SHA and bounded job conclusions',async()=>{
+ const called=[];
+ const fetcher=async(url,config={})=>{
+  called.push({url,config});
+  if(url.endsWith('/actions/workflows?per_page=50'))return Response.json({workflows:[{id:12,name:'build',path:'.github/workflows/build.yml',state:'active',html_url:'https://github.com/org/app/actions'}]});
+  if(url.endsWith('/actions/runs/7/jobs?per_page=50'))return Response.json({jobs:[{id:22,name:'CI',status:'completed',conclusion:'success',steps:[{name:'tests',status:'completed',conclusion:'success',number:1}],private_key:'NEVER_RETURN'}]});
+  if(url.endsWith('/actions/runs/7'))return Response.json({id:7,status:'completed',conclusion:'success',head_sha:'f'.repeat(40),run_attempt:2,html_url:'https://github.com/org/app/actions/runs/7'});
+  throw Error('Unexpected GitHub request: '+url);
+ };
+ const list=await invoke('atax_github_actions_workflows_list',{account:'WORK',repository:'org/app'},fetcher);
+ assert.equal(list.workflows[0].name,'build');
+ const run=await invoke('atax_github_actions_run_status',{account:'WORK',repository:'org/app',run_id:7},fetcher);
+ assert.equal(run.head_sha,'f'.repeat(40));assert.equal(run.jobs[0].conclusion,'success');
+ assert.ok(!JSON.stringify(run).includes('NEVER_RETURN'));
+ assert.ok(called.every(r=>r.config.headers.authorization==='Bearer '+env.GH_TOKEN_WORK));
+});
+test('Dispatch accepts developer-owned public and private repositories, refuses cross-repo identity and requires confirmation',async()=>{
+ const observed=[];
+ const fetcher=async(url,options={})=>{
+  observed.push({url,options});
+  if(url==='https://api.github.com/repos/org/app')return Response.json({full_name:'org/app',private:false,permissions:{push:true}});
+  if(url.endsWith('/actions/workflows/test.yml'))return Response.json({id:4,state:'active'});
+  if(url.endsWith('/dispatches'))return new Response(null,{status:204});
+  throw Error('Unexpected request: '+url);
+ };
+ const base={repository:'org/app',account:'WORK',workflow:'test.yml',ref:'main',inputs:{target:'release',debug:false}};
+ await assert.rejects(invoke('atax_github_actions_dispatch',base,fetcher),/confirmation required/);
+ await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true,inputs:{api_key:'unsafe'}},fetcher),/Unsupported CI input key/);
+ const result=await invoke('atax_github_actions_dispatch',{...base,confirm:true},fetcher);
+ assert.equal(result.state,'dispatch_accepted_not_executed');
+ assert.equal(result.visibility,'public');
+ const posted=observed.find(x=>x.url.endsWith('/dispatches'));
+ assert.deepEqual(JSON.parse(posted.options.body),{ref:'main',inputs:base.inputs});
+ const privateFetcher=async(url)=>{
+   if(url==='https://api.github.com/repos/org/app')return Response.json({full_name:'org/app',private:true,permissions:{push:true}});
+   if(url.endsWith('/actions/workflows/test.yml'))return Response.json({id:4,state:'active'});
+   if(url.endsWith('/dispatches'))return new Response(null,{status:204});
+   throw Error('Unexpected URL '+url);
+ };
+ const privateResult=await invoke('atax_github_actions_dispatch',{...base,confirm:true},privateFetcher);
+ assert.equal(privateResult.visibility,'private');
+ assert.match(privateResult.execution_boundary,/developer-owned repository/);
+ await assert.rejects(invoke('atax_github_actions_dispatch',{...base,confirm:true},async()=>Response.json({full_name:'another-org/private',private:true})),/identity is not verified/);
+});
+
+test('GitHub check annotations expose bounded compiler errors without disclosing saved provider tokens',async()=>{
+ const secret=env.GH_TOKEN_WORK;
+ const fetcher=async(url,options)=>{
+  assert.equal(url,'https://api.github.com/repos/org/app/check-runs/556/annotations?per_page=50');
+  assert.equal(options.headers.authorization,'Bearer '+secret);
+  return Response.json([{path:'src/index.ts',start_line:17,end_line:17,
+    annotation_level:'failure',title:'TypeScript compiler error',
+    message:'Invalid type on line 17; token='+secret}]);
+ };
+ const result=await invoke('atax_github_actions_check_annotations',{repository:'org/app',account:'WORK',check_run_id:556},fetcher);
+ assert.equal(result.annotations.length,1);
+ assert.equal(result.annotations[0].path,'src/index.ts');
+ assert.ok(result.annotations[0].message.includes('[REDACTED]'));
+ assert.ok(!JSON.stringify(result).includes(secret));
+ await assert.rejects(invoke('atax_github_actions_check_annotations',{repository:'org/app',account:'WORK',check_run_id:-1},fetcher),/Invalid GitHub check run ID/);
+});
+
+test('Explicit workflow authoring writes to the selected user repository without secrets or overwrite',async()=>{
+ const seen=[];
+ const fetcher=async(url,options)=>{
+  seen.push({url,options});
+  if(url==='https://api.github.com/repos/org/app')return Response.json({
+   full_name:'org/app',private:true,permissions:{push:true},archived:false,disabled:false});
+  if(url==='https://api.github.com/repos/org/app/contents/.github/workflows/test.yml' && options.method==='PUT')
+   return Response.json({commit:{sha:'c'.repeat(40)}});
+  throw Error('Unexpected URL: '+url);
+ };
+ const yaml='name: Smoke\non: workflow_dispatch\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node --version\n';
+ const body={repository:'org/app',account:'WORK',branch:'main',workflow:'test.yml',yaml};
+ await assert.rejects(invoke('atax_github_actions_workflow_create',body,fetcher),/confirmation required/);
+ await assert.rejects(invoke('atax_github_actions_workflow_create',{...body,confirm:true,
+   yaml:'name: Evil\nGH_TOKEN='+['ghp','012345678901234567890'].join('_')+'\n'},fetcher),/literal credentials/);
+ await assert.rejects(invoke('atax_github_actions_workflow_create',{...body,confirm:true,workflow:'../evil.yml'},fetcher),/Workflow must/);
+ const result=await invoke('atax_github_actions_workflow_create',{...body,confirm:true},fetcher);
+ assert.equal(result.state,'created_pending_exact_head_verification');
+ assert.equal(result.commit_sha,'c'.repeat(40));
+ const put=seen.find(x=>x.options.method==='PUT');
+ const payload=JSON.parse(put.options.body);
+ assert.equal(payload.branch,'main');
+ assert.equal(Buffer.from(payload.content,'base64').toString(),yaml);
+ assert.equal(payload.sha,undefined,'A workflow update must never be attempted without explicit new workflow creation');
+ assert.equal(put.options.headers.authorization,'Bearer '+env.GH_TOKEN_WORK);
+});

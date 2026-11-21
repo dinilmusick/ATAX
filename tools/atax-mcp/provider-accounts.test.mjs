@@ -103,3 +103,43 @@ test('expired permissions, missing bindings, provider errors and invalid respons
   await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'PERSONAL'},owner,env),/account ID required/);
   assert.deepEqual(availableAccounts({...env,GH_TOKEN_HIDDEN:''},owner,'github'),['PERSONAL','WORK']);
 });
+
+
+test('tenant Cloudflare Builds diagnostics bind to exact worker tag, account and redact tokens',async()=>{
+ const token=['cf','tenant','secret','value','for','testing'].join('_');
+ const configured={...env,CLOUDFLARE_TOKEN_WORK:token,CLOUDFLARE_ACCOUNT_ID_WORK:'a'.repeat(32)};
+ const requests=[];
+ const fetcher=async(url,opts)=>{
+  requests.push({url,opts});
+  if(url.includes('/builds/workers/'))return Response.json({success:true,result:[
+   {build_uuid:'b'.repeat(32),status:'failed',branch:'main',created_at:'2026-11-21',private_thing:'NEVER_RETURN'}
+  ]});
+  return Response.json({success:true,result:{logs:[{message:'Build failed; token='+token},'Error TS1234'] }});
+ };
+ const builds=await invoke('atax_cloudflare_builds_list',{account:'WORK',worker_tag:'c'.repeat(32)},client,configured,fetcher);
+ assert.equal(builds.builds[0].status,'failed');
+ assert.ok(!JSON.stringify(builds).includes('NEVER_RETURN'));
+ const logs=await invoke('atax_cloudflare_build_logs',{account:'WORK',build_uuid:'b'.repeat(32)},client,configured,fetcher);
+ assert.equal(logs.lines.length,2);
+ assert.ok(!JSON.stringify(logs).includes(token));
+ assert.ok(logs.lines[0].includes('[REDACTED]'));
+ assert.ok(requests.every(x=>x.opts.headers.authorization==='Bearer '+token));
+ await assert.rejects(invoke('atax_cloudflare_builds_list',{account:'WORK',worker_tag:'wrong'},client,configured,fetcher),/verified Worker tag/);
+ await assert.rejects(invoke('atax_cloudflare_build_logs',{account:'WORK',account_id:'b'.repeat(32),build_uuid:'b'.repeat(32)},client,configured,fetcher),/mismatch/);
+});
+test('tenant Vercel build events use only selected token and redact bounded log content',async()=>{
+ const token=['vercel','tenant','safe','token','for','test'].join('_');
+ const configured={...env,VERCEL_TOKEN_WORK:token};
+ const requests=[];
+ const fetcher=async(url,opts)=>{
+  requests.push({url,opts});
+  return Response.json([{id:'event-1',type:'stderr',created:123,text:'token='+token+' compiler failure'}]);
+ };
+ const result=await invoke('atax_vercel_build_events',{account:'WORK',deployment_id:'dpl_123456789'},client,configured,fetcher);
+ assert.equal(result.events.length,1);
+ assert.ok(result.events[0].message.includes('compiler failure'));
+ assert.ok(!JSON.stringify(result).includes(token));
+ assert.ok(requests[0].url.includes('teamId=team_work'));
+ assert.equal(requests[0].opts.headers.authorization,'Bearer '+token);
+ await assert.rejects(invoke('atax_vercel_build_events',{account:'WORK',deployment_id:'../../secret'},client,configured,fetcher),/invalid/);
+});
