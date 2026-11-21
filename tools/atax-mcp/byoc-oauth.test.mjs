@@ -279,3 +279,26 @@ test('per-user optional Cloudflare and Vercel credentials are scoped and never d
  const vercel=await tool(access,'tools/call',{name:'atax_vercel_projects_list',arguments:{}});
  assert.match(JSON.stringify(vercel.data),/prj_123/);
 });
+
+
+test('Gemini unlink revokes a token family without requiring client_id',async()=>{
+ const id=await register(),otherClient=await register();
+ const auth=await enroll(id,secretA,'https://project-aaa1.supabase.co/',keyA);
+ const tokens=(await getTokens(id,auth)).data;
+ const mismatched=await form('/revoke',{client_id:otherClient,token:tokens.access_token});
+ assert.equal(mismatched.status,400,'An unrelated OAuth client cannot revoke another client session');
+ assert.equal((await tool(tokens.access_token)).status,200);
+ const revoked=await form('/revoke',{token:tokens.access_token});
+ assert.equal(revoked.status,200,'Gemini may omit client ID during unlink');
+ assert.equal((await tool(tokens.access_token)).status,401);
+ const refresh=await form('/token',{grant_type:'refresh_token',client_id:id,refresh_token:tokens.refresh_token});
+ assert.equal(refresh.status,400);
+ const duplicate=await form('/revoke',{token:tokens.access_token});
+ assert.equal(duplicate.status,200,'RFC7009 revocation of an already revoked token is idempotent');
+ const id2=await register();
+ const code2=await enroll(id2,secretB,'https://project-bbb2.supabase.co/',keyB);
+ const token2=(await getTokens(id2,code2)).data;
+ const revokeRefresh=await form('/revoke',{token:token2.refresh_token});
+ assert.equal(revokeRefresh.status,200);
+ assert.equal((await tool(token2.access_token)).status,401);
+});
