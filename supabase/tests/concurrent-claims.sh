@@ -47,10 +47,13 @@ if [[ "$actual" != 1 ]]; then
 fi
 # A second independent connection checks recorded state + append-only claim events.
 pass="$(psql "$DATABASE_URL" -X -At -v ON_ERROR_STOP=1 -c \
- "SELECT CASE WHEN count(*)=1 AND min(t.claim_token::text) IS NOT NULL
-    AND (SELECT count(*) FROM public.task_events e
-      WHERE e.task_id=min(t.id) AND e.event_type='claimed')=1
-    THEN 'PASS' ELSE 'FAIL' END
-  FROM public.tasks t WHERE t.required_capabilities=ARRAY['${cap}']::text[]" 2>/dev/null)"
+ "SELECT CASE WHEN
+   (SELECT count(*) FROM public.tasks t WHERE t.required_capabilities=ARRAY['${cap}']::text[])=1
+   AND EXISTS(SELECT 1 FROM public.tasks t
+      WHERE t.required_capabilities=ARRAY['${cap}']::text[]
+        AND t.claim_token IS NOT NULL AND t.status='running'
+        AND (SELECT count(*) FROM public.task_events e
+            WHERE e.task_id=t.id AND e.event_type='claimed')=1)
+   THEN 'PASS' ELSE 'FAIL' END" 2>/dev/null)"
 test "$pass" = PASS || { echo "Claim race audit failed: $pass" >&2; exit 1; }
 echo "PASS: independent concurrent claim contenders; exactly one owner, one fencing token and one claimed event"
