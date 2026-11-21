@@ -42,6 +42,15 @@ begin
       claim_expires_at=now()+interval '15 minutes'
   where id=first_claim.id;
 
+  select * into early_claim from public.task_ledger_claim_next(
+    'recovery-threshold-within-lease','Unexpired Lease Worker','worker',array['recovery-threshold']::text[],900
+  );
+  if early_claim.id is not null then
+    raise exception 'Stale heartbeat allowed an unexpired lease takeover';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered from public.task_ledger_claim_next(
     'recovery-threshold-new','Recovery Worker','worker',array['recovery-threshold']::text[],900
   );

@@ -17,8 +17,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: supabase-db-integration-${{ github.ref }}
-  cancel-in-progress: true
+  # Push and PR events for one source branch share the same Docker port scope.
+  # Queue rather than cancel a stack mid-shutdown, which can leave bound ports.
+  group: supabase-db-integration-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   database:
@@ -79,6 +81,12 @@ jobs:
             psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f "$test_file"
             echo "::endgroup::"
           done
+
+      - name: Real concurrent claim race (separate database sessions)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: bash supabase/tests/concurrent-claims.sh
 
       - name: Detect public schema drift
         shell: bash
