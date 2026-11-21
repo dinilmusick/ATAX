@@ -15,6 +15,19 @@ begin
     values('atax','ATAX disposable release fixture','active',95)
     returning id into atax_id;
   end if;
+  -- SQL grants must not expose release authority to normal JWT clients.
+  if has_function_privilege('authenticated',
+       'public.atax_release_reserve(uuid,text,text,jsonb,integer)','EXECUTE')
+     or has_function_privilege('anon',
+       'public.atax_release_finalize(uuid,text,uuid,text,jsonb)','EXECUTE')
+     or has_table_privilege('authenticated','public.atax_release_days','UPDATE')
+     or has_table_privilege('service_role','public.atax_release_days','UPDATE') then
+    raise exception 'release gate unexpectedly exposes direct writes or public RPC access';
+  end if;
+  if not has_function_privilege('service_role',
+       'public.atax_release_reserve(uuid,text,text,jsonb,integer)','EXECUTE') then
+    raise exception 'authorized control-plane service role cannot reserve';
+  end if;
   perform set_config('atax.test_release_system_id',atax_id::text,true);
   evidence := jsonb_build_object(
     'ist_day',day_value,'verifier_agent_id','independent-release-checker',
