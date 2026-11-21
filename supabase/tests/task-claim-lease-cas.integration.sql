@@ -37,31 +37,31 @@ $fixture$;
 set local role service_role;
 do $guarded$
 declare
-  task_id uuid := current_setting('atax.claim_lease_fixture_id')::uuid;
+  fixture_task_id uuid := current_setting('atax.claim_lease_fixture_id')::uuid;
   original_token uuid := current_setting('atax.claim_lease_fixture_token')::uuid;
   current_task public.tasks;
 begin
   begin
     update public.tasks set claimed_by_agent_id='lease-cas-intruder',
-      claim_token=gen_random_uuid() where id=task_id;
+      claim_token=gen_random_uuid() where id=fixture_task_id;
     raise exception 'pre-expiry owner replacement unexpectedly succeeded';
   exception when sqlstate '55000' then null;
   end;
 
   begin
     update public.tasks set claim_expires_at=now()-interval '1 minute'
-    where id=task_id;
+    where id=fixture_task_id;
     raise exception 'pre-expiry lease shortening unexpectedly succeeded';
   exception when sqlstate '55000' then null;
   end;
 
-  select * into current_task from public.tasks where id=task_id;
+  select * into current_task from public.tasks where id=fixture_task_id;
   if current_task.claimed_by_agent_id<>'lease-cas-original-worker'
      or current_task.claim_token is distinct from original_token
      or current_task.claim_expires_at<=now() then
     raise exception 'Protected owner/token/lease were modified by direct SQL';
   end if;
-  if (select count(*) from public.task_events e where e.task_id=task_id and e.event_type='claimed')<>1 then
+  if (select count(*) from public.task_events e where e.task_id=fixture_task_id and e.event_type='claimed')<>1 then
     raise exception 'Direct SQL takeover altered append-only claim evidence';
   end if;
 end;
