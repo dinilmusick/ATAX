@@ -201,3 +201,69 @@ revoke all on function public.atax_release_reserve(uuid,text,text,jsonb,integer)
 revoke all on function public.atax_release_finalize(uuid,text,uuid,text,jsonb) from public,anon,authenticated;
 grant execute on function public.atax_release_reserve(uuid,text,text,jsonb,integer) to service_role;
 grant execute on function public.atax_release_finalize(uuid,text,uuid,text,jsonb) to service_role;
+
+-- Reconcile an expired or ambiguous release without ever silently reissuing
+-- its lease. Two identities distinct from the prior owner must inspect sources.
+create or replace function public.atax_release_reconcile(
+  system_id_in uuid, reconciler_agent_in text, provider_report_in jsonb
+) returns jsonb language plpgsql security definer
+set search_path to 'pg_catalog','public' as $function$
+declare
+  release_day date;
+  current_release public.atax_release_days;
+  actual_main integer;
+  actual_worker integer;
+  result_state text;
+begin
+  if nullif(btrim(reconciler_agent_in),'') is null then
+    raise exception 'reconciler identity required' using errcode='22023';
+  end if;
+  release_day:=(provider_report_in->>'ist_day')::date;
+  select * into current_release from public.atax_release_days
+  where system_id=system_id_in and ist_day=release_day for update;
+  if not found or current_release.state not in ('reserved','reconcile_required') then
+    raise exception 'no unresolved release to reconcile' using errcode='55000';
+  end if;
+  if reconciler_agent_in=current_release.holder_agent_id then
+    raise exception 'original holder cannot independently reconcile' using errcode='55000';
+  end if;
+  if current_release.state='reserved'
+    and current_release.lock_expires_at>clock_timestamp() then
+    raise exception 'live release lease cannot be reconciled by another agent' using errcode='55000';
+  end if;
+  perform public.atax_release_check_report(
+    provider_report_in,reconciler_agent_in,current_release.ist_day
+  );
+  actual_main:=(provider_report_in->>'main_updates')::integer;
+  actual_worker:=(provider_report_in->>'worker_deployments')::integer;
+  result_state:=case
+    when actual_main=current_release.observed_main_updates
+     and actual_worker=current_release.observed_worker_deployments then 'aborted'
+    when current_release.reserved_action='main_update'
+     and actual_main=current_release.observed_main_updates+1
+     and actual_worker=current_release.observed_worker_deployments then 'completed'
+    when current_release.reserved_action='worker_deployment'
+     and actual_worker=current_release.observed_worker_deployments+1
+     and actual_main=current_release.observed_main_updates then 'completed'
+    else 'reconcile_required'
+  end;
+  update public.atax_release_days
+  set state=result_state,holder_agent_id=null,lock_token=null,
+      lock_expires_at=null,observed_main_updates=actual_main,
+      observed_worker_deployments=actual_worker,
+      observed_main_sha=provider_report_in->>'observed_main_sha',
+      source_report=provider_report_in,updated_at=clock_timestamp()
+  where system_id=system_id_in and ist_day=current_release.ist_day;
+  insert into public.atax_release_events(
+    system_id,ist_day,event_type,agent_id,lock_token,action,evidence)
+  values(system_id_in,current_release.ist_day,
+    'recovery_'||result_state,reconciler_agent_in,current_release.lock_token,
+    current_release.reserved_action,provider_report_in);
+  return jsonb_build_object('state',result_state,
+    'requires_reconciliation',result_state='reconcile_required',
+    'evidence_verified_by_distinct_agents',true);
+end;
+$function$;
+
+revoke all on function public.atax_release_reconcile(uuid,text,jsonb) from public,anon,authenticated;
+grant execute on function public.atax_release_reconcile(uuid,text,jsonb) to service_role;
