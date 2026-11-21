@@ -62,7 +62,31 @@ begin
       where system_id=atax_id and event_type='completed')<>3 then
     raise exception 'append-only release evidence count differs';
   end if;
-  raise notice 'PASS: exclusive release lease, independent verification, two-per-day budget, append-only evidence';
+  -- Recovery is possible only after timeout and independent re-observation.
+  reservation:=public.atax_release_reserve(atax_id,'release-agent','worker_deployment',evidence,900);
+  begin
+    perform public.atax_release_reconcile(atax_id,'different-reconciler',evidence);
+    raise exception 'an unexpired release lease was stolen during recovery';
+  exception when sqlstate '55000' then null;
+  end;
+  update public.atax_release_days
+  set lock_expires_at=now()-interval '1 second'
+  where system_id=atax_id
+    and ist_day=day_value::date and lock_token=(reservation->>'token')::uuid;
+  finalized:=public.atax_release_reconcile(
+    atax_id,'different-reconciler',
+    evidence||jsonb_build_object('worker_deployments',2)
+  );
+  if finalized->>'state'<>'completed' then
+    raise exception 'independent recovery did not count confirmed release';
+  end if;
+  evidence:=evidence||jsonb_build_object('worker_deployments',2);
+  begin
+    perform public.atax_release_reserve(atax_id,'release-agent','worker_deployment',evidence,900);
+    raise exception 'daily deployment budget exceeded after independent recovery';
+  exception when sqlstate '55000' then null;
+  end;
+  raise notice 'PASS: exclusive IST release lease, recovery, independent evidence, quotas and audit';
 end;
 $test$;
 rollback;
