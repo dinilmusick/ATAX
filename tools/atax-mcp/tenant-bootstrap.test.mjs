@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBootstrap,tenantBootstrapTools} from './tenant-bootstrap.mjs';
+import {createBootstrap,dispatchBootstrap,tenantBootstrapTools} from './tenant-bootstrap.mjs';
 const token=['github','tenant','test','notreal'].join('_');
 const principal={id:'gh-101',authMethod:'byoc',scopes:new Set(['atax:github:workflow:write'])};
 const env={GH_TOKEN_DEFAULT:token,MCP_PROVIDER_ACCOUNT_GRANTS:JSON.stringify({'gh-101':{github:['DEFAULT']}})};
@@ -47,6 +47,35 @@ test('bootstrap refuses missing confirmation, non-default branches and unauthori
  const exists=mock({createStatus:422});
  await assert.rejects(createBootstrap(inputs,null,principal,{env,fetcher:exists.fetcher}),/HTTP 422/);
 });
+test('bootstrap-only client can dispatch ONLY byte-verified fixed migration workflow',async()=>{
+ const calls=[];let fixedYaml='';
+ const fetcher=async(url,opts={})=>{
+  calls.push({url,opts});
+  if(url==='https://api.github.com/repos/my-user/bootstrap')
+   return Response.json({full_name:'my-user/bootstrap',default_branch:'main',private:true});
+  if(url==='https://api.github.com/repos/my-user/bootstrap/contents/.github/workflows/atax-tenant-bootstrap.yml'&&opts.method==='PUT'){
+   fixedYaml=Buffer.from(JSON.parse(opts.body).content,'base64').toString();
+   return Response.json({commit:{sha:'f'.repeat(40)}},{status:201});
+  }
+  if(url==='https://api.github.com/repos/my-user/bootstrap/contents/.github/workflows/atax-tenant-bootstrap.yml?ref=main')
+   return Response.json({encoding:'base64',content:Buffer.from(fixedYaml).toString('base64')});
+  if(url==='https://api.github.com/repos/my-user/bootstrap/actions/workflows/atax-tenant-bootstrap.yml/dispatches')
+   return new Response(null,{status:204});
+  throw Error('Unexpected GitHub URL '+url);
+ };
+ await createBootstrap(inputs,null,principal,{env,fetcher});
+ const dispatched=await dispatchBootstrap(inputs,null,principal,{env,fetcher});
+ assert.equal(dispatched.state,'dispatch_accepted_not_executed');
+ assert.equal(dispatched.verified,false);
+ assert.equal(calls.at(-1).opts.headers.authorization,'Bearer '+token);
+ assert.deepEqual(JSON.parse(calls.at(-1).opts.body),{ref:'main'});
+ await assert.rejects(dispatchBootstrap({...inputs,confirm:false},null,principal,{env,fetcher}),/confirmation/);
+ fixedYaml += '\n# unexpected mutation after independent review';
+ await assert.rejects(dispatchBootstrap(inputs,null,principal,{env,fetcher}),/changed since review/);
+ assert.equal(calls.filter(x=>x.url.endsWith('/dispatches')).length,1,
+  'Unreviewed migration changes must not be dispatched');
+});
+
 test('bootstrap has independent scoped tool contract without accepting SQL or secrets',()=>{
  const [tool]=tenantBootstrapTools;
  assert.equal(tool.name,'atax_supabase_bootstrap_workflow_create');
