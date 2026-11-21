@@ -30,7 +30,7 @@ begin
   update public.goals set status='active',updated_at=now() where id=goal_id_value and status='ready';
   insert into public.task_events(task_id,event_type,agent_id,message,payload) values(task_out.id,'claimed',agent_id_in,'Goal-scoped ChatGPT worker claimed task',jsonb_build_object('goal_id',goal_id_value,'session_id',session_id_in,'lease_expires_at',task_out.claim_expires_at,'attempt_count',task_out.attempt_count,'blocker_notoriety',task_out.blocker_notoriety,'notorious_blockers',public.goal_ledger_blocker_attention(goal_key_value)));
   return next task_out;
-end; $function$
+end; $function$;
 
 -- task_ledger_claim_goal_next: fail-closed lease + heartbeat recovery.
 CREATE OR REPLACE FUNCTION public.task_ledger_claim_goal_next(goal_id_in uuid, agent_id_in text, agent_name_in text, agent_type_in text DEFAULT 'worker'::text, capabilities_in text[] DEFAULT '{}'::text[], lease_seconds_in integer DEFAULT 900)
@@ -133,7 +133,7 @@ begin
 
   return next task_out;
 end;
-$function$
+$function$;
 
 -- task_ledger_claim_next: fail-closed lease + heartbeat recovery.
 CREATE OR REPLACE FUNCTION public.task_ledger_claim_next(agent_id_in text, agent_name_in text, agent_type_in text DEFAULT 'worker'::text, capabilities_in text[] DEFAULT '{}'::text[], lease_seconds_in integer DEFAULT 900)
@@ -175,7 +175,7 @@ begin
   update public.tasks set status='running',claimed_by_agent_id=agent_id_in,claimed_by_agent_name=agent_name_in,claim_token=gen_random_uuid(),claimed_at=now(),claim_expires_at=now()+make_interval(secs=>lease_value),attempt_count=attempt_count+1,heartbeat_at=now(),updated_at=now(),heartbeat_context=jsonb_build_object('activity','claimed','progress',case when task_role='loop_authoring' then 'Loop-contract authoring claimed; executor must be a different agent.' else 'Execution task claimed with blocker-first ordering.' end,'notorious_blockers',public.goal_ledger_blocker_attention(goal_key_value),'next_action',case when task_role='loop_authoring' then 'Author and validate loop contract; do not execute task.' else 'Inspect the highest-notoriety active checkpoint blocker first.' end),current_step=case when task_role='loop_authoring' then 'Authoring loop contract' else 'Claimed; inspect highest-notoriety blocker first' end where id=candidate_id returning * into task_out;
   insert into public.task_events(task_id,event_type,agent_id,message,payload) values(task_out.id,'claimed',agent_id_in,'Task claimed by worker',jsonb_build_object('lease_expires_at',task_out.claim_expires_at,'attempt_count',task_out.attempt_count,'task_role',task_out.task_role,'loop_script_status',task_out.loop_script_status,'blocker_notoriety',task_out.blocker_notoriety,'notorious_blockers',public.goal_ledger_blocker_attention(goal_key_value),'heartbeat_policy',public.task_ledger_heartbeat_policy()));
   return next task_out;
-end; $function$
+end; $function$;
 
 -- Keep the observable heartbeat policy consistent with claim SQL.
 create or replace function public.task_ledger_heartbeat_policy()
