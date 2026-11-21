@@ -1,3 +1,17 @@
+> **2026-11-21 architecture decision: Independent Bring Your Own Credentials (BYOC) gateway.**
+> Do not create another repository or clone substrate implementation. Keep this
+> gateway under `tools/atax-mcp/`, with independent tests and deployment.
+> No Luth/ULTRST dependency and no global operator GitHub/Supabase credentials.
+> See [BYOC_ARCHITECTURE.md](BYOC_ARCHITECTURE.md).
+>
+> **Release status:** The branch now implements independent BYOC OAuth/DCR,
+> per-client encrypted credential envelopes, and user-scoped GitHub/Supabase
+> gateway operations. The legacy documentation below remains for the original
+> single-owner mode; do not configure its operator-owned secrets for BYOC.
+> BYOC is **not yet production certified**: new Supabase project schema
+> provisioning, user-owned FMRL build-and-delete parity, and real Claude/Gemini
+> end-to-end authorization must pass independently before production deployment.
+
 # ATAX Remote MCP Gateway
 
 This is an **additive remote Model Context Protocol (MCP) adapter**, not an alternative ATAX implementation. ATAX's existing GitHub-native repository/tools access and direct Supabase connector operations remain available and **do not call this Worker**. Both paths read/write the **same canonical Supabase records and RPCs**.

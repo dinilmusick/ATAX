@@ -1,5 +1,10 @@
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools} from './provider-accounts.mjs';
+import {githubActionTools} from './github-actions-tools.mjs';
+import {tenantFmrlTools} from './tenant-fmrl.mjs';
+import {tenantPrivateFmrlTools} from './tenant-fmrl-private.mjs';
+import {tenantBootstrapTools} from './tenant-bootstrap.mjs';
+import {byocRoute} from './byoc-oauth.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
@@ -47,7 +52,7 @@ const TOOLS = [
   tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
 ];
-TOOLS.push(...githubTools,...providerTools);
+TOOLS.push(...githubTools,...githubActionTools,...tenantFmrlTools,...tenantPrivateFmrlTools,...tenantBootstrapTools,...providerTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
@@ -80,7 +85,7 @@ async function authenticate(request,env, fetcher){
   const parts=token.split('.'); if(parts.length!==3)return null;
   let head,claims;
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  // OAuth access tokens are RFC 9068 at+jwt; reject Luth session JWTs
+  // Legacy federated provider access JWTs must be at+jwt, never login/session JWTs
   // even if they are signed by the same authorization server.
   if(!isObj(head)||!isObj(claims)||head.typ!=='at+jwt'||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'||
      typeof claims.azp!=='string'||claims.azp.length<3)return null;
@@ -110,8 +115,8 @@ async function authenticate(request,env, fetcher){
   }catch{return null;}
   const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
   // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
-  // Only a pinned Luth owner subject may receive capabilities defined by server policy.
-  // Never map all authenticated Luth accounts to the owner or verifier role.
+  // Legacy login scopes do not grant owner capabilities by themselves.
+  // BYOC sessions derive capabilities from explicit authorization consent.
   if(claims.sub===String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'') &&
      typeof env.MCP_ATAX_OWNER_JWT_SUBJECT==='string' &&
      env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
@@ -123,18 +128,36 @@ async function authenticate(request,env, fetcher){
   return {id:claims.sub,authMethod:'jwt',scopes};
 }
 function allowedOrigin(req, env){
+  // OAuth bearer access is the authority; client Origin is not an authorization allowlist.
+  if(env.ATAX_BYOC_MODE==='true')return true;
   const origin=req.headers.get('origin'); if(!origin)return true;
   const allowed=String(env.MCP_ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
   return allowed.includes(origin);
 }
 function allowedScope(principal,scope){return principal.scopes.has(scope)||principal.scopes.has('atax:admin');}
 const providerToolNames=new Set(providerTools.map(t=>t.name));
+const tenantGitHubGuide=Object.freeze({
+ title:'BYOC GitHub and disposable CI boundaries',
+ canonical:'Use the verified GitHub credential belonging to this MCP session. No shared ATAX owner controller.',
+ order:[
+   'For a newly created Supabase project, use bootstrap-only access to create atax_supabase_bootstrap_workflow_create in YOUR GitHub repo, configure the database URL only as a GitHub Actions secret, run and inspect the workflow, then reconnect for full ledger tools.',
+   'Hydrate canonical Supabase state and skills in this tenant project before creating tasks or coding.',
+   'Use atax_github_repository_create and atax_github_repository_inspect for verified permanent repository operations.',
+   'For CI use atax_github_actions_workflows_list, atax_github_actions_dispatch and atax_github_actions_run_status in the tenant authorized repository.',
+   'For PUBLIC targets call atax_fmrl_public_start then poll atax_fmrl_public_status to terminal and verified 404. For PRIVATE targets install atax_fmrl_private_workflow_create in YOUR private repository, configure tenant Actions secrets, dispatch and inspect completed jobs including mandatory public bridge deletion. Never use ATAX owner controller.',
+   'Do not run target code in the ATAX gateway or assume an Actions dispatch acknowledgement means verified execution.'
+ ]});
 function canonicalOwner(principal,env){
+  if(principal.authMethod==='byoc')return principal.id===env.ATAX_BYOC_SESSION && env.ATAX_BYOC_MODE==='true';
   if(principal.authMethod==='shared')return !!env.MCP_SHARED_TOKEN_SHA256&&principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
   const jwtOwner=String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'').trim();
   return principal.authMethod==='jwt'&&jwtOwner.length>=3&&principal.id===jwtOwner;
 }
 function toolAllowed(principal,env,tool){
+  // Legacy FMRL uses a fixed shared controller; BYOC users must never reach it.
+  if(principal.authMethod==='byoc' && ['atax_fmrl_create_run_dispose','atax_fmrl_get_status'].includes(tool.name))return false;
+  if(principal.authMethod==='byoc' && env.ATAX_BYOC_LEDGER_READY==='false' &&
+     !['atax_supabase_bootstrap_workflow_create','atax_supabase_bootstrap_dispatch','atax_github_actions_workflows_list','atax_github_actions_run_status','atax_github_workflows_guide'].includes(tool.name))return false;
   return allowedScope(principal,tool.scope)&&(providerToolNames.has(tool.name)||canonicalOwner(principal,env));
 }
 function supabase(env,fetcher){
@@ -163,6 +186,8 @@ function supabase(env,fetcher){
 async function runCall(name,args,principal,env,fetcher){
   const match=byName.get(name);
   if(!match)return {isError:true,content:[{type:'text',text:'Unknown tool'}]};
+  if(principal.authMethod==='byoc'&&name==='atax_github_workflows_guide')
+    return {content:[{type:'text',text:JSON.stringify(tenantGitHubGuide)}],structuredContent:{result:tenantGitHubGuide}};
   if(!toolAllowed(principal,env,match))return {isError:true,content:[{type:'text',text:'Principal or scope not authorized for this tool'}]};
   if(!isObj(args))return {isError:true,content:[{type:'text',text:'Tool arguments must be an object'}]};
   const schema=match.inputSchema;
@@ -190,7 +215,7 @@ async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
     if(params.protocolVersion&&!SUPPORTED.has(params.protocolVersion))return err(id,-32602,'Unsupported MCP protocol version');
-    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
+    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:principal.authMethod==='byoc'?'ATAX BYOC: hydrate this user Supabase state and live skills; claim work with fenced identity. Use your own GitHub account via atax_github_repository_create, atax_github_actions_dispatch, or atax_fmrl_public_start followed by atax_fmrl_public_status; for private targets install tenant FMRL workflow via atax_fmrl_private_workflow_create. Dispatch acceptance does not imply verified execution. Never use the legacy owner FMRL controller.': 'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
@@ -208,7 +233,7 @@ async function routeRpc(msg,principal,env,fetcher){
       let result;
       if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
-      else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
+      else if(params.uri==='atax://guides/github-workflows')result=principal.authMethod==='byoc'?tenantGitHubGuide:githubGuide;
       else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
       else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
       else return err(id,-32002,'Unknown resource URI');
@@ -219,18 +244,18 @@ async function routeRpc(msg,principal,env,fetcher){
   if(msg.method==='prompts/get'){
     if(!canonicalOwner(principal,env))return err(id,-32003,'Canonical ATAX owner required');
     if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
-    return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
+    return ok(id,{description:principal.authMethod==='byoc'?tenantGitHubGuide.title:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(principal.authMethod==='byoc'?tenantGitHubGuide:githubGuide)}}]});
   }
   return err(id,-32601,'Method not found');
 }
 export function createHandler(fetcher=fetch){
-  async function dispatch(req,env={}){
+  async function dispatch(req,env={},verifiedPrincipal=null){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL});
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      // The authorization server (Luth) owns OAuth metadata and dynamic client registration.
+      // Legacy externally configured authorization servers own this metadata.
       // ATAX is a protected resource, never a second token issuer.
       return json({resource,authorization_servers:server?[server]:[],bearer_methods_supported:['header'],
         scopes_supported:['openid','profile','email','offline_access']});
@@ -239,8 +264,9 @@ export function createHandler(fetcher=fetch){
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, OPTIONS'}});
     if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET'});
-    if(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
-    let principal;try{principal=await authenticate(req,env,fetcher);}catch{return json({error:'Authentication unavailable'},503);}
+    if(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||(!verifiedPrincipal&&!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL)))return json({error:'ATAX MCP not configured'},503);
+    let principal=verifiedPrincipal;
+    if(!principal){try{principal=await authenticate(req,env,fetcher);}catch{return json({error:'Authentication unavailable'},503);}}
     if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
     if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
     if(req.method==='DELETE')return json({error:'No sessions to terminate'},405,{allow:'POST'});
@@ -254,6 +280,7 @@ export function createHandler(fetcher=fetch){
     return json(Array.isArray(body)?results:results[0]);
   }
   return async (req,env={})=>{
+    if(env.ATAX_BYOC_MODE==='true')return byocRoute(req,env,fetcher,(scoped,principal)=>dispatch(req,scoped,principal));
     const response=await dispatch(req,env);
     const origin=req.headers.get('origin');
     if(!origin||!allowedOrigin(req,env))return response;

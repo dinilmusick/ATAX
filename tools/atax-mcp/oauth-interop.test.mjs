@@ -4,12 +4,12 @@ import {webcrypto} from 'node:crypto';
 import {createHandler} from './worker.mjs';
 
 const resource = 'https://atax.example/mcp';
-const issuer = 'https://luth.example/api/auth';
+const issuer = 'https://issuer.example/api/auth';
 const keyPair = await webcrypto.subtle.generateKey({name:'Ed25519'},true,['sign','verify']);
 const pub = await webcrypto.subtle.exportKey('jwk',keyPair.publicKey);
 pub.kid='luth-ed25519-key'; pub.alg='EdDSA';
 const fetcher = async url => {
-  if (url === 'https://luth.example/api/auth/jwks')return Response.json({keys:[pub]});
+  if (url === 'https://issuer.example/api/auth/jwks')return Response.json({keys:[pub]});
   if (String(url).includes('/rpc/'))return Response.json({ok:true});
   throw Error('Unexpected upstream request');
 };
@@ -17,7 +17,7 @@ const handler=createHandler(fetcher);
 const config={
   SUPABASE_URL:'https://project.supabase.co',
   SUPABASE_SECRET_KEY:'testing-only-secret',
-  MCP_AUTH_JWKS_URL:'https://luth.example/api/auth/jwks',
+  MCP_AUTH_JWKS_URL:'https://issuer.example/api/auth/jwks',
   MCP_AUTH_AUTHORIZATION_SERVER:issuer,
   MCP_AUTH_ISSUER:issuer,
   MCP_AUTH_AUDIENCE:resource,
@@ -53,7 +53,7 @@ test('MCP 401 challenge advertises path-specific metadata',async()=>{
   assert.match(r.headers.get('www-authenticate'),/\.well-known\/oauth-protected-resource\/mcp/);
 });
 
-test('Luth EdDSA resource audience and owner policy unlock only the pinned identity',async()=>{
+test('External issuer EdDSA resource audience and owner policy unlock only the pinned identity',async()=>{
   const accepted=await rpc(await jwt());
   assert.equal(accepted.status,200);
   const names=(await accepted.json()).result.tools.map(x=>x.name);
@@ -72,7 +72,10 @@ test('Luth EdDSA resource audience and owner policy unlock only the pinned ident
   assert.equal(missingClient.status,401);
   const expired=await rpc(await jwt({exp:1}));
   assert.equal(expired.status,401);
-  const forged=await rpc((await jwt()).replace(/.$/,'x'));
+  const original=await jwt();
+  const pieces=original.split('.');
+  const flipped=(pieces[2][0]==='A'?'B':'A')+pieces[2].slice(1);
+  const forged=await rpc(pieces[0]+'.'+pieces[1]+'.'+flipped);
   assert.equal(forged.status,401);
 });
 
