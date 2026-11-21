@@ -21,6 +21,12 @@ create table if not exists public.atax_release_days (
       and lock_expires_at is not null and reserved_action is not null))
 );
 
+-- A release held across midnight must block the next IST day as well.
+-- The day-specific primary key alone would otherwise allow two owners.
+create unique index if not exists atax_one_reserved_release_per_system
+  on public.atax_release_days(system_id)
+  where state='reserved';
+
 create table if not exists public.atax_release_events (
   id bigint generated always as identity primary key,
   system_id uuid not null references public.systems(id) on delete cascade,
