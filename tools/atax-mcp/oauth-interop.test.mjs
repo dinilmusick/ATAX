@@ -27,7 +27,7 @@ const config={
 const b64 = data => Buffer.from(data).toString('base64url');
 async function jwt(override={}){
   const header=b64(JSON.stringify({typ:'at+jwt',alg:'EdDSA',kid:pub.kid}));
-  const payload=b64(JSON.stringify({iss:issuer,aud:resource,sub:'owner-1',scope:'openid profile offline_access',exp:Math.floor(Date.now()/1000)+300,iat:Math.floor(Date.now()/1000),...override}));
+  const payload=b64(JSON.stringify({iss:issuer,aud:resource,sub:'owner-1',azp:'gemini-client-registered',scope:'openid profile offline_access',exp:Math.floor(Date.now()/1000)+300,iat:Math.floor(Date.now()/1000),...override}));
   const signature=await webcrypto.subtle.sign({name:'Ed25519'},keyPair.privateKey,new TextEncoder().encode(header+'.'+payload));
   return header+'.'+payload+'.'+b64(signature);
 }
@@ -68,6 +68,8 @@ test('Luth EdDSA resource audience and owner policy unlock only the pinned ident
   assert.ok(!noPolicyNames.includes('atax_context'));
   const incorrectAudience=await rpc(await jwt({aud:'https://some-other-api/mcp'}));
   assert.equal(incorrectAudience.status,401);
+  const missingClient=await rpc(await jwt({azp:undefined}));
+  assert.equal(missingClient.status,401);
   const expired=await rpc(await jwt({exp:1}));
   assert.equal(expired.status,401);
   const forged=await rpc((await jwt()).replace(/.$/,'x'));
