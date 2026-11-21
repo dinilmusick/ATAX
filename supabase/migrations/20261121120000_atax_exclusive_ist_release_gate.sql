@@ -174,12 +174,15 @@ begin
     when outcome_in='completed' and record_value.reserved_action='main_update' then
       after_main=record_value.observed_main_updates+1
         and after_worker=record_value.observed_worker_deployments
+        and provider_report_in->>'observed_main_sha' is distinct from record_value.observed_main_sha
     when outcome_in='completed' and record_value.reserved_action='worker_deployment' then
       after_worker=record_value.observed_worker_deployments+1
         and after_main=record_value.observed_main_updates
+        and provider_report_in->>'observed_main_sha' is not distinct from record_value.observed_main_sha
     else
       after_main=record_value.observed_main_updates
         and after_worker=record_value.observed_worker_deployments
+        and provider_report_in->>'observed_main_sha' is not distinct from record_value.observed_main_sha
   end;
   -- A late finalize or unexpected provider change is recorded as a blocker,
   -- never as a green release. It requires independent reconciliation.
@@ -244,13 +247,16 @@ begin
   actual_worker:=(provider_report_in->>'worker_deployments')::integer;
   result_state:=case
     when actual_main=current_release.observed_main_updates
-     and actual_worker=current_release.observed_worker_deployments then 'aborted'
+     and actual_worker=current_release.observed_worker_deployments
+     and provider_report_in->>'observed_main_sha' is not distinct from current_release.observed_main_sha then 'aborted'
     when current_release.reserved_action='main_update'
      and actual_main=current_release.observed_main_updates+1
-     and actual_worker=current_release.observed_worker_deployments then 'completed'
+     and actual_worker=current_release.observed_worker_deployments
+     and provider_report_in->>'observed_main_sha' is distinct from current_release.observed_main_sha then 'completed'
     when current_release.reserved_action='worker_deployment'
      and actual_worker=current_release.observed_worker_deployments+1
-     and actual_main=current_release.observed_main_updates then 'completed'
+     and actual_main=current_release.observed_main_updates
+     and provider_report_in->>'observed_main_sha' is not distinct from current_release.observed_main_sha then 'completed'
     else 'reconcile_required'
   end;
   update public.atax_release_days
