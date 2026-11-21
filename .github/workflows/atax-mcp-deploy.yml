@@ -63,7 +63,7 @@ jobs:
             echo 'Operator-owned credential bindings forbidden' >&2; exit 1
           fi
           echo "ATAX source SHA $REVIEWED_SHA, receipt $LOCK_TOKEN" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Reservation validity and daily quota require independent Supabase/provider evidence from release reconciler.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The workflow also atomically checks the genuine Supabase release reservation before deploying.' >> "$GITHUB_STEP_SUMMARY"
       - name: Test source and dry-run Worker packaging
         shell: bash
         run: |
@@ -85,6 +85,52 @@ jobs:
           jq -e '.success == true and (.result | length) == 0' <<<"$payload" >/dev/null || {
             echo 'Operator provider secrets still bound to Worker; refusing release' >&2; exit 1;
           }
+      - name: Atomically validate and consume the canonical worker release reservation
+        env:
+          ATAX_RELEASE_DATABASE_URL: ${{ secrets.ATAX_RELEASE_DATABASE_URL }}
+          RELEASE_TOKEN: ${{ inputs.release_reservation_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ATAX_RELEASE_DATABASE_URL" || { echo 'Canonical release database GitHub secret missing'; exit 1; }
+          echo "::add-mask::$ATAX_RELEASE_DATABASE_URL"
+          case "$ATAX_RELEASE_DATABASE_URL" in
+            postgresql://*|postgres://*) ;;
+            *) echo 'ATAX release credential is not a PostgreSQL URL' >&2; exit 1 ;;
+          esac
+          [[ "$RELEASE_TOKEN" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          # A valid-looking UUID by itself never authorizes deployment. This
+          # atomic reservation claim requires the independently verified IST
+          # release ledger (from the substrate release-gate migration).
+          claimed="$(PGCONNECT_TIMEOUT=15 psql "$ATAX_RELEASE_DATABASE_URL" -X -A -t -v ON_ERROR_STOP=1 <<SQL
+          WITH claimed AS (
+            UPDATE public.atax_release_days
+            SET source_report = jsonb_set(source_report,
+                  '{github_worker_deploy_run_id}', to_jsonb('$GITHUB_RUN_ID'::text), true),
+                updated_at = clock_timestamp()
+            WHERE system_id='924961be-3da3-4cf7-9aa2-a3ca834fae68'::uuid
+              AND ist_day=(clock_timestamp() at time zone 'Asia/Kolkata')::date
+              AND lock_token='$RELEASE_TOKEN'::uuid
+              AND state='reserved'
+              AND reserved_action='worker_deployment'
+              AND holder_agent_id IS NOT NULL
+              AND lock_expires_at>clock_timestamp()+interval '3 minutes'
+              AND observed_main_sha='$GITHUB_SHA'
+              AND observed_worker_deployments<2
+              AND source_report->>'github_history_complete'='true'
+              AND source_report->>'cloudflare_history_complete'='true'
+              AND source_report->>'exact_head_ci_verified'='true'
+              AND NOT (source_report ? 'github_worker_deploy_run_id')
+            RETURNING 1
+          )
+          SELECT count(*) FROM claimed;
+          SQL
+          )"
+          test "$claimed" = "1" || { echo 'ATAX release reservation absent, stale, reused or over quota' >&2; exit 1; }
+          echo 'One-time fenced release reservation verified and claimed' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy BYOC Worker only after independent release approval
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
