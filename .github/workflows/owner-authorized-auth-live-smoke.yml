@@ -1,0 +1,80 @@
+name: Owner-authorized ULTRST auth live smoke
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.id == 155351357 &&
+       github.event.issue.title == '[atax-auth] live-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify live public registration and app OAuth bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          LUTH='https://luth.blueprint-ninjastudios.workers.dev'
+          AIKO='https://aiko.todadjp.workers.dev'
+          SRKL='https://srkl-engine.todadjp.workers.dev'
+          report=/tmp/auth-smoke-report.txt
+          echo 'ULTRST Luth public auth production smoke' > "$report"
+          failures=0
+          status() {
+            curl --proto '=https' --tlsv1.2 --silent --show-error \
+              --connect-timeout 10 --max-time 22 \
+              --output /dev/null --dump-header /tmp/auth-headers \
+              --write-out '%{http_code}' "$1" || echo 000
+          }
+          health="$(status "$LUTH/api/status")"
+          echo "Luth health HTTP: $health" >> "$report"
+          [[ "$health" == 200 ]] || failures=$((failures+1))
+          logs="$(status "$LUTH/api/logs")"
+          echo "Unauthenticated login-log HTTP: $logs (expected 404)" >> "$report"
+          [[ "$logs" == 404 ]] || failures=$((failures+1))
+          discovery="$(status "$LUTH/api/auth/.well-known/openid-configuration")"
+          echo "Official issuer discovery HTTP: $discovery" >> "$report"
+          [[ "$discovery" == 200 ]] || failures=$((failures+1))
+          dcr="$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+            --connect-timeout 10 --max-time 22 -X POST \
+            -H 'content-type: application/json' \
+            --data '{"client_name":"invalid-test","redirect_uris":[],"token_endpoint_auth_method":"none"}' \
+            --output /dev/null --write-out '%{http_code}' \
+            "$LUTH/api/auth/oauth2/register" || echo 000)"
+          echo "Invalid public DCR HTTP: $dcr (expected 400)" >> "$report"
+          [[ "$dcr" == 400 ]] || failures=$((failures+1))
+          for app in "$AIKO" "$SRKL"; do
+            code="$(status "$app/api/auth/oidc/start")"
+            header="$(awk 'BEGIN{IGNORECASE=1} tolower($1)=="location:" {print $2}' /tmp/auth-headers | tr -d '\r' | tail -n 1)"
+            valid_location=false
+            if [[ "$header" == "$LUTH/api/auth/oauth2/authorize?"* ]]; then
+              valid_location=true
+            fi
+            echo "${app#https://} OAuth start HTTP: $code; official issuer redirect: $valid_location" >> "$report"
+            if [[ "$code" != 302 && "$code" != 303 ]] || [[ "$valid_location" != true ]]; then
+              failures=$((failures+1))
+            fi
+          done
+          echo "Failed smoke assertions: $failures" >> "$report"
+          cat "$report"
+          test "$failures" = 0
+
+      - name: Publish bounded test result
+        if: always() && github.event_name == 'issues'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          if test -f /tmp/auth-smoke-report.txt; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/auth-smoke-report.txt
+          else
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body 'Live auth probe did not execute.'
+          fi
