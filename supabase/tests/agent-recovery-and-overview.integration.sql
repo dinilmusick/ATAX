@@ -76,6 +76,19 @@ begin
       current_step='Stale heartbeat for recovery'
   where id=first_claim.id;
 
+  -- A stale heartbeat must not override a still-valid lease.
+  select * into early_claim
+  from public.task_ledger_claim_goal_next(
+    goal_id_value,'recovery-worker-preexpiry','Pre-expiry Worker','worker',
+    array['recovery-test']::text[],900
+  );
+  if early_claim.id is not null then
+    raise exception 'Stale heartbeat stole an unexpired task lease';
+  end if;
+
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered
   from public.task_ledger_claim_goal_next(
     goal_id_value,'recovery-worker-new','Recovery Worker','worker',

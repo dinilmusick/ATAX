@@ -80,6 +80,12 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Real concurrent claim race (separate database sessions)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: bash supabase/tests/concurrent-claims.sh
+
       - name: Detect public schema drift
         shell: bash
         run: |
