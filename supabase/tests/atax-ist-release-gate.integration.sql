@@ -9,11 +9,20 @@ declare
   finalized jsonb;
   lease_token uuid;
   check_index integer;
+  fixture_universe_id uuid;
 begin
   select id into atax_id from public.systems where system_key='atax' limit 1;
   if atax_id is null then
-    insert into public.systems(system_key,name,status,work_priority)
-    values('atax','ATAX disposable release fixture','active',95)
+    select id into fixture_universe_id from public.universes where status='active' limit 1;
+    if fixture_universe_id is null then
+      insert into public.universes(universe_key,name,status,description)
+      values('release-fixture-'||replace(gen_random_uuid()::text,'-',''),
+        'Release gate disposable universe','active','Rollback-only isolated fixture')
+      returning id into fixture_universe_id;
+    end if;
+    insert into public.systems(system_key,name,system_type,status,description,universe_id,work_priority)
+    values('atax','ATAX disposable release fixture','service','active',
+      'Rollback-only release gate acceptance',fixture_universe_id,95)
     returning id into atax_id;
   end if;
   -- SQL grants must not expose release authority to normal JWT clients.
