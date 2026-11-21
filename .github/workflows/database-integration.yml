@@ -17,8 +17,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: supabase-db-integration-${{ github.ref }}
-  cancel-in-progress: true
+  # Push and PR events for one source branch share the same Docker port scope.
+  # Queue rather than cancel a stack mid-shutdown, which can leave bound ports.
+  group: supabase-db-integration-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   database:
