@@ -37,6 +37,19 @@ begin
     'source_links',jsonb_build_array('https://api.github.com/repos/dinilmusick/ATAX/commits',
                                    'https://api.cloudflare.com/client/v4/accounts/example/workers/scripts/atax-mcp/deployments')
   );
+  -- A still unresolved previous-day reservation must block today's release,
+  -- even though its original lease has expired.
+  insert into public.atax_release_days(
+    system_id,ist_day,state,holder_agent_id,lock_token,lock_expires_at,reserved_action
+  ) values(atax_id,day_value::date-1,'reserved','yesterday-owner',
+      gen_random_uuid(),now()-interval '1 hour','main_update');
+  begin
+    perform public.atax_release_reserve(atax_id,'release-agent','main_update',evidence,900);
+    raise exception 'previous IST day still held an overlapping release lock';
+  exception when unique_violation then null;
+  end;
+  delete from public.atax_release_days
+    where system_id=atax_id and ist_day=day_value::date-1;
   reservation:=public.atax_release_reserve(atax_id,'release-agent','main_update',evidence,900);
   lease_token:=(reservation->>'token')::uuid;
   if lease_token is null then raise exception 'reservation returned no fencing token'; end if;
