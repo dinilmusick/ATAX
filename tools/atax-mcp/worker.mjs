@@ -80,7 +80,10 @@ async function authenticate(request,env, fetcher){
   const parts=token.split('.'); if(parts.length!==3)return null;
   let head,claims;
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  if(!isObj(head)||!isObj(claims)||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string')return null;
+  // OAuth access tokens are RFC 9068 at+jwt; reject Luth session JWTs
+  // even if they are signed by the same authorization server.
+  if(!isObj(head)||!isObj(claims)||head.typ!=='at+jwt'||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'||
+     typeof claims.azp!=='string'||claims.azp.length<3)return null;
   const now=Math.floor(Date.now()/1000);
   if(claims.iss!==env.MCP_AUTH_ISSUER||!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)||!Number.isFinite(claims.exp)||claims.exp<=now||
      (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now))||
