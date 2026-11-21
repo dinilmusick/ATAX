@@ -80,6 +80,38 @@ export async function createBootstrap(a,_db,p,ctx){
   required_secret:'ATAX_BOOTSTRAP_DATABASE_URL',state:'installed_not_executed',verified:false,
   instructions:'Configure ATAX_BOOTSTRAP_DATABASE_URL in YOUR GitHub repository Actions secrets (never in chat). Manually dispatch the workflow; use atax_github_actions_run_status to inspect its exact terminal result before authorizing ATAX OAuth.'};
 }
+
+/** Dispatch ONLY the independently byte-verified fixed migration workflow.
+ * This is available to bootstrap-only tenants without general Actions dispatch.
+ */
+export async function dispatchBootstrap(a,_db,p,ctx){
+ if(a.confirm!==true)throw Error('Explicit confirmation required to run database bootstrap');
+ if(!REPO.test(String(a.repository||''))||a.repository.includes('..'))throw Error('Invalid repository');
+ if(!BRANCH.test(String(a.branch||''))||a.branch.includes('..')||a.branch.includes('//'))
+  throw Error('Invalid branch');
+ const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+ const info=await git(ctx.fetcher,selected.token,'/repos/'+a.repository);
+ if(info.full_name.toLowerCase()!==a.repository.toLowerCase()||info.archived||info.disabled)
+  throw Error('Repository identity mismatch');
+ if(info.default_branch!==a.branch)throw Error('Bootstrap must run only from the reviewed default branch');
+ const path='/repos/'+a.repository+'/contents/.github/workflows/atax-tenant-bootstrap.yml?ref='+encodeURIComponent(a.branch);
+ const file=await git(ctx.fetcher,selected.token,path);
+ if(file.encoding!=='base64'||typeof file.content!=='string')
+  throw Error('Bootstrap workflow source cannot be verified');
+ let actual;
+ try{actual=atob(file.content.replace(/\s/g,''));}catch{throw Error('Bootstrap workflow content invalid');}
+ if(actual!==workflow)throw Error('Bootstrap workflow has changed since review; refusing dispatch');
+ const response=await ctx.fetcher('https://api.github.com/repos/'+a.repository+'/actions/workflows/atax-tenant-bootstrap.yml/dispatches',{
+  method:'POST',redirect:'error',headers:{authorization:'Bearer '+selected.token,
+   accept:'application/vnd.github+json','content-type':'application/json','user-agent':'atax-mcp'},
+  body:JSON.stringify({ref:a.branch})
+ });
+ if(response.status!==204)throw Error('GitHub bootstrap dispatch not accepted (HTTP '+response.status+')');
+ return {repository:a.repository,workflow:'atax-tenant-bootstrap.yml',
+  state:'dispatch_accepted_not_executed',verified:false,
+  next:'Use atax_github_actions_run_status for the actual terminal run and check migration subgates. Re-authorize ATAX OAuth after successful schema initialization.'};
+}
+
 export const tenantBootstrapTools=[{
  name:'atax_supabase_bootstrap_workflow_create',
  description:'Create a pinned ATAX schema migration workflow in a user-owned GitHub repository. Database URL is provided later only as a GitHub Actions secret.',
@@ -89,4 +121,12 @@ export const tenantBootstrapTools=[{
    account:{type:'string',maxLength:48},confirm:{type:'boolean'}},
   required:['repository','branch','confirm']},
  invoke:createBootstrap
+},{
+ name:'atax_supabase_bootstrap_dispatch',
+ description:'Dispatch only the unchanged fixed tenant ATAX database bootstrap Actions workflow; no SQL, database credentials, or other workflows accepted.',
+ scope:'atax:github:workflow:write',
+ inputSchema:{type:'object',additionalProperties:false,
+  properties:{repository:{type:'string',minLength:3,maxLength:205},branch:{type:'string',minLength:1,maxLength:100},
+   account:{type:'string',maxLength:48},confirm:{type:'boolean'}},required:['repository','branch','confirm']},
+ invoke:dispatchBootstrap
 }];
