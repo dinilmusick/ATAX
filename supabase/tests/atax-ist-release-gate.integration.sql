@@ -46,7 +46,7 @@ begin
   begin
     perform public.atax_release_reserve(atax_id,'release-agent','main_update',evidence,900);
     raise exception 'previous IST day still held an overlapping release lock';
-  exception when unique_violation then null;
+  exception when sqlstate '55000' then null;
   end;
   delete from public.atax_release_days
     where system_id=atax_id and ist_day=day_value::date-1;
