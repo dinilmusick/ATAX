@@ -70,16 +70,27 @@ export async function readToken(env,token,kind='access'){
  if(!credentials||typeof credentials!=='object'||!credentials.github_token||!credentials.supabase_key)return null;
  return {row,credentials};
 }
+/** Gemini persistent linking keeps the original refresh bearer stable.
+ * A short-lived access token is added only while its refresh family is valid.
+ * The SELECT/INSERT is atomic: a concurrent family revocation cannot
+ * resurrect a newly issued access token after the disconnect completes.
+ */
 export async function refreshTokens(env,token,clientId){
  const valid=await readToken(env,token,'refresh');
  if(!valid||valid.row.client_id!==clientId)throw Error('Refresh token invalid');
- const database=db(env),now=Math.floor(Date.now()/1000);
- const revoked=await database.prepare('UPDATE byoc_tokens SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL')
-  .bind(now,await digest(token)).run();
- if(revoked.meta?.changes!==1)throw Error('Refresh token already used');
- // Revoke all previously issued access tokens from this family on rotation.
- await database.prepare('UPDATE byoc_tokens SET revoked_at=? WHERE family_id=? AND revoked_at IS NULL').bind(now,valid.row.family_id).run();
- return issueTokens(env,clientId,{credentials:valid.credentials,scopes:valid.row.scopes,subject:valid.row.subject,github_owner:valid.row.github_owner});
+ const database=db(env),now=Math.floor(Date.now()/1000),refreshHash=await digest(token);
+ const extended=await database.prepare(
+  "UPDATE byoc_tokens SET expires_at=? WHERE token_hash=? AND client_id=? AND token_type='refresh' AND revoked_at IS NULL AND expires_at>?"
+ ).bind(now+2592000,refreshHash,clientId,now).run();
+ if(extended.meta?.changes!==1)throw Error('Refresh token revoked or expired');
+ const access=randomToken('access'),sealed=await seal(access,valid.credentials,clientId+'|access');
+ const issued=await database.prepare(
+  "INSERT INTO byoc_tokens(token_hash,token_type,client_id,subject,github_owner,scopes,iv,encrypted,expires_at,family_id) "+
+  "SELECT ?,'access',client_id,subject,github_owner,scopes,?,?,?,family_id FROM byoc_tokens "+
+  "WHERE token_hash=? AND token_type='refresh' AND client_id=? AND revoked_at IS NULL AND expires_at>?"
+ ).bind(await digest(access),sealed.iv,sealed.encrypted,now+900,refreshHash,clientId,now).run();
+ if(issued.meta?.changes!==1)throw Error('Refresh token no longer authorized');
+ return {access_token:access,refresh_token:token,token_type:'Bearer',expires_in:900,scope:valid.row.scopes};
 }
 export async function revokeToken(env,token){
  const found=await readToken(env,token,token?.startsWith('atx_refresh_')?'refresh':'access');
