@@ -30,7 +30,7 @@ Do not try to connect the legacy production Worker as if it already supports thi
 2. On the ATAX-hosted consent page, review the unverified client name, exact redirect URI, and requested permissions. Never paste provider credentials into a chat or MCP tool call.
 3. Supply a fine-grained GitHub token with permissions appropriate to the exact repositories and actions, and your own Supabase project HTTPS URL and server-side secret API key.
 4. **Optional:** Add your Cloudflare API token and a 32-hex-digit Cloudflare account ID, and/or a Vercel token and team ID. ATAX checks the provider token identity before encrypting these connections. Missing optional tokens do not trigger operator-account fallback.
-5. Access tokens expire after 15 minutes. Refresh tokens rotate. Revocation invalidates the token family.
+5. Access tokens expire after 15 minutes. For Gemini persistent linking, the refresh token remains stable and its idle expiration extends on renewal; use the server revocation endpoint to invalidate the entire token family.
 
 ## Empty Supabase project: supported bootstrap-only mode
 
