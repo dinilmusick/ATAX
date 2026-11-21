@@ -26,7 +26,7 @@ Build the gateway from **imported/versioned contracts**, never a duplicated copy
 1. The client enters the same public HTTPS `/mcp` URL in Claude or Gemini.
 2. ATAX serves its **own** OAuth 2.1 authorization server metadata, anonymous Dynamic Client Registration (with redirect constraints/rate limits) and Authorization Code + PKCE S256. This is client-to-ATAX authentication; it is **not** GitHub OAuth and has no Luth dependency.
 3. ATAX opens a first-party HTTPS onboarding/consent screen. The user enrolls a GitHub fine-grained personal access token with intentionally scoped repository/Actions permissions, chooses an owner/organization, provides a **Supabase project URL** and an appropriately scoped Supabase API credential. Validate the GitHub identity and project reachability before enabling tools.
-4. User approves which capabilities the MCP client may call; ATAX creates a tenant-bound OAuth session with short-lived access and rotating refresh tokens. Store only token hashes for bearer lookup.
+4. User approves which capabilities the MCP client may call; ATAX creates a tenant-bound OAuth session with short-lived access and long-lived stable refresh tokens with sliding idle expiration (to maintain Gemini linking), plus explicit full-family revocation. Store only token hashes for bearer lookup.
 5. Each incoming RPC resolves its tenant and capability policy; select **that tenant's** GitHub and Supabase connection. Apply user ledger schema only after an explicit authorized setup step and safe migration checks.
 6. FMRL provisioning, dispatch, evidence and **mandatory deletion/independent 404** run under the user's GitHub namespace with the user's chosen controller workflow. The hosted ATAX repository must not be used as a user-workspace fallback.
 
