@@ -70,6 +70,26 @@ begin
     raise exception 'previous IST day still held an overlapping release lock';
   exception when sqlstate '55000' then null;
   end;
+  -- An ambiguous previous-day result must retain its last verified source baseline.
+  finalized:=public.atax_release_reconcile(atax_id,'different-reconciler',
+    evidence||jsonb_build_object('ist_day',(day_value::date-1)::text,
+      'worker_deployments',2));
+  if finalized->>'state'<>'reconcile_required' then
+    raise exception 'mismatched independent recovery was improperly accepted';
+  end if;
+  finalized:=public.atax_release_reconcile(atax_id,'different-reconciler',
+    evidence||jsonb_build_object('ist_day',(day_value::date-1)::text,
+      'worker_deployments',2));
+  if finalized->>'state'<>'reconcile_required'
+     or (select observed_worker_deployments from public.atax_release_days
+         where system_id=atax_id and ist_day=day_value::date-1)<>0 then
+    raise exception 'ambiguous evidence was laundered on second reconciliation';
+  end if;
+  begin
+    perform public.atax_release_reserve(atax_id,'release-agent','main_update',evidence,900);
+    raise exception 'unresolved previous day did not block new release';
+  exception when sqlstate '55000' then null;
+  end;
   delete from public.atax_release_days
     where system_id=atax_id and ist_day=day_value::date-1;
   reservation:=public.atax_release_reserve(atax_id,'release-agent','main_update',evidence,900);
