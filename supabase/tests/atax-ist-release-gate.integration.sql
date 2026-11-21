@@ -8,6 +8,7 @@ declare
   reservation jsonb;
   finalized jsonb;
   lease_token uuid;
+  check_index integer;
 begin
   select id into atax_id from public.systems where system_key='atax' limit 1;
   if atax_id is null then
@@ -29,10 +30,22 @@ begin
     raise exception 'authorized control-plane service role cannot reserve';
   end if;
   perform set_config('atax.test_release_system_id',atax_id::text,true);
+  for check_index in 1..5 loop
+    insert into public.github_check_runs(
+      system_id,github_id,name,workflow_name,status,conclusion,sha,branch,url,synced_at)
+    values(atax_id,210000000+check_index,'release-integration-'||check_index,
+      'Exact-head integration','completed','success',repeat('d',40),
+      'main','https://github.com/dinilmusick/ATAX/actions/runs/'||check_index,clock_timestamp());
+  end loop;
   evidence := jsonb_build_object(
     'ist_day',day_value,'verifier_agent_id','independent-release-checker',
     'verified_at',clock_timestamp(),'github_history_complete',true,
     'cloudflare_history_complete',true,'observed_main_sha',repeat('a',40),
+    'candidate_head_sha',repeat('d',40),
+    'exact_head_ci_verified',true,
+    'migration_compatibility_verified',true,
+    'ci_evidence_url','https://github.com/dinilmusick/ATAX/actions/runs/fixture',
+    'migration_evidence_url','https://github.com/dinilmusick/ATAX/actions/runs/fixture/database',
     'main_updates',0,'worker_deployments',0,
     'source_links',jsonb_build_array('https://api.github.com/repos/dinilmusick/ATAX/commits',
                                    'https://api.cloudflare.com/client/v4/accounts/example/workers/scripts/atax-mcp/deployments')
