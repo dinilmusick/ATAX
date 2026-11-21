@@ -2,7 +2,7 @@ import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools} from './provider-accounts.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
-const SUPPORTED = new Set(['2025-06-18', '2025-03-26']);
+const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
 const MAX_BODY_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
