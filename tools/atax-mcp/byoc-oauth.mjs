@@ -186,9 +186,16 @@ async function routeRequest(req,env,fetcher,handleMcp){
   if(path==='/authorize'&&req.method==='POST')return await authorizeSubmit(req,env,fetcher);
   if(path==='/token'&&req.method==='POST')return await tokenRoute(req,env);
   if(path==='/revoke'&&req.method==='POST'){
-   const form=await boundedBody(req,12000);
-   if(!await clientRow(env,form.get('client_id')))throw Error('Unknown OAuth client');
-   await revokeToken(env,form.get('token'));return new Response(null,{status:200,headers});
+   const form=await boundedBody(req,12000),token=form.get('token'),clientId=form.get('client_id');
+   if(typeof token!=='string'||token.length<1||token.length>200)throw Error('Invalid OAuth revocation token');
+   if(clientId!==null&&(!identifier.test(clientId)||!await clientRow(env,clientId)))throw Error('Unknown OAuth client');
+   // Gemini may send only a refresh/access bearer at unlink. Possession of
+   // that high-entropy token is sufficient to revoke its whole session family.
+   const kind=token.startsWith('atx_refresh_')?'refresh':'access';
+   const existing=await readToken(env,token,kind);
+   if(existing&&clientId!==null&&existing.row.client_id!==clientId)throw Error('OAuth client mismatch');
+   if(existing)await revokeToken(env,token);
+   return new Response(null,{status:200,headers});
   }
   if(path==='/mcp'){
     const match=(req.headers.get('authorization')||'').match(/^Bearer (atx_access_[A-Za-z0-9_-]{43})$/);
@@ -200,7 +207,7 @@ async function routeRequest(req,env,fetcher,handleMcp){
   return error('not_found',404);
  }catch(err){
   const message=String(err?.message||'BYOC request failed');
-  const safe=/^(Invalid |Unknown OAuth|Unregistered |Unsupported |Wrong OAuth|Only PKCE|Redirect URIs|PKCE |Authorization |Request too large|Form body required|JSON required|GitHub credential rejected|Supabase project credential rejected|ATAX ledger schema unavailable|Cloudflare credential rejected|Vercel credential rejected|Refresh token invalid|Rate limit exceeded|Verifier and executor scopes must be separate)/.test(message);
+  const safe=/^(Invalid |Unknown OAuth|Unregistered |Unsupported |Wrong OAuth|Only PKCE|Redirect URIs|PKCE |Authorization |Request too large|Form body required|JSON required|GitHub credential rejected|Supabase project credential rejected|ATAX ledger schema unavailable|Cloudflare credential rejected|Vercel credential rejected|OAuth client mismatch|Refresh token invalid|Rate limit exceeded|Verifier and executor scopes must be separate)/.test(message);
   return json({error:safe?'invalid_request':'server_error',error_description:safe?message:'Request could not be completed'},safe?400:503);
  }
 }
