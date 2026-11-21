@@ -24,6 +24,19 @@ class FakeD1 {
     if(sql.startsWith('INSERT INTO byoc_clients')){const [client_id,redirects,client_name,created_at]=args;db.clients.set(client_id,{client_id,redirects,client_name,created_at});return {meta:{changes:1}};}
     if(sql.startsWith('INSERT INTO byoc_requests')){const [nonce_hash,client_id,redirect_uri,code_challenge,requested_scopes,state,expires_at]=args;db.requests.set(nonce_hash,{nonce_hash,client_id,redirect_uri,code_challenge,requested_scopes,state,expires_at});return {meta:{changes:1}};}
     if(sql.startsWith('INSERT INTO byoc_codes')){const [code_hash,client_id,redirect_uri,code_challenge,scopes,github_subject,github_owner,iv,encrypted,expires_at]=args;db.codes.set(code_hash,{code_hash,client_id,redirect_uri,code_challenge,scopes,github_subject,github_owner,iv,encrypted,expires_at});return {meta:{changes:1}};}
+    if(sql.startsWith("UPDATE byoc_tokens SET expires_at")){
+     const [expires_at,token_hash,client_id,now]=args;
+     const row=db.tokens.get(token_hash);
+     if(!row||row.client_id!==client_id||row.token_type!=='refresh'||row.revoked_at!=null||row.expires_at<=now)return {meta:{changes:0}};
+     row.expires_at=expires_at;return {meta:{changes:1}};
+    }
+    if(sql.includes("SELECT ?,'access'")){
+     const [token_hash,iv,encrypted,expires_at,refresh_hash,client_id,now]=args;
+     const source=db.tokens.get(refresh_hash);
+     if(!source||source.client_id!==client_id||source.token_type!=='refresh'||source.revoked_at!=null||source.expires_at<=now)return {meta:{changes:0}};
+     db.tokens.set(token_hash,{...source,token_hash,token_type:'access',iv,encrypted,expires_at,revoked_at:null});
+     return {meta:{changes:1}};
+    }
     if(sql.startsWith('INSERT INTO byoc_tokens')){const [token_hash,token_type,client_id,subject,github_owner,scopes,iv,encrypted,expires_at,family_id]=args;db.tokens.set(token_hash,{token_hash,token_type,client_id,subject,github_owner,scopes,iv,encrypted,expires_at,family_id,revoked_at:null});return {meta:{changes:1}};}
     if(sql.startsWith('DELETE FROM byoc_requests'))return {meta:{changes:db.requests.delete(args[0])?1:0}};
     if(sql.startsWith('DELETE FROM byoc_codes'))return {meta:{changes:db.codes.delete(args[0])?1:0}};
@@ -123,7 +136,7 @@ test('OAuth discovery and 401 are public without operator secrets',async()=>{
  const broken=await app(new Request(domain+'/mcp',{method:'POST',body:'{}'}),{ATAX_BYOC_MODE:'true'});
  assert.equal(broken.status,503);
 });
-test('full registration, PKCE consent, token, own-tenant RPC and refresh rotation',async()=>{
+test('full registration, PKCE consent, token, own-tenant RPC and persistent Gemini refresh linking',async()=>{
  const id=await register();
  const code=await enroll(id,secretA,'https://project-aaa1.supabase.co/',keyA);
  const wrong=await getTokens(id,code,{code_verifier:'b'.repeat(64)});
@@ -145,10 +158,22 @@ test('full registration, PKCE consent, token, own-tenant RPC and refresh rotatio
  const refreshed=await form('/token',{grant_type:'refresh_token',client_id:id,refresh_token});
  assert.equal(refreshed.status,200);
  const newer=await j(refreshed);
- assert.equal((await tool(access_token)).status,401);
+ assert.equal(newer.refresh_token,refresh_token,'Gemini persistent linking requires the same refresh token');
+ assert.notEqual(newer.access_token,access_token);
+ assert.equal((await tool(access_token)).status,200);
  assert.equal((await tool(newer.access_token)).status,200);
- const replayRefresh=await form('/token',{grant_type:'refresh_token',client_id:id,refresh_token});
- assert.equal(replayRefresh.status,400);
+ const repeated=await form('/token',{grant_type:'refresh_token',client_id:id,refresh_token});
+ assert.equal(repeated.status,200);
+ const repeatedData=await j(repeated);
+ assert.equal(repeatedData.refresh_token,refresh_token);
+ assert.notEqual(repeatedData.access_token,newer.access_token);
+ const revoked=await form('/revoke',{client_id:id,token:refresh_token});
+ assert.equal(revoked.status,200);
+ for(const t of [access_token,newer.access_token,repeatedData.access_token]){
+  assert.equal((await tool(t)).status,401,'Revocation must invalidate every access token in the family');
+ }
+ const denied=await form('/token',{grant_type:'refresh_token',client_id:id,refresh_token});
+ assert.equal(denied.status,400);
 });
 test('independent client must enroll its own GitHub and Supabase project',async()=>{
  const id=await register();
