@@ -197,8 +197,9 @@ begin
                     then outcome_in else 'reconcile_required' end;
   update public.atax_release_days
   set state=new_state,holder_agent_id=null,lock_token=null,lock_expires_at=null,
-      observed_main_updates=after_main,observed_worker_deployments=after_worker,
-      observed_main_sha=provider_report_in->>'observed_main_sha',
+      observed_main_updates=case when new_state='reconcile_required' then record_value.observed_main_updates else after_main end,
+      observed_worker_deployments=case when new_state='reconcile_required' then record_value.observed_worker_deployments else after_worker end,
+      observed_main_sha=case when new_state='reconcile_required' then record_value.observed_main_sha else provider_report_in->>'observed_main_sha' end,
       source_report=provider_report_in,updated_at=clock_timestamp()
   where system_id=system_id_in and ist_day=record_value.ist_day;
   insert into public.atax_release_events
@@ -267,9 +268,10 @@ begin
   end;
   update public.atax_release_days
   set state=result_state,holder_agent_id=null,lock_token=null,
-      lock_expires_at=null,observed_main_updates=actual_main,
-      observed_worker_deployments=actual_worker,
-      observed_main_sha=provider_report_in->>'observed_main_sha',
+      lock_expires_at=null,
+      observed_main_updates=case when result_state='reconcile_required' then current_release.observed_main_updates else actual_main end,
+      observed_worker_deployments=case when result_state='reconcile_required' then current_release.observed_worker_deployments else actual_worker end,
+      observed_main_sha=case when result_state='reconcile_required' then current_release.observed_main_sha else provider_report_in->>'observed_main_sha' end,
       source_report=provider_report_in,updated_at=clock_timestamp()
   where system_id=system_id_in and ist_day=current_release.ist_day;
   insert into public.atax_release_events(
