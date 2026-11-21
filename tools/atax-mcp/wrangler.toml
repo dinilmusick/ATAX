@@ -8,3 +8,12 @@ workers_dev = true
 [vars]
 SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
 MCP_GITHUB_OWNER = "dinilmusick"
+
+# Public, non-secret Luth issuer/resource metadata for Claude and Gemini OAuth DCR.
+# Do not add the owner subject or privileged Supabase key here.
+MCP_AUTH_AUTHORIZATION_SERVER = "https://luth.blueprint-ninjastudios.workers.dev/api/auth"
+MCP_AUTH_ISSUER = "https://luth.blueprint-ninjastudios.workers.dev/api/auth"
+MCP_AUTH_JWKS_URL = "https://luth.blueprint-ninjastudios.workers.dev/api/auth/jwks"
+MCP_AUTH_AUDIENCE = "https://atax-mcp.dextro1n1laevo.workers.dev/mcp"
+MCP_AUTH_OWNER_SCOPES = "atax:read atax:write"
+

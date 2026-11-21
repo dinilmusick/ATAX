@@ -110,8 +110,8 @@ test('JWKS bearer validation verifies RSA signature, issuer, audience, expiry an
   const keys=await webcrypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
   const pub=await webcrypto.subtle.exportKey('jwk',keys.publicKey);pub.kid='test-kid';pub.alg='RS256';
   const b64=v=>Buffer.from(v).toString('base64url');
-  const header=b64(JSON.stringify({alg:'RS256',kid:'test-kid',typ:'JWT'}));
-  const claims={iss:'https://auth.example',aud:'atax',sub:'test-jwks-user',scope:'atax:read',exp:Math.floor(Date.now()/1000)+60};
+  const header=b64(JSON.stringify({alg:'RS256',kid:'test-kid',typ:'at+jwt'}));
+  const claims={iss:'https://auth.example',aud:'atax',sub:'test-jwks-user',azp:'test-client-registered',scope:'atax:read',exp:Math.floor(Date.now()/1000)+60};
   async function sign(override={}){const payload=b64(JSON.stringify({...claims,...override}));const signature=await webcrypto.subtle.sign('RSASSA-PKCS1-v1_5',keys.privateKey,new TextEncoder().encode(header+'.'+payload));return header+'.'+payload+'.'+b64(signature);}
   const jwksEnv={...env,MCP_SHARED_TOKEN_SHA256:'',MCP_AUTH_JWKS_URL:'https://auth.example/jwks',MCP_AUTH_ISSUER:'https://auth.example',MCP_AUTH_AUDIENCE:'atax'};
   const remote=async(url,opts)=>url==='https://auth.example/jwks'?Response.json({keys:[pub]}):upstream(url,opts);
