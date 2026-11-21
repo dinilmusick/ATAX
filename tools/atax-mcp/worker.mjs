@@ -157,7 +157,7 @@ function toolAllowed(principal,env,tool){
   // Legacy FMRL uses a fixed shared controller; BYOC users must never reach it.
   if(principal.authMethod==='byoc' && ['atax_fmrl_create_run_dispose','atax_fmrl_get_status'].includes(tool.name))return false;
   if(principal.authMethod==='byoc' && env.ATAX_BYOC_LEDGER_READY==='false' &&
-     !['atax_supabase_bootstrap_workflow_create','atax_github_actions_workflows_list','atax_github_actions_run_status','atax_github_workflows_guide'].includes(tool.name))return false;
+     !['atax_supabase_bootstrap_workflow_create','atax_supabase_bootstrap_dispatch','atax_github_actions_workflows_list','atax_github_actions_run_status','atax_github_workflows_guide'].includes(tool.name))return false;
   return allowedScope(principal,tool.scope)&&(providerToolNames.has(tool.name)||canonicalOwner(principal,env));
 }
 function supabase(env,fetcher){
