@@ -57,10 +57,41 @@ jobs:
             if [[ "$header" == "$LUTH/api/auth/oauth2/authorize?"* ]]; then
               valid_location=true
             fi
-            echo "${app#https://} OAuth start HTTP: $code; official issuer redirect: $valid_location" >> "$report"
-            if [[ "$code" != 302 && "$code" != 303 ]] || [[ "$valid_location" != true ]]; then
+            valid_pkce="$(AUTH_LOCATION="$header" APP_ORIGIN="$app" LUTH_ORIGIN="$LUTH" node - <<'NODE'
+const raw = process.env.AUTH_LOCATION || '';
+let ok = false;
+try {
+  const target = new URL(raw);
+  const redirect = target.searchParams.get('redirect_uri');
+  ok = target.origin === process.env.LUTH_ORIGIN
+    && target.pathname === '/api/auth/oauth2/authorize'
+    && target.searchParams.get('response_type') === 'code'
+    && target.searchParams.get('code_challenge_method') === 'S256'
+    && /^[A-Za-z0-9_-]{43}$/.test(target.searchParams.get('code_challenge') || '')
+    && /^[A-Za-z0-9_-]{43}$/.test(target.searchParams.get('state') || '')
+    && !!target.searchParams.get('client_id')
+    && redirect === process.env.APP_ORIGIN + '/api/auth/oidc/callback';
+} catch {}
+process.stdout.write(ok ? 'true' : 'false');
+NODE
+)"
+            secure_cookie=false
+            if grep -Eiq '^set-cookie: .*httponly' /tmp/auth-headers &&
+               grep -Eiq '^set-cookie: .*secure' /tmp/auth-headers &&
+               grep -Eiq '^set-cookie: .*samesite=lax' /tmp/auth-headers; then
+              secure_cookie=true
+            fi
+            echo "${app#https://} OAuth start HTTP: $code; official issuer redirect: $valid_location; PKCE S256: $valid_pkce; secure flow cookie: $secure_cookie" >> "$report"
+            if [[ "$code" != 302 && "$code" != 303 ]] ||
+               [[ "$valid_location" != true ]] ||
+               [[ "$valid_pkce" != true ]] ||
+               [[ "$secure_cookie" != true ]]; then
               failures=$((failures+1))
             fi
+            session_code="$(status "$app/api/auth/oidc/session")"
+            callback_code="$(status "$app/api/auth/oidc/callback")"
+            echo "${app#https://} unauthenticated session HTTP: $session_code; invalid callback HTTP: $callback_code" >> "$report"
+            [[ "$session_code" == 401 && "$callback_code" == 400 ]] || failures=$((failures+1))
           done
           echo "Failed smoke assertions: $failures" >> "$report"
           cat "$report"
