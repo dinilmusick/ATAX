@@ -11,6 +11,19 @@ ATAX is hosted at one Cloudflare Worker, but **every client supplies its own Git
 
 **Note:** The BYOC OAuth source is presently in ATAX PR #1606, not the production Worker. Do not claim the public URL supports this new flow until deployed and independently tested.
 
+## Gemini Apps connection and availability
+
+Google's [official custom app guidance](https://support.google.com/gemini/answer/17209137) currently restricts custom Gemini Connected Apps to eligible US-based users 18+, using a personal Google account, English, with Gemini activity/history enabled. The connection is created in the **Gemini web app**, then usable on Gemini mobile. Availability should not be claimed outside Google's supported regions.
+
+After ATAX BYOC is **actually deployed and verified**:
+1. Open [gemini.google.com](https://gemini.google.com) → **Settings → Connected Apps → Custom apps → Add a custom app**. Alternatively, open [Gemini Apps Developer Mode](https://gemini.google.com/devmode) → **Create new**.
+2. Enter the exact HTTPS MCP URL: `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`.
+3. Choose **Dynamic Client Registration**; leave optional OAuth Client ID/Secret blank. Review connection/security permissions.
+4. On ATAX's own `/authorize` consent page, verify the unverified client name and exact redirect URI, and provide **your** GitHub token and Supabase project URL/API secret. Optional Cloudflare/Vercel tokens stay optional. Never paste credentials in a Gemini chat.
+5. Select **ATAX**, inspect its available actions, and start with a read-only context test such as `@ATAX show my canonical system state and available skills`. In Developer Mode, use **Tool Schemas**, **Authentication** and **Event Log** to diagnose 401/403 and tool-discovery failures.
+
+Do not try to connect the legacy production Worker as if it already supports this BYOC flow. Do not use the original Luth issuer, and do not provide a hardcoded OAuth client secret.
+
 ## First connection
 
 1. In a supported MCP connector (Claude/Gemini), enter the HTTPS `/mcp` URL and use dynamic OAuth client registration.
@@ -25,7 +38,7 @@ The gateway does **not** share the operator's canonical ATAX ledger. If `agent_c
 
 1. Call `atax_supabase_bootstrap_workflow_create` with an authorized GitHub repository and its exact default branch. It creates a fixed, no-overwrite Actions workflow using reviewed ATAX schema commit `d182e89a590a088bebd3aa18add8891ad3001fb2` and Supabase CLI 3.2.0.
 2. **In your own GitHub repository**, add `ATAX_BOOTSTRAP_DATABASE_URL` under Settings → Secrets and variables → Actions. Use the PostgreSQL connection string of **your dedicated Supabase project**. Never supply it through an MCP argument or chat.
-3. Trigger `ATAX tenant database bootstrap` in that repository using GitHub Actions, or use the authorized `atax_github_actions_dispatch` tool. The workflow applies the pinned ATAX migrations to the *specified* database, then checks canonical tables and migration history. It does not reset the database.
+3. Trigger `ATAX tenant database bootstrap` in that repository using GitHub Actions, or call the bootstrap-only `atax_supabase_bootstrap_dispatch` tool (it checks that the workflow is byte-for-byte identical to ATAX's pinned version before dispatch). The general-purpose `atax_github_actions_dispatch` tool is **not** permitted in bootstrap-only sessions. The workflow applies the pinned ATAX migrations to the *specified* database, then checks canonical tables and migration history. It does not reset the database.
 4. Inspect the exact GitHub Actions run and its terminal success, then **reconnect / reauthorize OAuth** to activate normal ATAX ledger tools. A bootstrap-only token never automatically escalates to normal privileges.
 5. The bootstrap workflow can be independently reviewed in your own repository before execution. Existing populated projects should be migrated only after their owner has assessed schema compatibility and backups.
 
