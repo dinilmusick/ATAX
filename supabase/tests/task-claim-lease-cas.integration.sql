@@ -55,6 +55,26 @@ begin
   exception when sqlstate '55000' then null;
   end;
 
+  -- A generic status flip is another route to premature ownership replacement.
+  begin
+    update public.tasks set status='queued',claimed_by_agent_id=null,
+      claim_token=null,claim_expires_at=null where id=fixture_task_id;
+    raise exception 'pre-expiry direct status reset unexpectedly succeeded';
+  exception when sqlstate '55000' then null;
+  end;
+
+  -- Legacy status mutation RPC has no claim-token argument; fail closed.
+  begin
+    perform public.task_ledger_update(
+      fixture_task_id,'lease-cas-regression','queued',null,null,null,null,null,
+      'legacy generic update must reject claimed task','{}'::jsonb);
+    raise exception 'legacy generic task_ledger_update bypassed active fencing';
+  exception when others then
+    if sqlerrm not like '%fenced running task requires token-scoped RPC%' then
+      raise;
+    end if;
+  end;
+
   select * into current_task from public.tasks where id=fixture_task_id;
   if current_task.claimed_by_agent_id<>'lease-cas-original-worker'
      or current_task.claim_token is distinct from original_token
@@ -63,6 +83,16 @@ begin
   end if;
   if (select count(*) from public.task_events e where e.task_id=fixture_task_id and e.event_type='claimed')<>1 then
     raise exception 'Direct SQL takeover altered append-only claim evidence';
+  end if;
+  -- A matching fenced owner can still deliberately release its own lease.
+  perform public.task_ledger_release_claim(
+    fixture_task_id,'lease-cas-original-worker',original_token,'queued',
+    'Disposable fenced release is authorized');
+  if not exists(select 1 from public.tasks where id=fixture_task_id
+    and status='queued' and claim_token is null)
+     or not exists(select 1 from public.task_events e where e.task_id=fixture_task_id
+       and e.event_type='released') then
+    raise exception 'legitimate owner release or its event was not preserved';
   end if;
 end;
 $guarded$;
