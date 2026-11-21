@@ -61,7 +61,7 @@ begin
      or current_task.claim_expires_at<=now() then
     raise exception 'Protected owner/token/lease were modified by direct SQL';
   end if;
-  if (select count(*) from public.task_events where task_id=task_id and event_type='claimed')<>1 then
+  if (select count(*) from public.task_events e where e.task_id=task_id and e.event_type='claimed')<>1 then
     raise exception 'Direct SQL takeover altered append-only claim evidence';
   end if;
 end;
