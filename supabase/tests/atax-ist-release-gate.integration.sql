@@ -20,9 +20,9 @@ begin
         'Release gate disposable universe','active','Rollback-only isolated fixture')
       returning id into fixture_universe_id;
     end if;
-    insert into public.systems(system_key,name,system_type,status,description,universe_id,work_priority)
+    insert into public.systems(system_key,name,system_type,status,description,universe_id)
     values('atax','ATAX disposable release fixture','service','active',
-      'Rollback-only release gate acceptance',fixture_universe_id,95)
+      'Rollback-only release gate acceptance',fixture_universe_id)
     returning id into atax_id;
   end if;
   -- SQL grants must not expose release authority to normal JWT clients.
