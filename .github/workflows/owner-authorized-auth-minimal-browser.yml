@@ -1,0 +1,43 @@
+name: Owner-authorized live minimal authentication Chromium checks
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.id == 155351357 &&
+       github.event.issue.title == '[atax-auth] minimal-browser')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install existing ATAX pinned browser toolchain
+        run: npm ci --prefix tools/react-typescript-fullstack --ignore-scripts --no-audit --no-fund
+      - name: Install Chromium
+        run: tools/react-typescript-fullstack/node_modules/.bin/playwright install --with-deps chromium
+      - name: Exercise live Aiko/SRKL choice, hosted email form, and Google handoff
+        run: node tools/react-typescript-fullstack/scripts/verify-live-minimal-auth.mjs
+      - name: Report bounded non-sensitive browser result
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          if test -f /tmp/atax-auth-minimal-browser-report.txt; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/atax-auth-minimal-browser-report.txt
+          else
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body 'Live browser validation did not reach the report stage.'
+          fi
