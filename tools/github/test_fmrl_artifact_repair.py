@@ -44,9 +44,9 @@ class FmrlArtifactContract(unittest.TestCase):
 
     def test_generated_workflow_never_contains_yaml_control_characters(self):
         # The Python triple-quoted workflow template must escape JS regex boundaries.
-        self.assertNotIn('\\x08', module.WORKFLOW)
-        self.assertNotIn('\\x00', module.WORKFLOW)
-        self.assertNotIn('\\x0c', module.WORKFLOW)
+        invalid = [(i, ord(ch)) for i, ch in enumerate(module.WORKFLOW)
+                   if ord(ch) < 32 and ord(ch) not in (9, 10, 13)]
+        self.assertEqual(invalid, [])
 
     def test_owner_approved_pr_id_and_no_arbitrary_target(self):
         controller = (ROOT.parent.parent / ".github/workflows/owner-authorized-private-ci.yml").read_text()
