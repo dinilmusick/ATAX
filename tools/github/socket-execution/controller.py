@@ -53,6 +53,23 @@ class Http:
             raise RemoteError("delivery_uncertain") from None
 
 
+    def anonymous_status(self, url: str) -> int:
+        """Independently observe public FMRL deletion without any bearer token."""
+        request = urllib.request.Request(url, method="GET", headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "atax-socket-cleanup-auditor",
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return response.status
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return 404
+            raise RemoteError("fmrl_cleanup_not_verified") from None
+        except (TimeoutError, urllib.error.URLError):
+            raise RemoteError("fmrl_cleanup_not_verified") from None
+
+
 class Supabase:
     def __init__(self, url: str, token: str, http: Http):
         if not url.startswith("https://") or not token:
@@ -109,14 +126,15 @@ class Github:
     def delete_fmrl(self, request: ExecutionRequest) -> str:
         # The FMRL is disposable; deletion must match a correlation-bound name.
         owner, name = request.runner_repository.split("/")
-        expected = "atax-fmrl-" + request.correlation_id.replace("-", "")[:20]
+        expected = "FMRL-" + request.correlation_id.replace("-", "")[:20]
         if request.mode != "fmrl" or name != expected or owner != request.target_repository.split("/")[0]:
             raise RemoteError("fmrl_identity_mismatch")
         code, _ = self.api("DELETE", f"repos/{request.runner_repository}")
         if code not in (204, 404):
             raise RemoteError("fmrl_delete_failed")
-        # An independent GET, not the delete response, proves cleanup.
-        check, _ = self.api("GET", f"repos/{request.runner_repository}")
+        # A token-free GET, not the DELETE response or a same-token GET,
+        # independently proves that the PUBLIC disposable repository is gone.
+        check = self.http.anonymous_status("https://api.github.com/repos/" + request.runner_repository)
         if check != 404:
             raise RemoteError("fmrl_cleanup_not_verified")
         return "independent_404"
