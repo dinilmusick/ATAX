@@ -5,6 +5,13 @@ const MAX_RESPONSE = 8192;
 const MAX_SUBMISSION = 12288;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const WORKFLOW_TYPES = Object.freeze({
+  sha: value => typeof value==='string' && /^[a-f0-9]{40}$/i.test(value),
+  uuid: value => typeof value==='string' && UUID.test(value),
+  slug: value => typeof value==='string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(value),
+  integer: value => Number.isSafeInteger(value) && value>=0 && value<=1000000,
+  boolean: value => typeof value==='boolean'
+});
 const bytes = value => encoder.encode(value).length;
 
 const BASE = {
@@ -65,7 +72,7 @@ function validateArguments(args,def){
   if(def.operation==='output_submit'&&!isObject(args.output))return false;
   if(def.operation==='atomisation_request'&&
       (typeof args.reason!=='string'||args.reason.length<1||args.reason.length>512||
-       (args.partial_progress!==undefined&&args.partial_progress.length>3000)))return false;
+       (args.partial_progress!==undefined&&(typeof args.partial_progress!=='string'||args.partial_progress.length>3000))))return false;
   if(def.operation==='workflow_request'&&
       (typeof args.workflow_key!=='string'||!/^[a-z][a-z0-9_-]{1,63}$/.test(args.workflow_key)||
        !isObject(args.inputs)))return false;
@@ -112,10 +119,12 @@ export function createSocketGateway(deps){
     try{principal=await deps.verifyPrincipal(request);}catch{return json({error:'Authentication unavailable'},503);}
     if(!principal||typeof principal.id!=='string'||!principal.id||
       typeof principal.sessionId!=='string'||!principal.sessionId||
-      !validId(principal.taskId))return json({error:'Unauthorized'},401);
+      !validId(principal.taskId)||!validId(principal.claimToken))return json({error:'Unauthorized'},401);
     let raw,msg;
     try{raw=await request.text();if(bytes(raw)>MAX_REQUEST)return json({error:'Request too large'},413);
       msg=JSON.parse(raw);}catch{return json(errorReply(null,'INVALID_ARGUMENTS'),400);}
+    if(isObject(msg)&&msg.jsonrpc==='2.0'&&msg.method==='notifications/initialized'&&msg.id===undefined)
+      return new Response(null,{status:202,headers:{'cache-control':'no-store'}});
     if(!isObject(msg)||msg.jsonrpc!=='2.0'||(typeof msg.id!=='number'&&typeof msg.id!=='string')||
       typeof msg.method!=='string')return json(errorReply(null,'INVALID_ARGUMENTS'),400);
     const id=msg.id;
@@ -133,14 +142,18 @@ export function createSocketGateway(deps){
     const args=msg.params?.arguments;
     if(!validateArguments(args,def))return json(errorReply(id,'INVALID_ARGUMENTS'));
     if(args.task_id!==principal.taskId)return json(errorReply(id,'CROSS_TASK_DENIED'));
+    if(args.claim_token!==principal.claimToken)return json(errorReply(id,'STALE_FENCE'));
     let payload={};
     for(const key of Object.keys(def.fields))if(Object.hasOwn(args,key))payload[key]=args[key];
     if(def.operation==='workflow_request'){
       // No dynamic URLs, repositories, branch refs, command strings, or credentials.
       let workflow;
       try{workflow=deps.githubDispatch.resolveWorkflow(payload.workflow_key);}catch{return json(errorReply(id,'CAPABILITY_REVOKED'));}
-      if(!workflow||workflow.key!==payload.workflow_key||!Array.isArray(workflow.inputNames)||
-        Object.keys(payload.inputs).some(k=>!workflow.inputNames.includes(k))||
+      if(!workflow||workflow.key!==payload.workflow_key||!isObject(workflow.inputs)||
+        Object.entries(payload.inputs).some(([key,value])=>
+          !Object.hasOwn(workflow.inputs,key)||
+          !Object.hasOwn(WORKFLOW_TYPES,workflow.inputs[key])||
+          !WORKFLOW_TYPES[workflow.inputs[key]](value))||
         bytes(JSON.stringify(payload.inputs))>2048)return json(errorReply(id,'CAPABILITY_REVOKED'));
     }
     const inboundTokens=tokenCount(deps.meter,raw);
