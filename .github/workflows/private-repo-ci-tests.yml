@@ -41,6 +41,22 @@ jobs:
       - name: Compile updated tooling
         run: |
           python3 -m py_compile tools/github/disposable_workspace.py tools/github/repository_lifecycle.py tools/github/fmrl_lock_writer.py tools/github/fmrl_artifact_writer.py tools/agent-bootstrap/bootstrap.py
+      - name: Lint the exact emitted disposable GitHub Actions workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          target = Path('tools/github/disposable_workspace.py')
+          spec = importlib.util.spec_from_file_location('fmrl_validation', target)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          Path('/tmp/atax-fmrl-generated.yml').write_text(module.WORKFLOW)
+          PY
+          mkdir -p "$RUNNER_TEMP/fmrl-lint-bin"
+          GOBIN="$RUNNER_TEMP/fmrl-lint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$RUNNER_TEMP/fmrl-lint-bin/actionlint" -shellcheck= -pyflakes= /tmp/atax-fmrl-generated.yml
       - name: Test FMRL isolation and local target bootstrap
         run: |
           python3 -m unittest discover -s tools/github -p test_disposable_workspace.py -v
