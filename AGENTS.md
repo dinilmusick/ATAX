@@ -20,6 +20,16 @@ Do not treat chat history as durable state.
 
 When a detailed skill or repository document conflicts with the stable ATAX contract above, treat the conflict as repository drift and reconcile it rather than silently inventing a new rule.
 
+## Three supported connections, one canonical substrate
+
+ATAX's interface is independent of the agent and the AI application. See [connection modes](docs/connection-modes.md).
+
+- **GitHub connector only:** agents use this repository's instructions, tools and trusted GitHub workflows. Live Supabase ledger operations require a separately authorized credential-bearing client/bridge, not bare repository access; full bridge parity remains to be verified.
+- **GitHub + Supabase connectors:** existing direct-connector path reads/writes live state through the connected Supabase RPC tools and operates GitHub through its connector; **do not redirect it through MCP**.
+- **Remote ATAX MCP:** authenticated clients use the owner-configured Cloudflare Worker `/mcp` endpoint, whose bounded tools call the **same** ledger RPCs. Worker credentials are Cloudflare secrets, independent from GitHub Actions repository secrets.
+
+**In every mode:** incoming agents are created externally; ATAX does not know/care which model/application arrived. A task is a **socket** occupied by one valid atomic claim and fencing token at a time. All entrants must use canonical Supabase claim, heartbeat, submit, release and independent verification safeguards. GitHub Issues, workflow statuses, an MCP session and chat history are **not** substitute locks or canonical state. Do not claim full three-mode equivalence until live acceptance tests prove it.
+
 ## Mandatory live-substrate bootstrap
 
 **This bootstrap is unconditional.** At the moment an agent/session comes into play, before interpreting, classifying, answering, or acting on the incoming turn, hydrate the live Supabase substrate and canonical skill catalogue. This applies to **every turn**, including greetings, casual conversation, clarifications, questions, acknowledgements, and requests that appear purely conversational.
