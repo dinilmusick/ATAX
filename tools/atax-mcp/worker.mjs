@@ -1,5 +1,5 @@
 import {githubTools, githubGuide} from './github-tools.mjs';
-import {providerTools} from './provider-accounts.mjs';
+import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
@@ -117,7 +117,7 @@ async function authenticate(request,env, fetcher){
      env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
      env.MCP_AUTH_OWNER_SCOPES) {
     for(const scope of String(env.MCP_AUTH_OWNER_SCOPES).split(/\s+/)) {
-      if(/^atax:(read|write|verify|github:read|github:create|fmrl:execute)$/.test(scope))scopes.add(scope);
+      if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|fmrl:execute)$/.test(scope))scopes.add(scope);
     }
   }
   return {id:claims.sub,authMethod:'jwt',scopes};
@@ -128,14 +128,10 @@ function allowedOrigin(req, env){
   return allowed.includes(origin);
 }
 function allowedScope(principal,scope){return principal.scopes.has(scope)||principal.scopes.has('atax:admin');}
-const providerToolNames=new Set(providerTools.map(t=>t.name));
-function canonicalOwner(principal,env){
-  if(principal.authMethod==='shared')return !!env.MCP_SHARED_TOKEN_SHA256&&principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
-  const jwtOwner=String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'').trim();
-  return principal.authMethod==='jwt'&&jwtOwner.length>=3&&principal.id===jwtOwner;
-}
+const canonicalOwner=(principal,env)=>isOwnerPrincipal(env,principal);
 function toolAllowed(principal,env,tool){
-  return allowedScope(principal,tool.scope)&&(providerToolNames.has(tool.name)||canonicalOwner(principal,env));
+  // This personal server never delegates provider secrets or privileged ledger RPCs.
+  return canonicalOwner(principal,env) && allowedScope(principal,tool.scope);
 }
 function supabase(env,fetcher){
   const url=String(env.SUPABASE_URL||'').replace(/\/$/,'');
