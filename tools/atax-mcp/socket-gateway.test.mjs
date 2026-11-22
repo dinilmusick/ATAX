@@ -81,11 +81,11 @@ function makeFake(options={}){
     verifyPrincipal:request=>{
       if(request.headers.get('authorization')!=='Bearer socket-valid')return null;
       return {id:options.principal??'agent-C',sessionId:options.session??'socket-C',
-        taskId:options.signedTask??TASK};
+        taskId:options.signedTask??TASK,claimToken:options.signedFence??FENCE};
     },
     database,meter,
     githubDispatch:{resolveWorkflow:key=>key==='safe_ci'?
-      {key,inputNames:['revision','target_id']}:null}
+      {key,inputs:{revision:'sha',target_id:'uuid'}}:null}
   });
   return {gateway,state,database,meter};
 }
@@ -206,9 +206,9 @@ test('workflow operations allow only configured keys and input names, with no di
     'CAPABILITY_REVOKED');
   assert.equal(reason(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',inputs:{url:'https://evil.invalid'}})),
     'CAPABILITY_REVOKED');
-  good(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',inputs:{revision:'deadbeef'}}));
+  good(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',inputs:{revision:'a'.repeat(40)}}));
   assert.equal(state.intents.length,1);
-  assert.deepEqual(state.intents[0].inputs,{revision:'deadbeef'});
+  assert.deepEqual(state.intents[0].inputs,{revision:'a'.repeat(40)});
 });
 test('valid output is persisted, atomisation request stops socket',async()=>{
   const {gateway,state}=makeFake();
@@ -249,7 +249,7 @@ test('real JWT verification binds identity, socket session and task to signed to
   const now=Math.floor(Date.now()/1000);
   const payload={iss:env.SOCKET_AUTH_ISSUER,aud:env.SOCKET_AUTH_AUDIENCE,
     azp:env.SOCKET_AUTH_CLIENT_ID,sub:'agent-C',atax_session_id:'socket-C',
-    atax_task_id:TASK,iat:now,exp:now+300};
+    atax_task_id:TASK,atax_claim_token:FENCE,iat:now,exp:now+300};
   const head=b64(JSON.stringify({typ:'at+jwt',alg:'RS256',kid:'test-key'}));
   const body=b64(JSON.stringify(payload));
   const data=head+'.'+body;
@@ -260,14 +260,14 @@ test('real JWT verification binds identity, socket session and task to signed to
   const request=token=>new Request('https://socket.example/mcp',{
     method:'POST',headers:{authorization:'Bearer '+token}});
   assert.deepEqual(await verifySocketJwt(request(data+'.'+signature),env,fetcher),
-    {id:'agent-C',sessionId:'socket-C',taskId:TASK});
+    {id:'agent-C',sessionId:'socket-C',taskId:TASK,claimToken:FENCE});
   assert.equal(await verifySocketJwt(request(data+'.AAAA'),env,fetcher),null);
   assert.equal(await verifySocketJwt(request(head+'.'+b64(JSON.stringify({...payload,atax_task_id:OTHER}))+'.'+signature),env,fetcher),null);
   assert.equal(await verifySocketJwt(request(data+'.'+signature),{...env,SOCKET_AUTH_AUDIENCE:'admin'},fetcher),null);
 });
 test('production adapter denies absent Supabase transaction and never falls back to maintainer tools',async()=>{
   const worker=createSocketWorker({
-    SOCKET_WORKFLOW_CATALOG_JSON:'{"safe_ci":["revision"]}',SUPABASE_URL:'https://example.supabase.co',
+    SOCKET_WORKFLOW_CATALOG_JSON:'{"safe_ci":{"revision":"sha"}}',SUPABASE_URL:'https://example.supabase.co',
     SUPABASE_SECRET_KEY:'test-only-placeholder'
   },async()=>new Response('{}',{status:404}));
   const response=await worker.fetch(new Request('https://socket.example/mcp',{
@@ -275,4 +275,29 @@ test('production adapter denies absent Supabase transaction and never falls back
     body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})
   }));
   assert.equal(response.status,503);
+});
+
+test('signed fencing token is bound before transaction and cannot be changed in a tool call',async()=>{
+  const {gateway,state}=makeFake({signedFence:OTHER});
+  assert.equal(reason(await call(gateway,STATUS,BASE)),'STALE_FENCE');
+  assert.equal(state.input,0);
+});
+test('workflow input types reject injection-like values and wrong primitives',async()=>{
+  const {gateway,state}=makeFake();
+  assert.equal(reason(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',
+    inputs:{revision:'a'.repeat(39)+';'}})),'CAPABILITY_REVOKED');
+  assert.equal(reason(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',
+    inputs:{target_id:55}})),'CAPABILITY_REVOKED');
+  good(await call(gateway,WORKFLOW,{...BASE,workflow_key:'safe_ci',
+    inputs:{target_id:TASK,revision:'f'.repeat(40)}}));
+  assert.equal(state.intents.length,1);
+});
+test('stateless MCP initialized notification is acknowledged without leaking task data',async()=>{
+  const {gateway}=makeFake();
+  const response=await gateway.fetch(new Request('https://restricted.example/mcp',{
+    method:'POST',headers:{'content-type':'application/json',authorization:'Bearer socket-valid'},
+    body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})
+  }));
+  assert.equal(response.status,202);
+  assert.equal(await response.text(),'');
 });
