@@ -125,7 +125,7 @@ Source HEAD pinned for review: 896ce4a18396d64fe9a4d14afaa38cb3fb8ae29e, 2026-11
 ### Evidence categories (never conflate)
 
 - SOURCE_REPLAY_PASS: 27/27 original source tests passed in an independently assembled isolated V8 source-function harness at the exact pinned blob SHAs. This was NOT a native Node test runner execution.
-- NODE_NATIVE: NOT_RUN until a clean Node 22+ checkout executes the command below and saves a TAP transcript. Successful unrelated CI workflows do not substitute for this.
+- NODE_NATIVE_PARTIAL: The newly added attestation.test.mjs passed 6/6 cases under Node 22.16.0 in a local reproduction. The attestation module (Git blob b1b9782a...), test file (d2e7c1ca...), and pinned synthetic fixture (4341d7e7...) were individually matched to the remote Git blob hashes. The local calibration.mjs dependency copy had equivalent reviewed logic but was not blob-identical. Therefore the full native checkout execution remains NOT_RUN; unrelated successful CI workflows cannot substitute for it.
 - MOCK_ONLY: The added attestation tests sign fake observations using ephemeral locally generated keys. They do not measure providers or establish quota access.
 - LIVE_PROVIDER / DATABASE / MCP_GATEWAY / GITHUB_ACTIONS: NOT_RUN until an independent actor executes real disposable integration tests and attaches records. Never promote an unrun gate to PASS.
 
