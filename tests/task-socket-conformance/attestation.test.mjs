@@ -83,3 +83,19 @@ test('trust anchoring, freshness, trial identities and independent review are ma
     assert.throws(() => validate(signed(evidence)), /UNTRUSTED_CALIBRATION/);
   }
 });
+
+test('even correctly signed observations reject impossible passing token budgets', () => {
+  for (const mutation of [
+    x => { x.trials[0].inputTokens = 100; x.trials[0].outputTokens = 1; },
+    x => { x.trials[0].outputTokens = 0; },
+    x => { x.trials[0].budgetTokens = 1; },
+  ]) {
+    const evidence = record(); mutation(evidence);
+    assert.throws(() => validate(signed(evidence)), /UNTRUSTED_CALIBRATION/);
+  }
+  const legitimateFailure = record();
+  legitimateFailure.trials[0].success = false;
+  legitimateFailure.trials[0].evaluation.pass = false;
+  legitimateFailure.trials[0].inputTokens = 101;
+  assert.equal(validate(signed(legitimateFailure)), true, 'failed over-budget trials are evidence, not successes');
+});
