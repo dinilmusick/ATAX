@@ -292,9 +292,20 @@ grant execute on function public.socket_dispatch_begin(uuid,uuid,text,text) to s
 grant execute on function public.socket_dispatch_delivery_result(uuid,text,text) to service_role;
 grant execute on function public.socket_dispatch_finish_observed(uuid,text,text,jsonb) to service_role;
 
--- Registered pg_cron invokes the pump after migration. Disabled configuration
--- means zero network traffic until an operator sets Vault token + allowlists.
-select cron.schedule('atax-socket-v1-dispatch-outbox', '* * * * *', 'select public.socket_dispatch_pump(10)');
+-- pg_cron may be absent from isolated/local Supabase stacks. Register the
+-- pump only where the extension and schema exist; never block migration in CI.
+-- Dispatch still remains disabled until Vault config and target allowlists are set.
+do $socket_schedule$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron')
+     and exists (select 1 from pg_namespace where nspname = 'cron') then
+    execute $cron_sql$select cron.schedule(
+      'atax-socket-v1-dispatch-outbox', '* * * * *',
+      'select public.socket_dispatch_pump(10)'
+    )$cron_sql$;
+  end if;
+end;
+$socket_schedule$;
 
 -- Target-scoped runner rechecks the live claim BEFORE checkout/execution.
 create or replace function public.socket_dispatch_fence_valid(
