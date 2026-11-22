@@ -14,8 +14,10 @@ DECLARE
   inv_author_ver public.socket_invocations;
   inv_exec_verify public.socket_invocations;
   inv_unrelated_worker public.socket_invocations;
-  p uuid; p_stale uuid; p_crash uuid; fence uuid:=gen_random_uuid();
+  p uuid; p_stale uuid; p_crash uuid; p_output uuid; p_total uuid;
+  fence uuid:=gen_random_uuid();
   fence_stale uuid:=gen_random_uuid(); fence_crash uuid:=gen_random_uuid();
+  fence_output uuid:=gen_random_uuid(); fence_total uuid:=gen_random_uuid();
   definition jsonb; bad jsonb; outcome jsonb; split_result jsonb;
   c1 uuid; c2 uuid; nested_c1 uuid; child public.tasks; claim public.tasks;
   verification public.tasks; msg text; rejected boolean;
@@ -88,9 +90,43 @@ BEGIN
     jsonb_build_object('name','Socket parent crash','general_pattern','read → split → verify',
       'actions',jsonb_build_array(jsonb_build_object('description','Carry work'))))
   RETURNING id INTO p_crash;
+  INSERT INTO public.tasks(agent_id,agent_name,task_name,status,claimed_by_agent_id,
+    claimed_by_agent_name,claimed_session_id,claim_token,claim_expires_at,task_definition)
+  VALUES('test-origin','test-origin','Socket output budget','running','test-atomiser',
+    'test-atomiser','test-atom-session',fence_output,now()+interval '1 hour',
+    jsonb_build_object('name','Socket output budget','general_pattern','output → stop → split',
+      'actions',jsonb_build_array(jsonb_build_object('description','Emit tokens'))))
+  RETURNING id INTO p_output;
+  INSERT INTO public.tasks(agent_id,agent_name,task_name,status,claimed_by_agent_id,
+    claimed_by_agent_name,claimed_session_id,claim_token,claim_expires_at,task_definition)
+  VALUES('test-origin','test-origin','Socket combined budget','running','test-atomiser',
+    'test-atomiser','test-atom-session',fence_total,now()+interval '1 hour',
+    jsonb_build_object('name','Socket combined budget','general_pattern','input → output → stop',
+      'actions',jsonb_build_array(jsonb_build_object('description','Consume combined tokens'))))
+  RETURNING id INTO p_total;
   INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
-    VALUES(p,50,50,80),(p_stale,50,50,80),(p_crash,50,50,80);
+    VALUES(p,50,50,80),(p_stale,50,50,80),(p_crash,50,50,80),
+      (p_output,50,20,120),(p_total,40,40,60);
 
+  -- Output-only and aggregate thresholds are enforced separately.
+  outcome:=public.socket_record_usage(p_output,inv_atom.id,inv_atom.secret,
+    fence_output,gen_random_uuid(),'output',21);
+  IF NOT (outcome->>'needs_atomization')::boolean OR
+     (SELECT status FROM public.tasks WHERE id=p_output)<>'waiting' THEN
+    RAISE EXCEPTION 'FAIL: output ceiling did not stop work';
+  END IF;
+  PERFORM public.socket_record_usage(p_total,inv_atom.id,inv_atom.secret,
+    fence_total,gen_random_uuid(),'input',35);
+  outcome:=public.socket_record_usage(p_total,inv_atom.id,inv_atom.secret,
+    fence_total,gen_random_uuid(),'output',30);
+  IF NOT (outcome->>'needs_atomization')::boolean OR
+     (SELECT status FROM public.tasks WHERE id=p_total)<>'waiting' THEN
+    RAISE EXCEPTION 'FAIL: aggregate ceiling did not stop work';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM public.socket_overflow_reports o
+    WHERE o.task_id=p_total AND o.usage_snapshot->>'limit_total'='60') THEN
+    RAISE EXCEPTION 'FAIL: combined overflow snapshot missing';
+  END IF;
   -- Authenticated invocation credentials cannot be replaced with arbitrary
   -- identities or secrets supplied in client-controlled payloads.
   rejected:=false;
@@ -171,6 +207,20 @@ BEGIN
   IF NOT (outcome->>'duplicate')::boolean THEN
     RAISE EXCEPTION 'FAIL: overflow event retry not idempotent'; END IF;
 
+  -- Contradictory replays with the same usage key are explicitly rejected.
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_record_usage(p,inv_atom.id,inv_atom.secret,fence,
+      '00000000-0000-4000-8000-000000000102','input',26,'chunk-2');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Usage event key reused with conflicting data' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: mutated usage replay accepted'; END IF;
+  IF EXISTS(SELECT 1 FROM public.socket_task_budgets
+    WHERE task_id=p AND (input_used<>55 OR output_used<>0 OR version<>1)) THEN
+    RAISE EXCEPTION 'FAIL: replay changed the versioned budget counters';
+  END IF;
   -- A stopped parent can never be split with a stale fence.
   rejected:=false;
   BEGIN
