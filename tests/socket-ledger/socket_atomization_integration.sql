@@ -331,6 +331,43 @@ BEGIN
      OR (SELECT status FROM public.tasks WHERE id=nested_c1)<>'waiting' THEN
     RAISE EXCEPTION 'FAIL: recursive atomisation did not create waiting subtree';
   END IF;
-  RAISE NOTICE 'PASS: replay, quota stop, stale fences, identity isolation, dependencies, verification, atomic recovery, recursion';
+  -- Complete the grandchildren, independently verify them, then reconcile
+  -- the nested child as an independently verified ancestor leaf outcome.
+  SELECT child_task_id INTO c1 FROM public.socket_atomization_children
+    WHERE parent_task_id=nested_c1 AND ordinal=1;
+  SELECT child_task_id INTO c2 FROM public.socket_atomization_children
+    WHERE parent_task_id=nested_c1 AND ordinal=2;
+  claim:=public.socket_claim_child(c1,inv_exec.id,inv_exec.secret);
+  PERFORM public.task_ledger_record_loop_iteration(c1,inv_exec.agent_id,claim.claim_token,
+    1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+    jsonb_build_array(jsonb_build_object('status','satisfied')),
+    '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-first-work'),
+    'pass','Nested first ready');
+  PERFORM public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,
+    '{}'::jsonb,'Nested first complete','[]'::jsonb,
+    jsonb_build_array('nested-first-evidence'),'completed');
+  verification:=public.socket_claim_child_verification(c1,inv_ver.id,inv_ver.secret);
+  PERFORM public.socket_verify_child(c1,inv_ver.id,inv_ver.secret,
+    verification.verification_claim_token,true,
+    jsonb_build_object('evidence',jsonb_build_array('nested first verified')));
+  claim:=public.socket_claim_child(c2,inv_other.id,inv_other.secret);
+  PERFORM public.task_ledger_record_loop_iteration(c2,inv_other.agent_id,claim.claim_token,
+    1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+    jsonb_build_array(jsonb_build_object('status','satisfied')),
+    '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-second-work'),
+    'pass','Nested second ready');
+  PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
+    '{}'::jsonb,'Nested second complete','[]'::jsonb,
+    jsonb_build_array('nested-second-evidence'),'completed');
+  verification:=public.socket_claim_child_verification(c2,inv_ver.id,inv_ver.secret);
+  PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
+    verification.verification_claim_token,true,
+    jsonb_build_object('evidence',jsonb_build_array('nested second verified')));
+  child:=public.socket_finalize_parent(nested_c1,inv_ver.id,inv_ver.secret,
+    jsonb_build_object('evidence',jsonb_build_array('grandchildren independently verified')));
+  IF child.status<>'completed' OR child.verification_status<>'verified' THEN
+    RAISE EXCEPTION 'FAIL: nested parent failed verified finalization';
+  END IF;
+  RAISE NOTICE 'PASS: replay, quota stop, stale fences, identity isolation, dependencies, verification, atomic recovery, recursive finalization';
 END $test$;
 ROLLBACK;
