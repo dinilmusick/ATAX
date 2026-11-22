@@ -1,0 +1,9 @@
+{
+  "kind": "synthetic-training-example-not-provider-observation",
+  "provenance": {"provider": "example", "model": "mock", "observedAt": "2026-11-22", "tokenizer": "mock", "responseIds": ["synthetic-a", "synthetic-b", "synthetic-c"]},
+  "trials": [
+    {"budgetTokens": 1000, "success": true, "responseId": "synthetic-a"},
+    {"budgetTokens": 1000, "success": true, "responseId": "synthetic-b"},
+    {"budgetTokens": 1000, "success": true, "responseId": "synthetic-c"}
+  ]
+}
