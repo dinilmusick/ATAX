@@ -249,6 +249,7 @@ DECLARE v_inv public.socket_invocations; v_parent public.tasks;
         v_actions jsonb; v_parameters jsonb; v_checkpoints jsonb;
         v_input jsonb; v_output jsonb; v_outcome text;
         v_budget public.socket_task_budgets; v_from_task public.tasks; v_to_task public.tasks;
+        v_progress jsonb;
 BEGIN
   v_inv:=public.socket_require_invocation(invocation_in,secret_in,ARRAY['worker','atomizer']);
   IF nullif(btrim(split_key_in),'') IS NULL OR jsonb_typeof(children_in)<>'array'
@@ -291,24 +292,30 @@ BEGIN
   END IF;
   SELECT * INTO v_budget FROM public.socket_task_budgets WHERE task_id=parent_in;
   IF NOT FOUND THEN RAISE EXCEPTION 'Parent budget missing'; END IF;
+  -- A stopped socket may be atomised by a later authenticated invocation.
+  -- Its durable overflow checkpoint remains authoritative if no newer
+  -- partial-progress payload was explicitly supplied to this split.
+  v_progress:=coalesce(nullif(partial_in,'{}'::jsonb),
+    (SELECT o.partial_progress FROM public.socket_overflow_reports o
+      WHERE o.task_id=parent_in),'{}'::jsonb);
   -- Atomisation is a non-terminal waiting state, never an unrecoverable failure.
   IF v_parent.status='running' THEN
     INSERT INTO public.socket_overflow_reports(task_id,reported_by,claim_token,
       reason,report_key,partial_progress)
-    VALUES(parent_in,invocation_in,fence_in,'scope',split_key_in,coalesce(partial_in,'{}'));
+    VALUES(parent_in,invocation_in,fence_in,'scope',split_key_in,v_progress);
   END IF;
   UPDATE public.tasks SET status='waiting',claim_token=NULL,
     claimed_by_agent_id=NULL,claimed_by_agent_name=NULL,
     claimed_session_id=NULL,claimed_at=NULL,claim_expires_at=NULL,
     heartbeat_at=now(),updated_at=now(),current_step='Awaiting verified child outcomes',
     heartbeat_context=jsonb_build_object('activity','atomized',
-      'progress',coalesce(partial_in,'{}'),
+      'progress',v_progress,
       'next_action','Independent later invocations claim child sockets')
     WHERE id=parent_in;
   INSERT INTO public.socket_atomizations(parent_task_id,split_key,
     authored_by_invocation,authored_by_agent,authored_in_session,definition,partial_progress)
   VALUES(parent_in,split_key_in,invocation_in,v_inv.agent_id,v_inv.session_id,
-    children_in,coalesce(partial_in,'{}'));
+    children_in,v_progress);
   FOR v_child IN SELECT value FROM jsonb_array_elements(children_in) LOOP
     v_i:=v_i+1;
     v_actions:=v_child->'actions';
@@ -399,7 +406,7 @@ BEGIN
   INSERT INTO public.task_events(task_id,event_type,agent_id,message,payload)
   VALUES(parent_in,'note',v_inv.agent_id,'Socket atomised; parent awaits verified children',
     jsonb_build_object('split_key',split_key_in,'child_ids',to_jsonb(v_ids),
-      'partial_progress',coalesce(partial_in,'{}'::jsonb)));
+      'partial_progress',v_progress));
   RETURN jsonb_build_object('duplicate',false,'parent_id',parent_in,
     'child_ids',to_jsonb(v_ids),'needs_atomization',false);
 END $$;
