@@ -18,7 +18,7 @@ function makeFake(options={}){
     input:0,output:0,pulls:0,outputs:[],intents:[],
     permissions:new Set([
       'socket:context:read','socket:output:submit','socket:atomise:request',
-      'socket:workflow:request','socket:task:status'
+      'socket:workflow:request','socket:task:status','socket:protocol'
     ]),
     ...options,
     session:'socket-C' // canonical claim session stays fixed; option alters only signed caller
@@ -41,6 +41,13 @@ function makeFake(options={}){
       };
       if(state.input>(options.inputMax??100000))return exhausted();
       if(command.rejectReason)return deny(command.rejectReason);
+      if(command.operation==='protocol'){
+        if(typeof command.replyFrame!=='string')throw Error('Missing trusted protocol frame');
+        const charge=meter.count(command.replyFrame);
+        if(state.output+charge>(options.outputMax??100000))return exhausted();
+        state.output+=charge;
+        return {status:'ok',receipt:{inputTokens:command.inboundTokens,outputTokens:charge}};
+      }
       let data;
       switch(command.operation){
         case 'context_pull':
@@ -130,6 +137,39 @@ test('tool discovery is a five-operation allowlist without maintainer or externa
     assert.equal(reason(answer),'TOOL_FORBIDDEN');
   }
   assert.equal((await rpc(gateway,'unknown/method')).error.data.code,'TOOL_FORBIDDEN');
+});
+test('protocol discovery requires live fenced claim and an active protocol capability',async()=>{
+  const expired=makeFake({expired:true});
+  assert.equal((await rpc(expired.gateway,'tools/list')).error.data.code,'LEASE_EXPIRED');
+  assert.equal((await rpc(expired.gateway,'initialize')).error.data.code,'LEASE_EXPIRED');
+  const revoked=makeFake();
+  revoked.state.permissions.delete('socket:protocol');
+  assert.equal((await rpc(revoked.gateway,'tools/list')).error.data.code,'CAPABILITY_REVOKED');
+  assert.equal((await rpc(revoked.gateway,'ping')).error.data.code,'CAPABILITY_REVOKED');
+  const stale=makeFake({signedFence:OTHER});
+  assert.equal((await rpc(stale.gateway,'tools/list')).error.data.code,'STALE_FENCE');
+  const other=makeFake({signedTask:OTHER});
+  assert.equal((await rpc(other.gateway,'tools/list')).error.data.code,'CROSS_TASK_DENIED');
+  const wrongSession=makeFake({session:'socket-other'});
+  assert.equal((await rpc(wrongSession.gateway,'tools/list')).error.data.code,'UNAUTHORIZED');
+});
+test('repeated protocol calls consume cumulative input and output, and overflow atomises',async()=>{
+  const {gateway,state}=makeFake({inputMax:380,outputMax:100000});
+  let success=0,blocked=false;
+  for(let i=0;i<20;i++){
+    const value=await rpc(gateway,'ping');
+    if(value.error?.data?.code==='BUDGET_EXHAUSTED'){blocked=true;break;}
+    assert.deepEqual(value.result,{});success++;
+  }
+  assert.ok(success>=1);
+  assert.equal(blocked,true);
+  assert.ok(state.input>380);
+  assert.ok(state.output>0);
+  assert.equal(state.atomisation,true);
+  assert.equal(state.leaseReleased,true);
+  const {gateway:limited,state:limitedState}=makeFake({outputMax:100});
+  assert.equal((await rpc(limited,'tools/list')).error.data.code,'BUDGET_EXHAUSTED');
+  assert.equal(limitedState.stop,true);
 });
 test('no anonymous access, no origin and no extra provider-facing request fields',async()=>{
   const {gateway,state}=makeFake();
