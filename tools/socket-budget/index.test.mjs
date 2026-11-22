@@ -13,7 +13,7 @@ test('40 percent upper bound and lower reliability ceiling always win',()=>{
   assert.equal(resolveBudget('gpt-4o-mini',{maxUsableTokens:999999}).maxUsableTokens,51200);
   assert.equal(resolveBudget('unlisted').maxUsableTokens,3276);
   assert.equal(resolveBudget('Unlisted').verified,false);
-  assert.equal(Object.keys(VERIFIED_MODELS).length,4);
+  assert.equal(Object.keys(VERIFIED_MODELS).length,5);
   assert.equal(known.tokenizerId,TOKENIZER_ID);
 });
 test('all accepted repeated chunks and retries are cumulative',()=>{
@@ -113,4 +113,37 @@ test('message framing overhead is charged on every request including empty strin
   });
   m.chargeInput('');m.chargeInput('');
   assert.equal(m.snapshot().inputTokens,16);
+});
+
+test('model metadata is immutable and an arbitrary HTTPS URL cannot increase context',()=>{
+  const original=VERIFIED_MODELS['gpt-4o-mini'].contextWindowTokens;
+  assert.throws(()=>{VERIFIED_MODELS['gpt-4o-mini'].contextWindowTokens=999999999;},TypeError);
+  assert.equal(VERIFIED_MODELS['gpt-4o-mini'].contextWindowTokens,original);
+  assert.throws(()=>resolveBudget('unknown',{profile:{provider:'fake',contextWindowTokens:999999999,evidence:'https://example.com/untrusted'}}),/cannot increase pinned/);
+  assert.throws(()=>resolveBudget('gpt-4o-mini',{profile:{provider:'fake',contextWindowTokens:999999999,evidence:'https://example.com/untrusted'}}),/cannot increase pinned/);
+  assert.equal(resolveBudget('unknown',{profile:{contextWindowTokens:4000,evidence:'https://example.com/only-reduction'}}).verified,false);
+  assert.equal(resolveBudget('unknown',{profile:{contextWindowTokens:4000,evidence:'https://example.com/only-reduction'}}).maxUsableTokens,1600);
+});
+test('sparse arrays fail closed before an optimistic JSON undercount',()=>{
+  const sparse=Array(5);
+  assert.ok(JSON.stringify(sparse).length>('[,,,,]').length);
+  assert.throws(()=>canonicalPayload(sparse),/sparse JSON/);
+  const m=small();
+  assert.throws(()=>m.chargeInput({tool:'x',payload:sparse},'tool'),/sparse JSON/);
+  assert.equal(m.snapshot().attempts,0);
+});
+test('restore must preserve pinned metering policy and deny drift',()=>{
+  const opts={maxUsableTokens:100,inputLimitTokens:75,outputLimitTokens:25,messageOverheadTokens:8};
+  const m=createSocketBudgetMeter('policy','other',opts);
+  const snap=m.snapshot();
+  assert.throws(()=>createSocketBudgetMeter('policy','other',{...opts,messageOverheadTokens:0},snap),/mismatch/);
+  assert.throws(()=>createSocketBudgetMeter('policy','other',{...opts,approachFraction:.9},snap),/mismatch/);
+  assert.equal(createSocketBudgetMeter('policy','other',opts,snap).snapshot().overhead,8);
+});
+test('conservative free-tier Cerebras context profile is source-backed',()=>{
+  const p=resolveBudget('cerebras/gpt-oss-120b:free');
+  assert.equal(p.provider,'cerebras');
+  assert.equal(p.contextWindowTokens,64000);
+  assert.equal(p.maxUsableTokens,25600);
+  assert.equal(p.verified,true);
 });
