@@ -17,6 +17,16 @@ After independent migration review, configure the `socket_dispatch_config.github
 
 No live token, target workflow allowlist or production migration is provisioned by this PR. Without operator activation the database pump is inert.
 
+### Disposable FMRL runner compatibility
+
+The ordinary target-workflow example uses `actions/checkout` in its own repository. **It is not suitable for a private target from a public FMRL bridge.** The dedicated `socket-fmrl.example.yml` in this directory is the socket-compatible, fixed-operation replacement for a disposable public FMRL's `.github/workflows/socket-fmrl.yml`.
+
+Provision the FMRL using the existing `tools/github/disposable_workspace.py` in an authorized local container with `--source owner/private-target --ref <exact 40-char SHA> --target FMRL-<first 20 hex of correlation> --mode direct`. The owner must match the private target owner. That tool installs an ordinary private-CI workflow and encrypted `FMRL_TARGET_REPOSITORY`, `FMRL_TARGET_REF` and `PRIVATE_REPO_TOKEN` secrets; these must **not** be added to public source, commands or logs. Install this socket-specific workflow independently on the disposable runner's protected `main` and provision its protected `ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SERVICE_ROLE_KEY` secrets for the preflight step only. Only trusted operators may configure these sensitive values.
+
+The disposable workflow checks the live request fence, exact SHA, correlation-bound FMRL repository identity and immutable source ref **before** fetching private code. It then clones the private source inside the runner using a clone-only credential in the clone step, removes the credential and Git remote, and runs only fixed test/build operations without source or service-role credentials. It suppresses raw target logs and scrubs transient files. The ATAX controller sees only GitHub's correlation-matched terminal status.
+
+Add a precise `socket_dispatch_allowed_targets` row for this `runner_repository`, `workflow_file='socket-fmrl.yml'`, `operation`, `mode='fmrl'`, with `enabled=false` until all protected secrets and workflow installation have been verified. Then enable the allowlist and dispatch only through a valid fenced socket request. The controller must journal the terminal observation and verify public anonymous 404 after deletion. If provisioning or deletion fails, retain a durable blocker and never claim the work complete. **Do not leave FMRL repositories behind for reuse.**
+
 ## Crash, retry and integrity rules
 
 - The `pg_net` outbox records HTTP IDs, status and maximum 5 retries; missing GitHub Vault credentials are durably marked `blocked_credentials`, and it never drops a persisted dispatch intent. Missing HTTP acknowledgement can retry **only the opaque relay event**. The SQL compare-and-swap ensures duplicate relays do not send duplicate target operations.
