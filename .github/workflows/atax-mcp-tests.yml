@@ -47,3 +47,11 @@ jobs:
           fi
       - name: Cloudflare Worker packaging dry-run
         run: npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-mcp-dry-run
+
+      - name: Restricted Socket Worker syntax and deployment bundle dry-run
+        run: |
+          set -euo pipefail
+          node --check tools/atax-mcp/socket-worker.mjs
+          node --check tools/socket-budget/index.mjs
+          npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.socket.toml --outdir /tmp/atax-socket-dry-run
+          test -n "$(find /tmp/atax-socket-dry-run -type f -name '*.js' -print -quit)"
