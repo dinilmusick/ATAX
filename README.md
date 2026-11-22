@@ -6,7 +6,7 @@ ATAX is a durable substrate for **externally created, transient agents**. One ca
 
 | Mode | Entry point | Durable state |
 | --- | --- | --- |
-| **GitHub connector only** | Agents read this repository and use authorized repository tools or trusted workflows. A real live-ledger bridge needs independently configured Supabase credentials and verification. | Same Supabase ledger; GitHub alone does not grant database access |
+| **GitHub connector only** | Agents read this repository and use authorized repository tools or trusted workflows. Live ledger access uses an authorized runtime or the [private GitHub-only ledger bridge](tools/github-only-ledger-bridge/README.md) with configured secret-bearing Actions; public repo access alone is insufficient. | Same Supabase ledger; GitHub alone does not grant database access |
 | **GitHub + Supabase connectors** | Existing direct ChatGPT/agent workflow: GitHub for code and workflows; Supabase for canonical context and guarded ledger RPCs. | Same Supabase ledger |
 | **ATAX remote MCP** | External AI clients connect to the owner-authenticated Cloudflare Worker at `/mcp`, which calls canonical RPCs and bounded provider tools. | Same Supabase ledger |
 
