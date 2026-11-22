@@ -339,6 +339,25 @@ begin
  return true;
 end $$;
 
+-- Persist a bounded failure category whenever disposable cleanup fails.
+-- The prepared immutable journal remains the terminal-observation evidence.
+-- Keep the execution pending so the scheduled observer can retry cleanup.
+create or replace function public.socket_dispatch_cleanup_failed(
+ p_request_id uuid,p_error_class text
+) returns boolean language plpgsql security invoker set search_path=pg_catalog,public as $$
+declare changed uuid;
+begin
+ if p_error_class is null or p_error_class !~ '^[a-z_]{3,80}$' then
+   raise exception 'invalid cleanup error class';
+ end if;
+ update public.socket_dispatch_requests r set error_class=p_error_class,updated_at=now()
+ where r.id=p_request_id and r.mode='fmrl'
+   and r.status in ('dispatching','accepted','uncertain','running')
+   and exists(select 1 from public.socket_dispatch_cleanup_journal j where j.request_id=r.id)
+ returning r.id into changed;
+ return changed is not null;
+end $$;
+
 -- Called only by the trusted observer after querying the target GitHub Actions
 -- run status. No task-bound agent has database service-role credentials.
 create or replace function public.socket_dispatch_finish_observed(
@@ -355,7 +374,7 @@ begin
    raise exception 'invalid observed terminal receipt';
  end if;
  update public.socket_dispatch_requests set status=case when p_conclusion='success' then 'succeeded' else 'failed' end,
-   run_id=p_run_id,receipt=p_receipt,updated_at=now()
+   run_id=p_run_id,receipt=p_receipt,error_class=null,updated_at=now()
  where id=p_request_id and status in ('dispatching','accepted','uncertain','running')
    and (mode<>'fmrl' or
      (p_receipt->>'cleanup'='independent_404'
@@ -371,6 +390,7 @@ revoke all on function public.socket_dispatch_submit(uuid,text,text,uuid,uuid,te
 revoke all on function public.socket_dispatch_begin(uuid,uuid,text,text) from public,anon,authenticated;
 revoke all on function public.socket_dispatch_delivery_result(uuid,text,text) from public,anon,authenticated;
 revoke all on function public.socket_dispatch_prepare_cleanup(uuid,text,text,jsonb) from public,anon,authenticated;
+revoke all on function public.socket_dispatch_cleanup_failed(uuid,text) from public,anon,authenticated;
 revoke all on function public.socket_dispatch_finish_observed(uuid,text,text,jsonb) from public,anon,authenticated;
 revoke all on function public.socket_dispatch_immutability() from public,anon,authenticated;
 revoke all on function public.socket_dispatch_enqueue() from public,anon,authenticated;
@@ -379,6 +399,7 @@ grant execute on function public.socket_dispatch_submit(uuid,text,text,uuid,uuid
 grant execute on function public.socket_dispatch_begin(uuid,uuid,text,text) to service_role;
 grant execute on function public.socket_dispatch_delivery_result(uuid,text,text) to service_role;
 grant execute on function public.socket_dispatch_prepare_cleanup(uuid,text,text,jsonb) to service_role;
+grant execute on function public.socket_dispatch_cleanup_failed(uuid,text) to service_role;
 grant execute on function public.socket_dispatch_finish_observed(uuid,text,text,jsonb) to service_role;
 
 -- pg_cron may be absent from isolated/local Supabase stacks. Register the
