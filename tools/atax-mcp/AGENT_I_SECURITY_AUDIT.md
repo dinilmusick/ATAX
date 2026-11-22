@@ -18,7 +18,7 @@
 - Source commit `98e891f3dcdede80cf5d3c66914764ec8a563f99` had successful `ATAX MCP gateway tests` workflow run `45048305967`. This certifies neither the corrective branch nor host isolation.
 - Canonical Supabase PostgreSQL `pg_proc` inspection: `public.atax_socket_execute_v1` does not exist. Missing transaction must deny tool requests, not silently fall back.
 - Cloudflare account that hosts the existing `atax-mcp` maintainer Worker: account Worker inventory contains `atax-mcp` but no `atax-task-socket` Worker. The restricted Worker has not been proven deployed or run live.
-- Local container Node version 22.16.0 is suitable, but this environment cannot resolve github.com to clone the private repository. The corrective PR must be executed in an authorized CI runner; historical source CI is **not** a replacement for that result.
+- Local container Node version 22.16.0 is suitable, but this environment cannot resolve github.com to clone the private repository. The corrective PR **did** execute in an authorized GitHub Actions runner: run `45051805173`, success at `368353eb8f6cc51e7640422a1976a5bc99e42ed8`, 54 passing Node tests, 0 failures, packaging dry run and existing maintainer-Worker fail-closed probe. This is scoped test evidence, not production restricted-host evidence.
 
 ## Mandatory host attestation before certification
 1. Obtain the agent host's **enforced** tool/connector/extension configuration from its control plane, not from the agent's prompt or self-report.
@@ -34,4 +34,4 @@
 - **Dedicated API/agent hosts allowing externally enforced tool inventories and sandbox isolation:** eligible only after an inventory/negative-run attestation demonstrates exclusive socket capabilities.
 
 ## Release decision
-**NOT CERTIFIED.** The corrective branch addresses independently identified ingress/metering defects but full acceptance is blocked on the canonical RPC, restricted Worker deployment, exact-head corrective CI and enforceable host-side isolation. Existing maintainer access remains independent and unchanged. Submit to an agent other than the implementation author or Agent I for independent release review.
+**NOT CERTIFIED.** The corrective branch addresses independently identified ingress/metering defects, and scoped corrective CI passed. Full acceptance remains blocked on the canonical RPC, restricted Worker deployment, live end-to-end negative tests and enforceable host-side isolation. Existing maintainer access remains independent and unchanged. Submit to an agent other than the implementation author or Agent I for independent release review.
