@@ -69,11 +69,13 @@
       "publishedContext": "400,000-token context window",
       "publishedOutput": "128,000 maximum output tokens",
       "contextPrecision": "exact-provider-context-limit",
-      "freeTierEvidence": "API free quota NOT established; ChatGPT Free plan limits are not published model API limits",
+      "freeTierEvidence": "OpenAI API model limits: Free tier Not supported (2026-11-22); ChatGPT Free consumer access is separate",
       "source": "https://developers.openai.com/api/docs/models/gpt-5.4-nano",
       "tierSource": null,
       "reliableCeilingTokens": null,
-      "calibrationStatus": "unmeasured"
+      "calibrationStatus": "unmeasured",
+      "lifecycle": "Deprecated as of 2026-11-22; announced API shutdown 2027-04-01",
+      "lifecycleSource": "https://developers.openai.com/api/docs/deprecations"
     },
     {
       "key": "grok-4.7:xai-api",
