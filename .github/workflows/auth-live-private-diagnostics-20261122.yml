@@ -34,8 +34,8 @@ jobs:
           for repository in Aiko Srkl-Engine; do
             mkdir -p "/tmp/auth-${repository}"
             git -c credential.helper= clone --quiet --no-checkout               "https://github.com/dinilmusick/${repository}.git" "/tmp/auth-${repository}/repo" >/dev/null 2>&1
-            if [ "$repository" = Aiko ]; then exact="4bb3bba2fe917acb241bbd775a8d1af903ce1edd";
-            else exact="e649bcd4c70b14de24cd5a1a14e08b5fc4157ebb"; fi
+            if [ "$repository" = Aiko ]; then exact="7108680a92ec8e369b51d96a7dc42fe51846b984";
+            else exact="55de473b29eabffa2ead83e69c08a6b5ebf60598"; fi
             git -C "/tmp/auth-${repository}/repo" checkout --quiet --detach "$exact" >/dev/null 2>&1
             test "$(git -C "/tmp/auth-${repository}/repo" rev-parse HEAD)" = "$exact"
             echo "PRIVATE_CHECKOUT_VERIFIED=${repository}"
@@ -66,7 +66,7 @@ jobs:
           test -n "$GH_TOKEN"
           python3 - <<'PY'
           import json,re,pathlib
-          for repo,pr in [('Aiko',106),('Srkl-Engine',61)]:
+          for repo,pr in [('Aiko',107),('Srkl-Engine',62)]:
             root=pathlib.Path('/tmp/auth-'+repo)
             content=(root/'test.log').read_text(errors='replace')
             status=int((root/'status').read_text().strip())
@@ -98,7 +98,7 @@ jobs:
             pathlib.Path('/tmp/auth-'+repo+'/body.json').write_text(json.dumps({'body':body}))
           PY
           for repository in Aiko Srkl-Engine; do
-            if [ "$repository" = Aiko ]; then pr=106; else pr=61; fi
+            if [ "$repository" = Aiko ]; then pr=107; else pr=62; fi
             gh api -X POST "repos/dinilmusick/${repository}/issues/${pr}/comments"               --input "/tmp/auth-${repository}/body.json" >/dev/null
             echo "PRIVATE_DIAGNOSTIC_COMMENT_POSTED=${repository}"
           done
