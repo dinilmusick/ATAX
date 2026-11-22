@@ -62,6 +62,12 @@ BEGIN
         AND p.proname=patch.function_name
         AND p.pronargs=patch.arity::integer;
     IF target_oid IS NULL THEN
+      -- task_ledger_revise_definition was introduced to the live database by
+      -- a later substrate path not present in the original clean migration
+      -- baseline. Where absent, there is no callable revision bypass.
+      -- Guard the function when it actually exists, never fabricate it here.
+      IF patch.function_name='task_ledger_revise_definition'
+         AND patch.arity::integer=8 THEN CONTINUE; END IF;
       RAISE EXCEPTION 'Socket-fence migration: missing function % / % arguments',
         patch.function_name,patch.arity;
     END IF;
