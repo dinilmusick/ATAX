@@ -107,8 +107,10 @@ class ExecutionRequest:
             raise ContractError("invalid workflow filename")
         if r.mode == "target" and r.runner_repository != r.target_repository:
             raise ContractError("target runner mismatch")
-        if r.mode == "fmrl" and r.runner_repository == r.target_repository:
-            raise ContractError("FMRL runner must be separate from target")
+        if r.mode == "fmrl":
+            expected = r.target_repository.split("/")[0] + "/FMRL-" + r.correlation_id.replace("-", "")[:20]
+            if r.runner_repository != expected:
+                raise ContractError("FMRL runner identity must be correlation-bound and canonical")
         if not isinstance(r.input_payload, dict) or not isinstance(r.expected_output, dict):
             raise ContractError("payload and expected output must be objects")
         canonical(r.input_payload, MAX_INPUT_BYTES)
