@@ -162,7 +162,7 @@ jobs:
               # The static committed workflow and one-shot marker contain no private metadata.
               echo "FMRL workflow_dispatch denied (HTTP 403); using one-shot Contents:write push trigger." >> "$GITHUB_STEP_SUMMARY"
               registered=0
-              for ready in $(seq 1 12); do
+              for ready in $(seq 1 45); do
                 if curl -fsS --connect-timeout 10 --max-time 20 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$BRIDGE/actions/workflows/atax-private-ci.yml" >/dev/null 2>&1; then
                   registered=1
                   break
