@@ -1,15 +1,18 @@
-# Personal ATAX MCP — one owner, two access paths
+# Personal ATAX MCP — one owner, three substrate connection modes
 
-This document defines the owner-approved **single-user** ATAX MCP deployment. Do **not** resurrect multi-user BYOC enrollment, D1 credential vaults, per-tenant Supabase ledgers, or provider credentials passed in MCP tool arguments.
+ATAX supports three ways for externally created agents to reach **one** canonical Supabase ledger: **GitHub connector only** (using an authorized, credential-bearing tool/Actions bridge for live ledger operations), **GitHub plus Supabase connectors** (the existing direct path), and **the remote ATAX MCP Worker**. Full coverage and verification differ by transport; the [connection-mode contract](../../docs/connection-modes.md) documents exact boundaries and acceptance gaps.
 
-## Both supported entry points
+This document configures **only the third mode**, the single-owner remote MCP Worker. Do **not** resurrect multi-user BYOC enrollment, D1 credential vaults, per-tenant Supabase ledgers, or provider credentials passed in MCP tool arguments.
 
-| Entry point | Authentication and credentials | Canonical state |
+## All three entry points
+
+| Entry path | Authentication and credentials | Canonical state |
 | --- | --- | --- |
-| Direct ChatGPT/agent access | Existing **GitHub connector + Supabase connector**, using those connectors' own account authorization. GitHub-native tools, repository workflows and Supabase calls continue working without the MCP Worker. | The existing single ATAX Supabase ledger |
-| Remote MCP access (Claude, Gemini and compatible clients) | Client authenticates **to the MCP resource**; the Worker admits only the configured owner identity, and consumes owner-managed **Cloudflare Worker secret bindings** for GitHub/Cloudflare/Supabase. | **The same** ATAX Supabase ledger and governed RPC contracts |
+| **GitHub connector only** | Repository-level GitHub connection; trusted GitHub Actions secrets or a separately authorized runtime powers live Supabase RPC calls. A plain GitHub connector **cannot** read database secrets or live state automatically. | One ATAX Supabase ledger; GitHub-only live task bridge parity remains to be certified |
+| **GitHub + Supabase connectors** | Existing ChatGPT/agent direct GitHub and Supabase tools, each using its own granted account authorization. No MCP dependency. | The **same** ATAX Supabase ledger |
+| **Remote MCP** | Client authenticates to the MCP resource; the Worker admits only the configured owner and consumes owner-managed **Cloudflare Worker secrets** for GitHub/Cloudflare/Supabase. | The **same** ATAX Supabase ledger and guarded RPCs |
 
-Do not make the direct connector path depend on MCP uptime, Worker credentials, Cloudflare deployment, or Worker code. Both paths preserve the same ATAX rules: substrate supplies state to externally created transient agents; ATAX never spawns or schedules agents; task claim, evidence, independent verification and FMRL deletion remain enforced. Tool-surface parity is an acceptance target, not a current fact: the Worker has bounded GitHub tools and Cloudflare *read-only* diagnostics, whereas direct connectors may offer additional operations.
+Do not make either direct connector path depend on MCP uptime, Cloudflare deployment, Worker credentials or Worker code. All three must use the canonical task-socket claim, fencing, checkpoint and independent verification contracts; no vendor-specific agent identity or resident orchestration. The Worker currently exposes bounded GitHub operations and Cloudflare read-only diagnostics; full three-mode tool parity is an **acceptance target**, not current fact.
 
 ## Task sockets: substrate invariant
 
