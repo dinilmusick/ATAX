@@ -8,9 +8,9 @@ const issuer = 'https://luth.example/api/auth';
 const keyPair = await webcrypto.subtle.generateKey({name:'Ed25519'},true,['sign','verify']);
 const pub = await webcrypto.subtle.exportKey('jwk',keyPair.publicKey);
 pub.kid='luth-ed25519-key'; pub.alg='EdDSA';
-const fetcher = async url => {
+const fetcher = async (url,options={}) => {
   if (url === 'https://luth.example/api/auth/jwks')return Response.json({keys:[pub]});
-  if (String(url).includes('/rpc/'))return Response.json({ok:true});
+  if (String(url).includes('/rpc/'))return Response.json({ok:true,params:JSON.parse(options.body||'{}')});
   throw Error('Unexpected upstream request');
 };
 const handler=createHandler(fetcher);
@@ -81,4 +81,21 @@ test('independent verification cannot be conferred by read/write owner OAuth pol
   const names=(await res.json()).result.tools.map(x=>x.name);
   assert.ok(!names.includes('atax_verification_submit'));
   assert.ok(!names.includes('atax_verification_claim'));
+});
+
+test('same owner in different OAuth apps receives distinct durable agent identities',async()=>{
+  const args={jsonrpc:'2.0',id:101,method:'tools/call',params:{name:'atax_task_claim_next',arguments:{capabilities:['backend'],lease_seconds:300}}};
+  const request=async(token)=>handler(new Request(resource,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(args)}),config);
+  const gemini=await (await request(await jwt({azp:'gemini-client-registered'}))).json();
+  const claude=await (await request(await jwt({azp:'claude-client-registered'}))).json();
+  const again=await (await request(await jwt({azp:'gemini-client-registered'}))).json();
+  const first=gemini.result.structuredContent.result.params.agent_id_in;
+  const second=claude.result.structuredContent.result.params.agent_id_in;
+  assert.match(first,/^mcp-[a-f0-9]{32}$/);
+  assert.match(second,/^mcp-[a-f0-9]{32}$/);
+  assert.notEqual(first,second);
+  assert.equal(first,again.result.structuredContent.result.params.agent_id_in);
+  assert.ok(!first.includes('owner-1')&&!first.includes('gemini-client'));
+  const outsider=await (await request(await jwt({sub:'someone-else'}))).json();
+  assert.equal(outsider.result.isError,true);
 });
