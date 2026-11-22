@@ -10,6 +10,7 @@ DECLARE
   target_oid oid;
   before_sql text;
   after_sql text;
+  candidate_old text;
 BEGIN
   FOR patch IN SELECT * FROM (VALUES
     ('task_ledger_claim_next','5','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
@@ -67,7 +68,17 @@ BEGIN
     before_sql:=pg_get_functiondef(target_oid);
     -- Safe if this reviewed migration is replayed via both direct Supabase and CLI.
     IF strpos(before_sql,patch.new_fragment)>0 THEN CONTINUE; END IF;
-    IF strpos(before_sql,patch.old_fragment)=0 THEN
+    candidate_old := patch.old_fragment;
+    -- Clean migrations historically used a 3,600-second five-argument heartbeat
+    -- while the live schema has a 30-second bound. Both exact legacy definitions
+    -- are deliberately recognized; unexpected definitions remain fail-closed.
+    IF patch.function_name='task_ledger_heartbeat_claim' AND patch.arity='5'
+       AND patch.old_fragment='greatest(30,least(coalesce(lease_seconds_in,900),86400))'
+       AND strpos(before_sql,candidate_old)=0
+       AND strpos(before_sql,'greatest(3600,least(coalesce(lease_seconds_in,3600),86400))')>0 THEN
+       candidate_old := 'greatest(3600,least(coalesce(lease_seconds_in,3600),86400))';
+    END IF;
+    IF strpos(before_sql,candidate_old)=0 THEN
       -- Some installations retain the earlier five-argument heartbeat body,
       -- while the canonical isolated rebuild starts from its older migration.
       -- Both variants are explicitly recognized; unknown drift still aborts.
@@ -79,11 +90,11 @@ BEGIN
       RAISE EXCEPTION 'Socket-fence migration drift: % / % fragment not found',
         patch.function_name,patch.arity;
     END IF;
-    IF length(before_sql)-length(replace(before_sql,patch.old_fragment,''))<>length(patch.old_fragment) THEN
+    IF length(before_sql)-length(replace(before_sql,candidate_old,''))<>length(candidate_old) THEN
       RAISE EXCEPTION 'Socket-fence migration ambiguous target: % / %',
         patch.function_name,patch.arity;
     END IF;
-    after_sql:=replace(before_sql,patch.old_fragment,patch.new_fragment);
+    after_sql:=replace(before_sql,candidate_old,patch.new_fragment);
     EXECUTE after_sql;
   END LOOP;
 END;
