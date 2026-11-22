@@ -365,8 +365,12 @@ jobs:
             test -f target/package.json
             (cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
                pnpm install --frozen-lockfile --ignore-scripts) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
-          elif [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine ]]; then
-            test -f target/package-lock.json
+          elif [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine || "$TARGET_REPOSITORY" == dinilmusick/Embr ]]; then
+            # Embr bootstraps its first lockfile in this isolated runner.
+            test -f target/package.json
+            if [[ "$TARGET_REPOSITORY" != dinilmusick/Embr ]]; then
+              test -f target/package-lock.json
+            fi
             (cd target && npm install --package-lock-only --ignore-scripts --no-audit --no-fund &&
                npm ci --ignore-scripts --no-audit --no-fund) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
           else
@@ -477,8 +481,8 @@ def main() -> int:
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
     if args.mode == "repair":
-        if args.source not in ("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine", "dinilmusick/Frnes"):
-            raise SystemExit("Repair target must be an allowlisted private authentication repository.")
+        if args.source not in ("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine", "dinilmusick/Frnes", "dinilmusick/Embr"):
+            raise SystemExit("Repair target must be an allowlisted private repository.")
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
 

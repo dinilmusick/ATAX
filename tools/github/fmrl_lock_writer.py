@@ -20,6 +20,7 @@ ALLOWED = {
     "dinilmusick/Aiko": "package-lock.json",
     "dinilmusick/Srkl-Engine": "package-lock.json",
     "dinilmusick/Frnes": "pnpm-lock.yaml",
+    "dinilmusick/Embr": "package-lock.json",
 }
 ROOT = Path("target")
 API = "https://api.github.com"
