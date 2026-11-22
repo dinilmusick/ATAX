@@ -42,15 +42,16 @@ BEGIN
 
   -- If the prior token is still on the expired row, the holder can record
   -- its note before a replacement has claimed the socket.
-  recognized_prior_lease :=
+  recognized_prior_lease := COALESCE(
     task_out.claimed_by_agent_id=previous_agent_id_in
     AND task_out.claim_token=previous_claim_token_in
-    AND task_out.claim_expires_at<=statement_timestamp();
+    AND task_out.claim_expires_at<=statement_timestamp(), false
+  );
 
   -- If a replacement has already claimed it, validate the exact prior
   -- token/holder pair against the immutable recovery event. Do not trust
   -- a caller-supplied agent name, unverified token or client/application name.
-  IF NOT recognized_prior_lease THEN
+  IF recognized_prior_lease IS NOT TRUE THEN
     SELECT EXISTS (
       SELECT 1 FROM public.task_events e
       WHERE e.task_id=task_id_in
@@ -59,7 +60,7 @@ BEGIN
         AND e.payload->>'previous_claim_token'=previous_claim_token_in::text
     ) INTO recognized_prior_lease;
   END IF;
-  IF NOT recognized_prior_lease THEN
+  IF recognized_prior_lease IS NOT TRUE THEN
     RAISE EXCEPTION 'Unrecognized or still-owned former socket claim';
   END IF;
 
