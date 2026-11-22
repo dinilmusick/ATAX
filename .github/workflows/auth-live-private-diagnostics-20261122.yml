@@ -1,0 +1,101 @@
+name: Isolated private auth regression diagnostics
+on:
+  push:
+    paths: [.github/workflows/auth-live-private-diagnostics-20261122.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/ops/auth-live-private-diagnostics-20261122'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Clone approved exact private revisions without logging source
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_REPO_TOKEN"
+          helper="$(mktemp)"
+          cat > "$helper" <<'ASKPASS'
+          #!/bin/bash
+          case "$1" in
+            *Username*) printf '%s' 'x-access-token' ;;
+            *Password*) printf '%s' "$PRIVATE_REPO_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS
+          chmod 700 "$helper"
+          export GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0
+          for repository in Aiko Srkl-Engine; do
+            mkdir -p "/tmp/auth-${repository}"
+            git -c credential.helper= clone --quiet --no-checkout               "https://github.com/dinilmusick/${repository}.git" "/tmp/auth-${repository}/repo" >/dev/null 2>&1
+            if [ "$repository" = Aiko ]; then exact="d4989ed3fbae402b683abf2777ec6ac8e7c89bbd";
+            else exact="7f541bcaee3f495df67d29da57b36d0259fa6c03"; fi
+            git -C "/tmp/auth-${repository}/repo" checkout --quiet --detach "$exact" >/dev/null 2>&1
+            test "$(git -C "/tmp/auth-${repository}/repo" rev-parse HEAD)" = "$exact"
+            echo "PRIVATE_CHECKOUT_VERIFIED=${repository}"
+          done
+          rm -f "$helper"
+      - name: Run private test suites without exposing raw logs or secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repository in Aiko Srkl-Engine; do
+            cd "/tmp/auth-${repository}/repo"
+            npm ci --ignore-scripts --no-audit --no-fund >/tmp/auth-${repository}/npm.log 2>&1
+            if [ "$repository" = Aiko ]; then command=(npm run test:integration); 
+            else command=(npm run test:architecture); fi
+            set +e
+            "${command[@]}" >/tmp/auth-${repository}/test.log 2>&1
+            code="$?"
+            set -e
+            echo "$code" > "/tmp/auth-${repository}/status"
+            echo "PRIVATE_SUITE_STATUS=${repository}:${code}"
+          done
+      - name: Report sanitized failure names only to each private pull request
+        env:
+          GH_TOKEN: ${{ secrets.CODING_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          python3 - <<'PY'
+          import json,re,pathlib
+          for repo,pr in [('Aiko',105),('Srkl-Engine',60)]:
+            root=pathlib.Path('/tmp/auth-'+repo)
+            content=(root/'test.log').read_text(errors='replace')
+            status=int((root/'status').read_text().strip())
+            selected=[]
+            for raw in content.splitlines():
+              line=raw.strip()
+              if re.match(r'(?:not ok \d+|# (?:fail|pass|tests|error|duration_ms)\b|(?:AssertionError|Error|TypeError|ReferenceError|SyntaxError)(?:\s|:|\[)|npm (?:error|ERR!))',line):
+                line=re.sub(r'https?://\S+','[url]',line)
+                line=re.sub(r'[^\s]+@[^\s]+','[email]',line)
+                line=re.sub(r'[0-9a-fA-F]{32,}','[hex-id]',line)
+                line=re.sub(r'/tmp/auth-[A-Za-z-]+/repo','[private-source]',line)
+                line=''.join(c for c in line if c.isprintable())
+                selected.append(line[:220])
+            body=('Private canonical-auth verification on exact merged main.\n'+
+                 'Suite: '+('test:integration' if repo=='Aiko' else 'test:architecture')+
+                 '\nExit code: '+str(status)+'\nFiltered test error identifiers only:\n'+
+                 '\n'.join('- '+s for s in selected[:65])+
+                 '\nRaw private test logs and clone remain on the disposable runner only.')
+            pathlib.Path('/tmp/auth-'+repo+'/body.json').write_text(json.dumps({'body':body}))
+          PY
+          for repository in Aiko Srkl-Engine; do
+            if [ "$repository" = Aiko ]; then pr=105; else pr=60; fi
+            gh api -X POST "repos/dinilmusick/${repository}/issues/${pr}/comments"               --input "/tmp/auth-${repository}/body.json" >/dev/null
+            echo "PRIVATE_DIAGNOSTIC_COMMENT_POSTED=${repository}"
+          done
+      - name: Destroy transient source and test evidence
+        if: always()
+        shell: bash
+        run: |
+          rm -rf /tmp/auth-Aiko /tmp/auth-Srkl-Engine
+          test ! -e /tmp/auth-Aiko && test ! -e /tmp/auth-Srkl-Engine
+          echo "PRIVATE_SOURCE_CLEANUP_VERIFIED"
