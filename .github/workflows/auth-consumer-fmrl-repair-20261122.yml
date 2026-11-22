@@ -15,12 +15,3 @@ jobs:
       branch: release/auth-bff-floks-current-20261122
       mode: repair
     secrets: inherit
-  repair_srkl:
-    if: github.ref == 'refs/heads/ops/auth-consumer-fmrl-repair-20261122' && github.actor == 'dinilmusick'
-    uses: ./.github/workflows/private-repo-ci.yml
-    with:
-      repository: dinilmusick/Srkl-Engine
-      ref: a0dcb5c37c7c3aed61be39f53fb72cd1aec1dfd7
-      branch: release/auth-bff-floks-current-20261122
-      mode: repair
-    secrets: inherit
