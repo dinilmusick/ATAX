@@ -32,7 +32,7 @@ BEGIN
   -- Snapshot under the same row lock used by atomic claims/reclaims, to
   -- prevent a forged handoff during an ownership transition.
   SELECT * INTO task_out FROM public.tasks
-  WHERE id=task_id_in FOR SHARE;
+  WHERE id=task_id_in FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Task socket not found'; END IF;
 
   -- An active occupant must checkpoint normally, not forfeit its socket.
