@@ -1,7 +1,7 @@
 ---
 name: "Task Ledger"
 slug: task-ledger
-version: 2.8.0
+version: 2.8.2
 source: Supabase Skills Database
 sourceId: 7
 status: active
@@ -95,8 +95,8 @@ Running task ownership is a short heartbeat lease.
 
 - Workers checkpoint and heartbeat every ~2 minutes while active.
 - Workers independently check ownership about every 5 minutes.
-- A running task is eligible for reassignment only when its last heartbeat is at least 5 minutes old.
-- Lease expiry alone never permits reassignment; heartbeat freshness is the recovery gate.
+- A running task is eligible for recovery only when **both** its last heartbeat is at least 5 minutes old **and** its canonical lease has expired. A stale heartbeat never overrides a still-valid lease.
+- Lease expiry alone is not an automatic takeover: a fresh heartbeat continues to block opportunistic reassignment. Both signals must be checked under the canonical atomic claim RPC.
 - `claim_token` is the fencing token. Recovery rotates it, increments attempts, assigns the new worker/session and appends a `lease_recovered` event containing the previous worker and last heartbeat checkpoint.
 - Heartbeats persist `current_step` plus a JSON checkpoint containing activity, progress, discoveries, blockers and next action.
 - A worker that detects fencing loss must stop. It may append a `handoff` event with its final note, but it must not overwrite canonical task ownership/progress.
@@ -116,13 +116,16 @@ Running task ownership is a short heartbeat lease.
 
 The orchestrator records goal-level iterations as tasks progress. A new worker chat must reconstruct state from Supabase, not rely on the original conversation.
 
-## GitHub compute workspace
+## Connection modes and compute boundary
 
-Use `.github/workflows/agent-compute.yml` for finite code execution when a real computation, parser, simulation, test or generated artifact is needed. It supports Python, Node.js, TypeScript, Bash, Go, Rust, Java, C, C++, C#, Ruby, PHP, Perl, R and PowerShell on an ephemeral GitHub-hosted Ubuntu runner.
+Three authorized paths reach the *same* canonical Supabase substrate:
+- GitHub connector only: read ATAX's public instructions, use a secret-bearing trusted agent runtime **or** the private GitHub Actions ledger controller documented at `tools/github-only-ledger-bridge/README.md`. A bare GitHub connector cannot read Supabase secrets or safely publish private ledger results in public Issues. An external private controller with granted access is required for the issue-bridge workflow.
+- GitHub plus Supabase connectors: operate GitHub directly and hydrate/claim/verify using the Supabase connector's guarded RPCs. It does not depend on MCP.
+- ATAX remote MCP: owner-authenticated Cloudflare Worker calls the same Supabase RPCs, with separately configured Worker secrets. MCP is an alternative transport, not a resident agent.
 
-Provide the repository `ref`, source file, runtime, JSON string arguments and timeout (maximum 1,200 seconds). The result is uploaded as an artifact. The workflow uses read-only repository permission, checkout credentials are not persisted, and no application secrets are passed to the executed process. It is finite compute, not a persistent machine or a ChatGPT worker.
+**Socket law:** queued -> atomic exclusive claim with unexpired fencing token -> execution externally -> evidence submitted -> independently verified -> finalized. A task cannot be reclaimed before its valid lease expires. Expired holders cannot renew, release, submit or append iterations with obsolete fences. Opaque agent identifiers are claim holders only, never AI-vendor identity or a scheduler.
 
-To invoke compute from a ChatGPT conversation without a workflow-dispatch tool, create a GitHub issue with title prefixed `[agent-compute]` and a JSON body containing `ref`, `runtime`, `source_file`, `arguments` (string array) and `timeout_seconds`. The issue trigger accepts only repository owners, members and collaborators. Use the returned issue number to track the request and inspect its Actions run/artifact. Alternatively use workflow_dispatch from the Actions UI. Never claim execution occurred without a real run. Do not put credentials in source files.
+For target application work, run locally in the arriving agent's own container first. When authorized remote GitHub compute is required for private target source, use a disposable FMRL public bridge; never execute target code in ATAX's own Actions runner. Delete FMRL and verify 404. Do not use the retired `agent-compute` issue-triggered ATAX runner.
 
 ## Completion invariant
 
