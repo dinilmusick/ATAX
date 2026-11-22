@@ -45,6 +45,13 @@ jobs:
           if [ "$code" != "503" ] && [ "$code" != "401" ]; then
             echo "Expected auth/config failure, got HTTP $code" >&2; cat /tmp/atax-mcp-unauth.json >&2; exit 1
           fi
+      - name: Independent Socket V1 standalone conformance (synthetic; not live certification)
+        run: |
+          set -euo pipefail
+          node --test tests/task-socket-conformance/*.test.mjs tools/socket-budget/index.test.mjs
+          node tests/task-socket-conformance/calibration-cli.mjs > /tmp/atax-socket-calibration.json
+          node -e "const a=require('/tmp/atax-socket-calibration.json'); if (!a.rows?.length || a.rows.some(r=>r.status!=='NOT_CALIBRATED')) process.exit(1)"
+
       - name: Cloudflare Worker packaging dry-run
         run: npx --yes wrangler@4 deploy --dry-run --config tools/atax-mcp/wrangler.toml --outdir /tmp/atax-mcp-dry-run
 
