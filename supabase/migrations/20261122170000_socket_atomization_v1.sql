@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS public.socket_invocations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   secret uuid NOT NULL DEFAULT gen_random_uuid(),
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   agent_id text NOT NULL CHECK (length(btrim(agent_id)) > 0),
   session_id text NOT NULL UNIQUE CHECK (length(btrim(session_id)) > 0),
   authenticated_subject text NOT NULL CHECK (length(btrim(authenticated_subject)) > 0),
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.socket_task_budgets (
 CREATE TABLE IF NOT EXISTS public.socket_usage_events (
   task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
   event_key uuid NOT NULL,
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   invocation_id uuid NOT NULL REFERENCES public.socket_invocations(id),
   claim_token uuid NOT NULL,
   direction text NOT NULL CHECK (direction IN ('input','output')),
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.socket_usage_events (
 );
 CREATE TABLE IF NOT EXISTS public.socket_overflow_reports (
   task_id uuid PRIMARY KEY REFERENCES public.tasks(id),
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   reported_by uuid NOT NULL REFERENCES public.socket_invocations(id),
   claim_token uuid NOT NULL,
   reason text NOT NULL CHECK (reason IN ('budget','scope')),
@@ -47,6 +50,7 @@ CREATE TABLE IF NOT EXISTS public.socket_overflow_reports (
 );
 CREATE TABLE IF NOT EXISTS public.socket_atomizations (
   parent_task_id uuid PRIMARY KEY REFERENCES public.tasks(id),
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   split_key text NOT NULL CHECK (length(btrim(split_key)) > 0),
   authored_by_invocation uuid NOT NULL REFERENCES public.socket_invocations(id),
   authored_by_agent text NOT NULL,
@@ -58,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.socket_atomizations (
 CREATE TABLE IF NOT EXISTS public.socket_atomization_children (
   child_task_id uuid PRIMARY KEY REFERENCES public.tasks(id),
   parent_task_id uuid NOT NULL REFERENCES public.socket_atomizations(parent_task_id),
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   ordinal integer NOT NULL CHECK (ordinal > 0),
   independent_outcome text NOT NULL CHECK (length(btrim(independent_outcome)) > 0),
   UNIQUE (parent_task_id,ordinal)
@@ -66,6 +71,7 @@ CREATE TABLE IF NOT EXISTS public.socket_atomization_edges (
   target_task_id uuid NOT NULL REFERENCES public.socket_atomization_children(child_task_id),
   source_task_id uuid NOT NULL REFERENCES public.socket_atomization_children(child_task_id),
   dependency_type text NOT NULL CHECK (dependency_type IN ('blocking','advisory')),
+  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
   source_output text NOT NULL CHECK (length(btrim(source_output)) > 0),
   target_input text NOT NULL CHECK (length(btrim(target_input)) > 0),
   PRIMARY KEY (target_task_id,source_task_id,target_input),
@@ -155,6 +161,7 @@ BEGIN
   END IF;
   IF v_task.status<>'running' OR v_task.claim_token IS DISTINCT FROM fence_in
      OR v_task.claimed_by_agent_id IS DISTINCT FROM v_inv.agent_id
+     OR v_task.claimed_session_id IS DISTINCT FROM v_inv.session_id
      OR v_task.claim_expires_at<=statement_timestamp() THEN
     RAISE EXCEPTION 'Stale or foreign socket lease';
   END IF;
@@ -206,6 +213,7 @@ BEGIN
   SELECT * INTO v_task FROM public.tasks WHERE id=task_in FOR UPDATE;
   IF v_task.status<>'running' OR v_task.claim_token IS DISTINCT FROM fence_in
     OR v_task.claimed_by_agent_id IS DISTINCT FROM v_inv.agent_id
+    OR v_task.claimed_session_id IS DISTINCT FROM v_inv.session_id
     OR v_task.claim_expires_at<=statement_timestamp() THEN
     RAISE EXCEPTION 'Stale or foreign socket lease';
   END IF;
@@ -266,6 +274,7 @@ BEGIN
   IF v_parent.status='running' THEN
     IF v_parent.claim_token IS DISTINCT FROM fence_in
        OR v_parent.claimed_by_agent_id IS DISTINCT FROM v_inv.agent_id
+       OR v_parent.claimed_session_id IS DISTINCT FROM v_inv.session_id
        OR v_parent.claim_expires_at<=statement_timestamp() THEN
       RAISE EXCEPTION 'Stale or foreign split fence';
     END IF;
