@@ -29,7 +29,7 @@ BEGIN
     ('task_ledger_heartbeat_claim','6','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
     ('task_ledger_release_claim','5','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
     ('task_ledger_submit_result','8','status=''running'' for update','status=''running'' and claim_expires_at>statement_timestamp() for update'),
-    ('task_ledger_finalize_loop_script','7','status=''running'' and task_role=''loop_authoring''','status=''running'' and claim_expires_at>statement_timestamp() and task_role=''loop_authoring'''),
+    ('task_ledger_finalize_loop_script','7','and task_role=''loop_authoring''','and claim_expires_at>statement_timestamp() and task_role=''loop_authoring'''),
     ('task_ledger_record_iteration','11','AND claim_token=claim_token_in AND status=''running'') THEN','AND claim_token=claim_token_in AND status=''running'' AND claim_expires_at>statement_timestamp() FOR UPDATE) THEN'),
     ('task_ledger_update','10','where id=task_id_in and agent_id=agent_id_in returning','where id=task_id_in and agent_id=agent_id_in and claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp()) and status_in is distinct from ''running'' and status_in is distinct from ''completed'' returning'),
     ('task_ledger_heartbeat','5','and status in (''running'',''blocked'',''waiting'') returning','and status in (''running'',''blocked'',''waiting'') and claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp()) returning'),
