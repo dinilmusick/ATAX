@@ -13,6 +13,23 @@ const WORKFLOW_TYPES = Object.freeze({
   boolean: value => typeof value==='boolean'
 });
 const bytes = value => encoder.encode(value).length;
+// Reject oversized streams before holding the entire untrusted body in memory.
+export async function readBoundedText(message,limit){
+  if(!message.body)return '';
+  const reader=message.body.getReader(),chunks=[];let total=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      total+=value.byteLength;
+      if(total>limit){await reader.cancel();return null;}
+      chunks.push(value);
+    }
+    const combined=new Uint8Array(total);let offset=0;
+    for(const chunk of chunks){combined.set(chunk,offset);offset+=chunk.byteLength;}
+    return new TextDecoder('utf-8',{fatal:true}).decode(combined);
+  }finally{reader.releaseLock();}
+}
 
 const BASE = {
   task_id: {type:'string', description:'Canonical task UUID'},
@@ -120,14 +137,22 @@ export function createSocketGateway(deps){
     if(!principal||typeof principal.id!=='string'||!principal.id||
       typeof principal.sessionId!=='string'||!principal.sessionId||
       !validId(principal.taskId)||!validId(principal.claimToken))return json({error:'Unauthorized'},401);
-    let raw,msg;
-    try{raw=await request.text();if(bytes(raw)>MAX_REQUEST)return json({error:'Request too large'},413);
-      msg=JSON.parse(raw);}catch{return json(errorReply(null,'INVALID_ARGUMENTS'),400);}
+    let raw,msg,invalidJson=false;
+    try{
+      raw=await readBoundedText(request,MAX_REQUEST);
+      if(raw===null)return json({error:'Request too large'},413);
+      msg=JSON.parse(raw);
+    }catch{
+      if(typeof raw!=='string')return json(errorReply(null,'INVALID_ARGUMENTS'),400);
+      invalidJson=true;
+      msg={method:'invalid-json'};
+    }
     const isNotification=isObject(msg)&&msg.jsonrpc==='2.0'&&msg.method==='notifications/initialized'&&msg.id===undefined;
-    if(!isNotification&&(!isObject(msg)||msg.jsonrpc!=='2.0'||
-      (typeof msg.id!=='number'&&typeof msg.id!=='string')||
-      typeof msg.method!=='string'))return json(errorReply(null,'INVALID_ARGUMENTS'),400);
-    const id=isNotification?null:msg.id;
+    const validIdField=isObject(msg)&&(typeof msg.id==='string'&&msg.id.length<=128||
+      typeof msg.id==='number'&&Number.isSafeInteger(msg.id));
+    const validFrame=isObject(msg)&&msg.jsonrpc==='2.0'&&validIdField&&
+      typeof msg.method==='string'&&msg.method.length<=128;
+    const id=isNotification?null:(validFrame?msg.id:null);
     // Every authenticated protocol message, not just tool calls, requires a live
     // canonical claim and durable cumulative input/output metering. The DB MUST
     // check the task, principal, session, fence, lease and socket:protocol grant.
@@ -144,7 +169,7 @@ export function createSocketGateway(deps){
           operation:'protocol',capability:'socket:protocol',
           principalId:principal.id,sessionId:principal.sessionId,
           taskId:principal.taskId,claimToken:principal.claimToken,
-          payload:{method:msg.method},inboundTokens,replyId:id,
+          payload:{method:typeof msg.method==='string'?msg.method.slice(0,128):'invalid'},inboundTokens,replyId:id,
           maxReplyBytes:MAX_RESPONSE,replyFrame:wire
         });
       }catch{return json(errorReply(id,'FAIL_CLOSED'));}
@@ -158,6 +183,9 @@ export function createSocketGateway(deps){
       return frame===null?
         new Response(null,{status:202,headers:{'cache-control':'no-store'}}):json(frame);
     }
+    // Signed malformed frames are still charged; only transport rejection is free.
+    if(invalidJson||(!isNotification&&!validFrame))
+      return meteredProtocol(errorReply(null,'INVALID_ARGUMENTS'));
     if(isNotification)return meteredProtocol(null);
     if(msg.method==='initialize')return meteredProtocol(okReply(id,{
       protocolVersion:'2025-06-18',capabilities:{tools:{}},
@@ -179,13 +207,13 @@ export function createSocketGateway(deps){
     if(def.operation==='workflow_request'){
       // No dynamic URLs, repositories, branch refs, command strings, or credentials.
       let workflow;
-      try{workflow=deps.githubDispatch.resolveWorkflow(payload.workflow_key);}catch{return json(errorReply(id,'CAPABILITY_REVOKED'));}
+      try{workflow=deps.githubDispatch.resolveWorkflow(payload.workflow_key);}catch{return meteredProtocol(errorReply(id,'CAPABILITY_REVOKED'));}
       if(!workflow||workflow.key!==payload.workflow_key||!isObject(workflow.inputs)||
         Object.entries(payload.inputs).some(([key,value])=>
           !Object.hasOwn(workflow.inputs,key)||
           !Object.hasOwn(WORKFLOW_TYPES,workflow.inputs[key])||
           !WORKFLOW_TYPES[workflow.inputs[key]](value))||
-        bytes(JSON.stringify(payload.inputs))>2048)return json(errorReply(id,'CAPABILITY_REVOKED'));
+        bytes(JSON.stringify(payload.inputs))>2048)return meteredProtocol(errorReply(id,'CAPABILITY_REVOKED'));
     }
     const inboundTokens=tokenCount(deps.meter,raw);
     if(inboundTokens===null)return json(errorReply(id,'FAIL_CLOSED'));
