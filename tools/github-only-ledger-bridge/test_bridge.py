@@ -93,7 +93,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_no_untrusted_protocol_fields(self):
         with self.assertRaises(BRIDGE.BridgeError):
-            self.command("context", {})
+            self.command("context", {"unexpected": "argument"})
         with self.assertRaises(BRIDGE.BridgeError):
             BRIDGE.execute_command({"protocol": "other", "op": "context", "args": {}},
                                    "trusted-agent", FakeDB())
