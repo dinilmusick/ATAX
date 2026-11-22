@@ -38,7 +38,7 @@ This is **exclusive authorized occupancy**, not a claim that only one external A
 | --- | --- | --- |
 | `SUPABASE_URL` | Public configuration | The one canonical ATAX Supabase API origin |
 | `SUPABASE_SECRET_KEY` | **Secret** | Dedicated, server-side Supabase key; never exposed through an MCP response |
-| `MCP_ATAX_OWNER_JWT_SUBJECT` | Operator-supplied configuration | **Exact verified** Luth owner subject, not an email address or a wildcard |
+| `MCP_ATAX_OWNER_JWT_SUBJECT` | Operator-supplied configuration | **Exact verified** owner subject from the configured optional OAuth issuer, not an email address or a wildcard |
 | `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE` | Public configuration | Verify signed OAuth resource tokens |
 | `MCP_AUTH_OWNER_SCOPES` | Public policy | Explicitly enables authorized MCP tools for the one owner |
 
