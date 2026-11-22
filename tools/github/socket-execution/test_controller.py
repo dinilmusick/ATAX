@@ -261,17 +261,14 @@ class TestRelay(unittest.TestCase):
         no=Capture(200)
         with self.assertRaises(RemoteError): Github('protected',no).delete_fmrl(request)
 
-    def test_legacy_fmrl_name_rejected_before_any_repository_mutation(self):
-        class Capture(Http):
-            def __init__(self): self.calls=[]
-            def request(self,method,url,token,payload=None,headers=None):
-                self.calls.append(method)
-                return 204,None
+    def test_legacy_fmrl_name_rejected_at_intake(self):
         legacy='owner/atax-fmrl-'+CORR.replace('-','')[:20]
-        req=ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=legacy))
-        recorder=Capture()
-        with self.assertRaises(RemoteError):
-            Github('protected',recorder).delete_fmrl(req)
-        self.assertEqual(recorder.calls,[])
+        with self.assertRaises(ContractError):
+            ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=legacy))
+
+    def test_unbound_fmrl_runner_rejected_at_intake(self):
+        for runner in ('other/FMRL-'+CORR.replace('-','')[:20], 'owner/FMRL-12345678901234567890'):
+            with self.assertRaises(ContractError):
+                ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=runner))
 
 if __name__=='__main__': unittest.main()
