@@ -85,6 +85,13 @@ BEGIN
     THEN
        candidate_old := E'where id=task_id_in and agent_id=agent_id_in\n  returning';
     END IF;
+    IF patch.function_name='task_ledger_heartbeat'
+       AND patch.arity::integer=5
+       AND strpos(before_sql,candidate_old)=0
+       AND strpos(before_sql,E'and status in (''running'',''blocked'',''waiting'')\n  returning')>0
+    THEN
+       candidate_old := E'and status in (''running'',''blocked'',''waiting'')\n  returning';
+    END IF;
     IF strpos(before_sql,candidate_old)=0 THEN
       -- Some installations retain the earlier five-argument heartbeat body,
       -- while the canonical isolated rebuild starts from its older migration.
