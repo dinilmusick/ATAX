@@ -50,6 +50,8 @@ BEGIN
         patch.function_name,patch.arity;
     END IF;
     before_sql:=pg_get_functiondef(target_oid);
+    -- Safe if this reviewed migration is replayed via both direct Supabase and CLI.
+    IF strpos(before_sql,patch.new_fragment)>0 THEN CONTINUE; END IF;
     IF strpos(before_sql,patch.old_fragment)=0 THEN
       RAISE EXCEPTION 'Socket-fence migration drift: % / % fragment not found',
         patch.function_name,patch.arity;
