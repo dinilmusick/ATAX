@@ -1,0 +1,52 @@
+name: Owner-authorized ULTRST live login browser verification
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    if: >-
+      github.event.issue.user.id == 155351357 &&
+      github.event.issue.title == '[atax-auth] live-ui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout ATAX browser test (no private target source)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Playwright browser with no application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/atax-auth-ui
+          npm install --prefix /tmp/atax-auth-ui --no-audit --no-fund --ignore-scripts --save-exact playwright@1.57.0
+          /tmp/atax-auth-ui/node_modules/.bin/playwright install --with-deps chromium
+          cp tools/github/verify_live_auth_ui.mjs /tmp/atax-auth-ui/verify.mjs
+      - name: Verify actual public Aiko, SRKL and Luth UI in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          node /tmp/atax-auth-ui/verify.mjs
+      - name: Publish only bounded non-secret browser result
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          if test -f /tmp/atax-auth-ui-evidence.txt; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/atax-auth-ui-evidence.txt
+          else
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body 'Live Chromium verification did not reach its assertions.'
+          fi
