@@ -82,6 +82,28 @@ class BridgeTests(unittest.TestCase):
         _, next_claim = self.command("claim", {"goal_id": goal})
         self.assertEqual(next_claim[0][0], "task_ledger_claim_goal_next")
 
+    def test_fenced_out_holder_can_leave_note_and_claim_other_work(self):
+        task = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        old = "11111111-2222-4333-8444-555555555555"
+        result, calls = self.command("handoff", {
+            "task_id": task, "old_claim_token": old,
+            "note": "Lease was lost; partial output saved, remaining validation pending.",
+            "context": {"progress": "completed implementation",
+                        "evidence": ["https://example.org/verified-pr"],
+                        "next_action": "New holder must independently check tests"},
+        }, "researcher")
+        self.assertEqual(result, {"success": True})
+        self.assertEqual(calls[0][0], "task_ledger_record_handoff")
+        self.assertEqual(calls[0][1]["previous_claim_token_in"], old)
+        self.assertEqual(calls[0][1]["previous_agent_id_in"], "atax-github:researcher")
+        self.assertEqual(len(calls), 1, "Handoff must not mutate or release the task")
+        another, new_claim = self.command("claim", {"goal_id": task}, "researcher")
+        self.assertEqual(another, {"success": True})
+        self.assertEqual(new_claim[0][0], "task_ledger_claim_goal_next")
+        self.assertEqual(new_claim[0][1]["agent_id_in"], "atax-github:researcher")
+        with self.assertRaises(BRIDGE.BridgeError):
+            self.command("handoff", {"task_id": task, "old_claim_token": "bad", "note": "fake"})
+
     def test_verification_uses_actor_principal(self):
         _, claim = self.command("verification_claim", {}, "auditor")
         self.assertEqual(claim[0][1]["verifier_agent_id_in"], "atax-github:auditor")
