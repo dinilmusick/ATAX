@@ -99,7 +99,7 @@ function tokenCount(meter,text){
  *
  * MeterAdapter.count(text) is a trusted deterministic server-side tokenizer.
  * GitHubDispatchAdapter.resolveWorkflow(key) returns a trusted allowlisted descriptor
- * {key,inputNames:string[]} only; actual dispatch is by an external outbox consumer.
+ * {key,inputs:{[name:string]:type}} only; actual dispatch is by an external outbox consumer.
  */
 export function createSocketGateway(deps){
   const configured=validateDeps(deps);
@@ -123,26 +123,57 @@ export function createSocketGateway(deps){
     let raw,msg;
     try{raw=await request.text();if(bytes(raw)>MAX_REQUEST)return json({error:'Request too large'},413);
       msg=JSON.parse(raw);}catch{return json(errorReply(null,'INVALID_ARGUMENTS'),400);}
-    if(isObject(msg)&&msg.jsonrpc==='2.0'&&msg.method==='notifications/initialized'&&msg.id===undefined)
-      return new Response(null,{status:202,headers:{'cache-control':'no-store'}});
-    if(!isObject(msg)||msg.jsonrpc!=='2.0'||(typeof msg.id!=='number'&&typeof msg.id!=='string')||
-      typeof msg.method!=='string')return json(errorReply(null,'INVALID_ARGUMENTS'),400);
-    const id=msg.id;
-    if(msg.method==='initialize')return json(okReply(id,{
+    const isNotification=isObject(msg)&&msg.jsonrpc==='2.0'&&msg.method==='notifications/initialized'&&msg.id===undefined;
+    if(!isNotification&&(!isObject(msg)||msg.jsonrpc!=='2.0'||
+      (typeof msg.id!=='number'&&typeof msg.id!=='string')||
+      typeof msg.method!=='string'))return json(errorReply(null,'INVALID_ARGUMENTS'),400);
+    const id=isNotification?null:msg.id;
+    // Every authenticated protocol message, not just tool calls, requires a live
+    // canonical claim and durable cumulative input/output metering. The DB MUST
+    // check the task, principal, session, fence, lease and socket:protocol grant.
+    // The exact trusted MCP response frame is included for atomic output reservation.
+    async function meteredProtocol(frame){
+      const wire=frame===null?'':JSON.stringify(frame);
+      if(bytes(wire)>MAX_RESPONSE)return json(errorReply(id,'OUTPUT_TOO_LARGE'));
+      const inboundTokens=tokenCount(deps.meter,raw);
+      const outboundTokens=wire?tokenCount(deps.meter,wire):0;
+      if(inboundTokens===null||outboundTokens===null)return json(errorReply(id,'FAIL_CLOSED'));
+      let result;
+      try{
+        result=await deps.database.executeAtomically({
+          operation:'protocol',capability:'socket:protocol',
+          principalId:principal.id,sessionId:principal.sessionId,
+          taskId:principal.taskId,claimToken:principal.claimToken,
+          payload:{method:msg.method},inboundTokens,replyId:id,
+          maxReplyBytes:MAX_RESPONSE,replyFrame:wire
+        });
+      }catch{return json(errorReply(id,'FAIL_CLOSED'));}
+      if(!isObject(result))return json(errorReply(id,'FAIL_CLOSED'));
+      if(result.status==='denied')
+        return json(errorReply(id,Object.hasOwn(codes,result.code)?result.code:'FAIL_CLOSED'));
+      if(result.status!=='ok'||!isObject(result.receipt)||
+        !Number.isSafeInteger(result.receipt.inputTokens)||result.receipt.inputTokens<inboundTokens||
+        !Number.isSafeInteger(result.receipt.outputTokens)||result.receipt.outputTokens<outboundTokens)
+        return json(errorReply(id,'FAIL_CLOSED'));
+      return frame===null?
+        new Response(null,{status:202,headers:{'cache-control':'no-store'}}):json(frame);
+    }
+    if(isNotification)return meteredProtocol(null);
+    if(msg.method==='initialize')return meteredProtocol(okReply(id,{
       protocolVersion:'2025-06-18',capabilities:{tools:{}},
       serverInfo:{name:'atax-task-socket',version:'1.0.0'}}));
-    if(msg.method==='ping')return json(okReply(id,{}));
-    if(msg.method==='tools/list')return json(okReply(id,{tools:SOCKET_TOOLS}));
-    if(msg.method==='resources/list')return json(okReply(id,{resources:[]}));
-    if(msg.method==='prompts/list')return json(okReply(id,{prompts:[]}));
-    if(msg.method!=='tools/call')return json(errorReply(id,'TOOL_FORBIDDEN'));
+    if(msg.method==='ping')return meteredProtocol(okReply(id,{}));
+    if(msg.method==='tools/list')return meteredProtocol(okReply(id,{tools:SOCKET_TOOLS}));
+    if(msg.method==='resources/list')return meteredProtocol(okReply(id,{resources:[]}));
+    if(msg.method==='prompts/list')return meteredProtocol(okReply(id,{prompts:[]}));
+    if(msg.method!=='tools/call')return meteredProtocol(errorReply(id,'TOOL_FORBIDDEN'));
     const name=msg.params?.name;
     const def=byName.get(name);
-    if(!def)return json(errorReply(id,'TOOL_FORBIDDEN'));
+    if(!def)return meteredProtocol(errorReply(id,'TOOL_FORBIDDEN'));
     const args=msg.params?.arguments;
-    if(!validateArguments(args,def))return json(errorReply(id,'INVALID_ARGUMENTS'));
-    if(args.task_id!==principal.taskId)return json(errorReply(id,'CROSS_TASK_DENIED'));
-    if(args.claim_token!==principal.claimToken)return json(errorReply(id,'STALE_FENCE'));
+    if(!validateArguments(args,def))return meteredProtocol(errorReply(id,'INVALID_ARGUMENTS'));
+    if(args.task_id!==principal.taskId)return meteredProtocol(errorReply(id,'CROSS_TASK_DENIED'));
+    if(args.claim_token!==principal.claimToken)return meteredProtocol(errorReply(id,'STALE_FENCE'));
     let payload={};
     for(const key of Object.keys(def.fields))if(Object.hasOwn(args,key))payload[key]=args[key];
     if(def.operation==='workflow_request'){
