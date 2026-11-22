@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {availableAccounts,resolveProviderAccount,isOwnerPrincipal,providerTools} from './provider-accounts.mjs';
 
 const owner={id:'owner',authMethod:'shared'};
-const oauthOwner={id:'mcp-oauth-client-a',ownerSubject:'oauth-owner',authMethod:'jwt'};
-const outsider={id:'mcp-outsider',ownerSubject:'outsider',authMethod:'jwt'};
+const oauthOwner={id:'oauth-owner',authMethod:'jwt'};
+const outsider={id:'outsider',authMethod:'jwt'};
 const env={
   MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'test-digest',
   MCP_ATAX_OWNER_JWT_SUBJECT:'oauth-owner',
