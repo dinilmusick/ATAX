@@ -1,0 +1,110 @@
+# Install ONLY in a freshly provisioned disposable PUBLIC FMRL repository.
+# Never install this workflow in ATAX. No private target source is committed.
+name: ATAX socket FMRL target runner
+run-name: atax-socket/${{ inputs.correlation_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id: {required: true, type: string}
+      correlation_id: {required: true, type: string}
+      task_id: {required: true, type: string}
+      claim_fence: {required: true, type: string}
+      target_sha: {required: true, type: string}
+      operation: {required: true, type: string}
+permissions:
+  contents: read
+concurrency:
+  group: socket-fmrl-${{ inputs.correlation_id }}
+  cancel-in-progress: false
+jobs:
+  scoped-private-test-or-build:
+    if: ${{ github.ref == 'refs/heads/main' && (inputs.operation == 'test' || inputs.operation == 'build') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate task fence, exact target SHA, and disposable runner identity BEFORE checkout
+        env:
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+          FMRL_TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          FMRL_TARGET_REF: ${{ secrets.FMRL_TARGET_REF }}
+          SOCKET_REQUEST_ID: ${{ inputs.request_id }}
+          SOCKET_CORRELATION_ID: ${{ inputs.correlation_id }}
+          SOCKET_FENCE: ${{ inputs.claim_fence }}
+          SOCKET_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          sha=os.environ['SOCKET_SHA']
+          corr=os.environ['SOCKET_CORRELATION_ID']
+          repo=os.environ['FMRL_TARGET_REPOSITORY']
+          own=os.environ['GITHUB_REPOSITORY']
+          if not re.fullmatch(r'[0-9a-f]{40}',sha): raise SystemExit('invalid target SHA')
+          if not re.fullmatch(r'[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}',corr): raise SystemExit('invalid correlation')
+          if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo): raise SystemExit('invalid private target')
+          expected=repo.split('/')[0]+'/FMRL-'+corr.replace('-','')[:20]
+          if own != expected or os.environ['FMRL_TARGET_REF'] != sha: raise SystemExit('disposable repository binding mismatch')
+          token=os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          url=os.environ['SUPABASE_URL'].rstrip('/')+'/rest/v1/rpc/socket_dispatch_fence_valid'
+          if not url.startswith('https://') or not token: raise SystemExit('missing verifier credentials')
+          payload={'p_request_id':os.environ['SOCKET_REQUEST_ID'],'p_claim_fence':os.environ['SOCKET_FENCE'],'p_target_sha':sha}
+          request=urllib.request.Request(url,data=json.dumps(payload).encode(),method='POST',headers={
+            'apikey':token,'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+          with urllib.request.urlopen(request,timeout=15) as response:
+            if response.read(32).strip()!=b'true': raise SystemExit('stale or unauthorized socket fence')
+          print('FMRL task-bound authorization verified; payload and credentials withheld')
+          PY
+      - name: Checkout pinned private target INSIDE transient FMRL runner
+        env:
+          PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          FMRL_TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
+          SOCKET_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$PRIVATE_REPO_TOKEN"
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          cat > "$stage/askpass" <<'ASKPASS'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf 'x-access-token\n' ;;
+            *Password*) printf '%s\n' "$PRIVATE_REPO_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS
+          chmod 700 "$stage/askpass"
+          target="$RUNNER_TEMP/socket-private-source"
+          mkdir -p "$target"
+          git init -q "$target"
+          cd "$target"
+          git remote add origin "https://github.com/$FMRL_TARGET_REPOSITORY.git"
+          GIT_ASKPASS="$stage/askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch -q --depth=1 origin "$SOCKET_SHA" >"$stage/fetch.log" 2>&1
+          git -c credential.helper= checkout -q --detach FETCH_HEAD >"$stage/checkout.log" 2>&1
+          test "$(git rev-parse HEAD)" = "$SOCKET_SHA"
+          git remote remove origin
+          echo 'Private checkout matched immutable SHA; source and logs remain transient'
+      - name: Perform ONLY fixed test/build operation without repository token
+        env:
+          SOCKET_OPERATION: ${{ inputs.operation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/socket-private-source"
+          test -f package-lock.json
+          npm ci --no-audit --no-fund >"$RUNNER_TEMP/socket-private-execution.log" 2>&1
+          case "$SOCKET_OPERATION" in
+            test) npm test >"$RUNNER_TEMP/socket-private-execution.log" 2>&1 ;;
+            build) npm run build >"$RUNNER_TEMP/socket-private-execution.log" 2>&1 ;;
+            *) exit 2 ;;
+          esac
+          echo 'Pinned private target operation completed; raw output suppressed'
+      - name: Always erase transient private source and raw logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/socket-private-source"
+          rm -f "$RUNNER_TEMP/socket-private-execution.log"

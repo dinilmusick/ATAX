@@ -1,0 +1,69 @@
+# Reference only. Install in approved TARGET repo, not ATAX. Protect main.
+# Only test/build supported. Other operations need separate reviewed adapters.
+name: ATAX socket target runner
+run-name: atax-socket/${{ inputs.correlation_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id: {required: true, type: string}
+      correlation_id: {required: true, type: string}
+      task_id: {required: true, type: string}
+      claim_fence: {required: true, type: string}
+      target_sha: {required: true, type: string}
+      operation: {required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  bounded-target-operation:
+    if: inputs.operation == 'test' || inputs.operation == 'build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check live fence BEFORE target checkout
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+          SOCKET_REQUEST_ID: ${{ inputs.request_id }}
+          SOCKET_FENCE: ${{ inputs.claim_fence }}
+          SOCKET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,re,urllib.request
+          sha=os.environ['SOCKET_SHA']
+          if not re.fullmatch('[0-9a-f]{40}',sha): raise SystemExit('invalid SHA')
+          token=os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          url=os.environ['SUPABASE_URL'].rstrip('/')+'/rest/v1/rpc/socket_dispatch_fence_valid'
+          payload={'p_request_id':os.environ['SOCKET_REQUEST_ID'],
+                   'p_claim_fence':os.environ['SOCKET_FENCE'],'p_target_sha':sha}
+          req=urllib.request.Request(url,data=json.dumps(payload).encode(),method='POST',
+             headers={'apikey':token,'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+          with urllib.request.urlopen(req,timeout=15) as res:
+            if res.read(32).strip()!=b'true': raise SystemExit('invalid or expired task socket')
+          print('Fenced claim verified')
+          PY
+      - name: Checkout pinned target revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_sha }}
+          persist-credentials: false
+      - name: Execute fixed allowed target operation
+        env:
+          SOCKET_SHA: ${{ inputs.target_sha }}
+          SOCKET_OPERATION: ${{ inputs.operation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOCKET_SHA"
+          test -f package-lock.json
+          npm ci --no-audit --no-fund >/tmp/socket-target-private.log 2>&1
+          case "$SOCKET_OPERATION" in
+            test) npm test >/tmp/socket-target-private.log 2>&1 ;;
+            build) npm run build >/tmp/socket-target-private.log 2>&1 ;;
+            *) exit 2 ;;
+          esac
+          echo 'Pinned target operation successful; raw logs withheld'
+      - name: Scrub transient raw logs
+        if: always()
+        run: rm -f /tmp/socket-target-private.log

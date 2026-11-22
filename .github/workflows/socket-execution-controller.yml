@@ -1,0 +1,56 @@
+name: ATAX socket bounded workflow relay
+run-name: atax-socket-relay/${{ inputs.correlation_id || github.run_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Canonical UUID of durable socket execution request
+        required: true
+        type: string
+      correlation_id:
+        description: Canonical UUID of execution correlation
+        required: true
+        type: string
+  schedule:
+    - cron: '*/5 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: socket-relay-${{ github.event_name == 'schedule' && 'reconcile' || inputs.request_id }}
+  cancel-in-progress: false
+jobs:
+  relay-or-observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout trusted ATAX control-plane code only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate protected configuration
+        env:
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+          SOCKET_GITHUB_TOKEN: ${{ secrets.SOCKET_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_SERVICE_ROLE_KEY" && test -n "$SOCKET_GITHUB_TOKEN"
+      - name: Dispatch exactly one fenced target operation
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+          SOCKET_GITHUB_TOKEN: ${{ secrets.SOCKET_GITHUB_TOKEN }}
+          SOCKET_REQUEST_ID: ${{ inputs.request_id }}
+          SOCKET_CORRELATION_ID: ${{ inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          python3 tools/github/socket-execution/controller.py dispatch --request-id "$SOCKET_REQUEST_ID" --correlation-id "$SOCKET_CORRELATION_ID"
+      - name: Independently reconcile bounded target run receipts
+        if: github.event_name == 'schedule'
+        env:
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+          SOCKET_GITHUB_TOKEN: ${{ secrets.SOCKET_GITHUB_TOKEN }}
+        run: python3 tools/github/socket-execution/controller.py reconcile

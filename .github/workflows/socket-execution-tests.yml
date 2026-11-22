@@ -1,0 +1,38 @@
+name: ATAX socket execution controller tests
+on:
+  pull_request:
+    paths:
+      - 'tools/github/socket-execution/**'
+      - 'supabase/migrations/*socket_dispatch*.sql'
+      - '.github/workflows/*socket*'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/github/socket-execution/**'
+      - 'supabase/migrations/*socket_dispatch*.sql'
+      - '.github/workflows/*socket*'
+permissions:
+  contents: read
+jobs:
+  isolated-fakes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Python standard-library tests (no secrets, no target access)
+        run: |
+          python3 -m compileall -q tools/github/socket-execution
+          python3 -m unittest discover -s tools/github/socket-execution -p 'test_*.py' -v
+      - name: Parse protected target and FMRL workflow examples
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0), aliases: true)' tools/github/socket-execution/socket-target.example.yml
+          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0), aliases: true)' tools/github/socket-execution/socket-fmrl.example.yml
+      - name: Migration security and endpoint declaration smoke test
+        run: |
+          set -euo pipefail
+          grep -Fq 'enable row level security' supabase/migrations/*socket_dispatch*.sql
+          grep -Fq "net.http_post(" supabase/migrations/*socket_dispatch*.sql
+          grep -Fq 'socket_dispatch_begin' supabase/migrations/*socket_dispatch*.sql
+          grep -Fq "cron.schedule(" supabase/migrations/*socket_dispatch*.sql
