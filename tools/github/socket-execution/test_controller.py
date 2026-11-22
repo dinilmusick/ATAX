@@ -197,7 +197,7 @@ class TestRelay(unittest.TestCase):
             self.assertEqual(db.state,'accepted')
 
     def test_fmrl_cleanup_and_independent_observation(self):
-        fmrl='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+        fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
         db,gh=FakeDB(sample(mode='fmrl',runner_repository=fmrl)),FakeGithub()
         c=Controller(db,gh); c.dispatch(ID,CORR); gh.matches=[complete_run()]
         self.assertEqual(c.reconcile()['terminal'],1)
@@ -205,7 +205,7 @@ class TestRelay(unittest.TestCase):
         self.assertEqual(db.receipt['cleanup'],'independent_404')
 
     def test_cleanup_failure_blocks_terminal_certification(self):
-        fmrl='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+        fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
         db,gh=FakeDB(sample(mode='fmrl',runner_repository=fmrl)),FakeGithub()
         c=Controller(db,gh); c.dispatch(ID,CORR); gh.matches=[complete_run()]
         gh.cleanup_error='fmrl_cleanup_not_verified'
@@ -213,7 +213,7 @@ class TestRelay(unittest.TestCase):
         self.assertEqual(db.state,'accepted')
 
     def test_crash_after_delete_recovers_from_durable_cleanup_journal(self):
-        fmrl='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+        fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
         db,gh=FakeDB(sample(mode='fmrl',runner_repository=fmrl)),FakeGithub()
         db.fail_finish_once=True
         c=Controller(db,gh); c.dispatch(ID,CORR); gh.matches=[complete_run()]
@@ -247,13 +247,31 @@ class TestRelay(unittest.TestCase):
         class Capture(Http):
             def __init__(self, confirm=404): self.calls=[];self.confirm=confirm
             def request(self,method,url,token,payload=None,headers=None):
-                self.calls.append(method)
-                return (204 if method=='DELETE' else self.confirm), None
-        fmrl='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+                self.calls.append((method, 'authenticated'))
+                return 204, None
+            def anonymous_status(self,url):
+                self.calls.append(('GET', 'anonymous'))
+                self.assert_url = url
+                return self.confirm
+        fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
         request=ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=fmrl))
         yes=Capture(); self.assertEqual(Github('protected',yes).delete_fmrl(request),'independent_404')
-        self.assertEqual(yes.calls,['DELETE','GET'])
+        self.assertEqual(yes.calls,[('DELETE','authenticated'),('GET','anonymous')])
+        self.assertEqual(yes.assert_url,'https://api.github.com/repos/'+fmrl)
         no=Capture(200)
         with self.assertRaises(RemoteError): Github('protected',no).delete_fmrl(request)
+
+    def test_legacy_fmrl_name_rejected_before_any_repository_mutation(self):
+        class Capture(Http):
+            def __init__(self): self.calls=[]
+            def request(self,method,url,token,payload=None,headers=None):
+                self.calls.append(method)
+                return 204,None
+        legacy='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+        req=ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=legacy))
+        recorder=Capture()
+        with self.assertRaises(RemoteError):
+            Github('protected',recorder).delete_fmrl(req)
+        self.assertEqual(recorder.calls,[])
 
 if __name__=='__main__': unittest.main()
