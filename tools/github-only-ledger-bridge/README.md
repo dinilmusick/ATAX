@@ -41,10 +41,10 @@ For `heartbeat`:
 {"protocol":"atax-github-bridge/v1","op":"heartbeat","args":{"task_id":"TASK_UUID","claim_token":"CLAIM_UUID","current_step":"Working on acceptance checks"}}
 ```
 
-If a holder loses the lease, it must **stop only the forfeited task, not the whole agent session**. It sends a fresh private issue with `handoff`; the stored `old_claim_token` authorizes an append-only task event but never renews or releases the old task:
+If a holder loses the lease, it must **stop only the forfeited task, not the whole agent session**. It sends a fresh private issue with `handoff`; the stored `claim_token` authorizes an append-only task event but never renews or releases the old task:
 
 ```json
-{"protocol":"atax-github-bridge/v1","op":"handoff","args":{"task_id":"LOST_TASK_UUID","old_claim_token":"OLD_TOKEN_UUID","note":"Lease lost. Partial results and outstanding work recorded.","context":{"progress":"partially done","evidence":["private-evidence-reference"],"next_action":"New holder should resume remaining checks"}}}
+{"protocol":"atax-github-bridge/v1","op":"handoff","args":{"task_id":"LOST_TASK_UUID","claim_token":"OLD_TOKEN_UUID","note":"Lease lost. Partial results and outstanding work recorded.","context":{"progress":"partially done","evidence":["private-evidence-reference"],"next_action":"New holder should resume remaining checks"}}}
 ```
 
 After this note, **rehydrate and request a different unoccupied task** through `goals` and `claim`. An existing new holder continues the forfeited task without interference. If no finite task is available, inspect always-available maintenance work; ATAX never schedules the agent. Handoff is not task completion and must not be passed to `submit` using the old fence.
