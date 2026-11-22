@@ -1,0 +1,176 @@
+name: ATAX one-time archive and stale-branch cleanup
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/atax-branch-archive-cleanup-once.yml]
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+jobs:
+  archive-and-clean:
+    if: github.repository == 'dinilmusick/ATAX'
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    concurrency:
+      group: atax-one-time-branch-archive-cleanup
+      cancel-in-progress: false
+    steps:
+      - name: Checkout canonical main with full history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Preserve unmerged branch histories in one verified Git tag, then delete
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARCHIVE_TAG: atax-branch-archive-20261122
+          ARCHIVE_ISSUE: "1720"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          repo=os.environ["GH_REPO"]
+          token=os.environ["GH_TOKEN"]
+          tag=os.environ["ARCHIVE_TAG"]
+          issue=int(os.environ["ARCHIVE_ISSUE"])
+          base=f"https://api.github.com/repos/{repo}"
+          headers={
+              "Authorization":f"Bearer {token}",
+              "Accept":"application/vnd.github+json",
+              "X-GitHub-Api-Version":"2022-11-28",
+          }
+          def git(*args):
+              return subprocess.check_output(["git",*args],text=True).strip()
+          def api(method,path,body=None):
+              req=urllib.request.Request(base+path,
+                  method=method,headers=headers,
+                  data=json.dumps(body).encode() if body is not None else None)
+              try:
+                  with urllib.request.urlopen(req,timeout=35) as response:
+                      data=response.read()
+                      return response.status,json.loads(data) if data else None
+              except urllib.error.HTTPError as e:
+                  if e.code==404:return 404,None
+                  raise RuntimeError(f"{method} {path} rejected with HTTP {e.code}") from None
+          def open_heads():
+              live={}
+              page=1
+              while True:
+                  _,prs=api("GET",f"/pulls?state=open&per_page=100&page={page}")
+                  for pr in prs:
+                      head=pr.get("head",{})
+                      if head.get("repo",{}).get("full_name")==repo:
+                          live[head.get("ref","")]=pr["number"]
+                  if len(prs)<100:break
+                  page+=1
+                  if page>40:raise RuntimeError("PR pagination limit exceeded")
+              return live
+
+          # Obtain exactly the server-visible head snapshot. No branch may
+          # be deleted until every SHA is preserved by the archive commit.
+          if open_heads():
+              raise RuntimeError("New open PR detected; refuse destructive cleanup")
+          git("fetch","origin","+refs/heads/*:refs/remotes/origin/*","--prune","--no-tags")
+          output=git("ls-remote","--heads","origin")
+          heads={}
+          for row in output.splitlines():
+              sha,ref=row.split("\t",1)
+              name=ref.removeprefix("refs/heads/")
+              if name=="main":continue
+              heads[name]=sha
+          if not heads:
+              print("No non-default branches remain")
+              raise SystemExit(0)
+          _,main_ref=api("GET","/git/ref/heads/main")
+          main_sha=main_ref["object"]["sha"]
+          git("cat-file","-e",main_sha+"^{commit}")
+          for name,sha in heads.items():
+              git("cat-file","-e",sha+"^{commit}")
+          # Archive parents include the canonical main SHA and every unique
+          # branch tip; tree equals main, so archive contains no code changes.
+          parent_shas=[main_sha]+sorted(set(heads.values())-{main_sha})
+          tree=git("rev-parse",main_sha+"^{tree}")
+          env=dict(os.environ)
+          env.update({"GIT_AUTHOR_NAME":"ATAX Branch Archive",
+              "GIT_AUTHOR_EMAIL":"41898282+github-actions[bot]@users.noreply.github.com",
+              "GIT_COMMITTER_NAME":"ATAX Branch Archive",
+              "GIT_COMMITTER_EMAIL":"41898282+github-actions[bot]@users.noreply.github.com"})
+          args=["git","commit-tree",tree]
+          for sha in parent_shas:args.extend(["-p",sha])
+          commit=subprocess.check_output(args,
+              input="ATAX branch history archive 2026-11-22: preserve the branch heads listed in issue #1720. Do not merge this synthetic commit into main.\n",
+              text=True,env=env).strip()
+          actual=git("cat-file","-p",commit).splitlines()
+          actual_parents=[line.split()[1] for line in actual if line.startswith("parent ")]
+          if actual_parents!=parent_shas:
+              raise RuntimeError("Archive parent verification failed")
+          _,existing=api("GET",f"/git/ref/tags/{tag}")
+          if existing:
+              raise RuntimeError("Archive tag already exists; do not overwrite")
+          git("tag","-a",tag,commit,"-m",
+              "ATAX one-time archive of stale branch heads; manifest issue #1720")
+          git("push","origin",f"refs/tags/{tag}")
+          remote_tags=git("ls-remote","--tags","origin",f"refs/tags/{tag}^{{}}")
+          if not remote_tags or remote_tags.split()[0]!=commit:
+              raise RuntimeError("Archive tag remote SHA verification failed")
+          print("ARCHIVE tag verified",tag,commit,
+                "branch tips",len(heads),"unique parents",len(parent_shas))
+          if open_heads():
+              raise RuntimeError("A new open PR appeared after archive; leave branches intact")
+
+          removed=[];skipped=[];failures=[]
+          for index,(name,sha) in enumerate(sorted(heads.items())):
+              try:
+                  if index%20==0 and open_heads():
+                      raise RuntimeError("New open PR appeared; stop cleanup")
+                  escaped=urllib.parse.quote(name,safe="/")
+                  status,current=api("GET",f"/git/ref/heads/{escaped}")
+                  if status==404:
+                      skipped.append([name,"already deleted"]);continue
+                  if current["object"]["sha"]!=sha:
+                      skipped.append([name,"changed since archived snapshot"]);continue
+                  _,branch=api("GET",f"/branches/{urllib.parse.quote(name,safe='')}")
+                  if not branch or branch.get("protected",False):
+                      skipped.append([name,"protected/unknown"]);continue
+                  if name=="main":
+                      skipped.append([name,"main"]);continue
+                  if name in open_heads():
+                      skipped.append([name,"open PR"]);continue
+                  api("DELETE",f"/git/refs/heads/{escaped}")
+                  status,_=api("GET",f"/git/ref/heads/{escaped}")
+                  if status!=404:raise RuntimeError("Delete not confirmed")
+                  removed.append(name)
+              except Exception as e:
+                  failures.append([name,type(e).__name__,str(e)[:150]])
+                  if "New open PR" in str(e):break
+
+          _,remains=api("GET","/git/ref/heads/main")
+          if remains["object"]["sha"]!=main_sha:
+              print("main advanced concurrently; no main ref modified by cleanup")
+          report=(
+              f"Archive tag \`{tag}\` points to synthetic commit \`{commit}\` "
+              f"with {len(parent_shas)} unique parent commits covering {len(heads)} archived branch heads.\n"
+              f"Deleted: **{len(removed)}**; skipped: **{len(skipped)}**; failures: **{len(failures)}**.\n"
+              f"Skipped refs: \`{json.dumps(skipped)}\`\n"
+              f"Failures: \`{json.dumps(failures)}\`\n"
+              "This tag is *not a working branch*. Recreate a needed branch from its SHA in the manifest."
+          )
+          api("POST",f"/issues/{issue}/comments",{"body":report})
+          print(report)
+          with open(os.environ.get("GITHUB_STEP_SUMMARY","/tmp/atax-summary"),"a") as f:
+              f.write(report+"\n")
+          if skipped or failures:
+              raise SystemExit("Some branches remain: inspect recorded archive manifest")
+          PY
