@@ -15,5 +15,5 @@ MCP_AUTH_AUTHORIZATION_SERVER = "https://luth.blueprint-ninjastudios.workers.dev
 MCP_AUTH_ISSUER = "https://luth.blueprint-ninjastudios.workers.dev/api/auth"
 MCP_AUTH_JWKS_URL = "https://luth.blueprint-ninjastudios.workers.dev/api/auth/jwks"
 MCP_AUTH_AUDIENCE = "https://atax-mcp.dextro1n1laevo.workers.dev/mcp"
-MCP_AUTH_OWNER_SCOPES = "atax:read atax:write"
+MCP_AUTH_OWNER_SCOPES = "atax:read atax:write atax:github:read atax:github:create atax:cloudflare:read atax:fmrl:execute"
 
