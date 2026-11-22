@@ -80,10 +80,20 @@ jobs:
                 line=re.sub(r'/tmp/auth-[A-Za-z-]+/repo','[private-source]',line)
                 line=''.join(c for c in line if c.isprintable())
                 selected.append(line[:220])
+            context=[]
+            for raw in content.splitlines()[-105:]:
+              line=raw.strip()
+              line=re.sub(r'https?://\S+','[url]',line)
+              line=re.sub(r'[^\s]+@[^\s]+','[email]',line)
+              line=re.sub(r'[0-9a-fA-F]{32,}','[hex-id]',line)
+              line=re.sub(r'/tmp/auth-[A-Za-z-]+/repo','[private-source]',line)
+              line=re.sub(r'(?:Bearer|token|secret|password|authorization)[=:]\S+','[credential]',line,flags=re.I)
+              context.append(''.join(c for c in line if c.isprintable())[:230])
             body=('Private canonical-auth verification on exact merged main.\n'+
                  'Suite: '+('test:integration' if repo=='Aiko' else 'test:architecture')+
                  '\nExit code: '+str(status)+'\nFiltered test error identifiers only:\n'+
                  '\n'.join('- '+s for s in selected[:65])+
+                 '\nSanitized test failure context:\n'+'\n'.join(context[-80:])+
                  '\nRaw private test logs and clone remain on the disposable runner only.')
             pathlib.Path('/tmp/auth-'+repo+'/body.json').write_text(json.dumps({'body':body}))
           PY
