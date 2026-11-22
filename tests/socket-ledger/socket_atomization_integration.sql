@@ -415,7 +415,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('independent-execution-evidence'),
     'pass','Ready for independent verification');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(  child:=public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,,c1.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_exec.agent_id,claim.claim_token);
   child:=public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,
     '{}'::jsonb,'First child completed','[]'::jsonb,
     jsonb_build_array('execution-evidence'),'completed');
@@ -475,7 +475,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('evidence'),
     'pass','Second child ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(  child:=public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,,c2.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_other.agent_id,claim.claim_token);
   child:=public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
     '{}'::jsonb,'Second child completed','[]'::jsonb,
     jsonb_build_array('result-evidence'),'completed');
@@ -542,7 +542,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-first-work'),
     'pass','Nested first ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(  PERFORM public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,,c1.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_exec.agent_id,claim.claim_token);
   PERFORM public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,
     '{}'::jsonb,'Nested first complete','[]'::jsonb,
     jsonb_build_array('nested-first-evidence'),'completed');
@@ -556,7 +556,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-second-work'),
     'pass','Nested second ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(  PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,,c2.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_other.agent_id,claim.claim_token);
   PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
     '{}'::jsonb,'Nested second complete','[]'::jsonb,
     jsonb_build_array('nested-second-evidence'),'completed');
@@ -589,7 +589,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('execution-evidence'),
     'pass','Awaiting independent result');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(  PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,,c2.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_other.agent_id,claim.claim_token);
   PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
     '{}'::jsonb,'Result awaiting review','[]'::jsonb,
     jsonb_build_array('negative-test-result'),'completed');
