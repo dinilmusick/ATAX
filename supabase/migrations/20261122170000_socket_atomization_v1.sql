@@ -522,8 +522,11 @@ BEGIN
     RAISE EXCEPTION 'Parent is not an atomised waiting socket';
   END IF;
   IF v_inv.agent_id=v_atom.authored_by_agent OR v_inv.id=v_atom.authored_by_invocation
-    OR v_inv.session_id=v_atom.authored_in_session THEN
-    RAISE EXCEPTION 'Atomiser may not independently finalize the parent';
+    OR v_inv.session_id=v_atom.authored_in_session
+    OR EXISTS(SELECT 1 FROM public.socket_child_claim_grants g
+       JOIN public.socket_invocations executor ON executor.id=g.invocation_id
+       WHERE g.child_task_id=parent_in AND executor.agent_id=v_inv.agent_id) THEN
+    RAISE EXCEPTION 'Atomiser or preceding executor may not independently finalize the parent';
   END IF;
   IF NOT EXISTS(SELECT 1 FROM public.socket_atomization_children
      WHERE parent_task_id=parent_in)
@@ -604,7 +607,10 @@ BEGIN
            AND i.expires_at>statement_timestamp();
       END IF;
       IF NOT FOUND OR v_inv.agent_id=v_atom.authored_by_agent
-         OR v_inv.agent_id=NEW.claimed_by_agent_id THEN
+         OR v_inv.agent_id=NEW.claimed_by_agent_id
+         OR EXISTS(SELECT 1 FROM public.socket_child_claim_grants g
+            JOIN public.socket_invocations executor ON executor.id=g.invocation_id
+            WHERE g.child_task_id=NEW.id AND executor.agent_id=v_inv.agent_id) THEN
         RAISE EXCEPTION 'Child verification may not reuse atomiser/executor identity';
       END IF;
     END IF;
