@@ -24,6 +24,22 @@ def sample(**changes):
     return doc
 
 
+class TestSupabaseQueryShapes(unittest.TestCase):
+    def test_request_sorting_does_not_break_allowlist_lookup(self):
+        class Capture(Http):
+            def __init__(self): self.urls = []
+            def request(self, method, url, token, payload=None, headers=None):
+                self.urls.append(url)
+                return 200, [{}]
+        capture = Capture()
+        db = Supabase('https://test.supabase.co', 'service-only-token', capture)
+        db.rows('socket_dispatch_allowed_targets', {'enabled': 'true'})
+        self.assertNotIn('order=created_at', capture.urls[0])
+        db.rows('socket_dispatch_requests', {'status': 'in.(accepted,running)'})
+        self.assertIn('order=created_at.asc', capture.urls[1])
+        self.assertIn('status=in.%28accepted%2Crunning%29', capture.urls[1])
+
+
 class FakeDB:
     def __init__(self, item=None, allowed=True, fence=True):
         self.item=item or sample()
