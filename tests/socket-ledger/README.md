@@ -35,12 +35,12 @@ The race harness launches two independent PostgreSQL client sessions against one
 
 ## Evidence and remaining verification
 
-Executed: migration syntax and double replay on the canonical Supabase project vcaerawuwffziufvpbvw inside BEGIN/ROLLBACK. The latest extended SQL regression returned the proof marker full_context_ceiling_and_fenced_lifecycle_passed, including recursive verification, identity separation, replay defenses, and input/output/combined budget thresholds. No live schema changes or fixtures were persisted.
+Executed: migration syntax and double replay on the canonical Supabase project vcaerawuwffziufvpbvw inside BEGIN/ROLLBACK. The latest extended SQL regression returned the proof marker socket_v1_full_recovery_security_regression_passed, including recursive verification, exact-session fencing, security grants, replay defenses, input/output/combined budget thresholds, negative verdict hardening, and stopped-checkpoint inheritance. No live schema changes or fixtures were persisted.
 
-Not executed here: the separate-process claim race, because this execution environment has neither psql nor a disposable PostgreSQL service. A separate independent reviewer must run that harness before certifying cross-connection concurrency.
+Not executed here: the separate-process claim race, because this execution environment has neither psql nor a disposable PostgreSQL service. A separate independent reviewer must run that harness before certifying cross-connection concurrency. The existing repository Disposable Supabase Database Integration workflow applies migrations but only executes supabase/tests/*.integration.sql, not tests/socket-ledger/*.sql or this directory's race shell harness. Its green status is not evidence that these dedicated tests ran in CI.
 
 Not done: live production schema deployment, main merge, or self-verification. The release reconciler owns those steps.
 
 Integration requirement: trusted control-plane registration of separately authenticated invocations, real event-by-event token consumption, and use of the new child claim/verification RPCs. Legacy selectors do not claim the socket-specific waiting/review records.
 
-The canonical task was observed queued with loop_script_status = missing. This agent has not bypassed its independent loop-authoring gate or claimed completion or independent verification in the durable ledger.
+The canonical task was observed queued with loop_script_status = missing. This agent has not bypassed its independent loop-authoring gate or claimed completion or independent verification in the durable ledger. A separately authenticated loop author and independent verifier must resolve its formal lifecycle. The SQL implementation is submitted for review without merging into main.
