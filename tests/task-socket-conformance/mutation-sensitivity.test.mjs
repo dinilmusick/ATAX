@@ -14,7 +14,7 @@ for (const spec of [
     const env = { ...process.env, ATAX_SOCKET_CONFORMANCE_ADAPTER: broken };
     // Node's test runner injects a recursive-test sentinel into subprocesses.
     delete env.NODE_TEST_CONTEXT;
-    const result = spawnSync(process.execPath, ['--test', join(dir, spec.file)], {
+    const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', join(dir, spec.file)], {
       env,
       encoding: 'utf8', timeout: 10000,
     });
