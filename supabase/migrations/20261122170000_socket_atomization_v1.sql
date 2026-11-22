@@ -593,6 +593,16 @@ BEGIN
        JOIN public.socket_invocations i ON i.id=g.invocation_id
        WHERE g.child_task_id=NEW.id AND i.agent_id=NEW.verified_by_agent_id
          AND i.expires_at>statement_timestamp();
+      -- A recursively atomised child becomes a non-leaf parent. It is verified
+      -- only by finalizing its own verified descendants; the nested parent's
+      -- authenticated finalization grant is equivalent to a child verifier grant.
+      IF NOT FOUND AND EXISTS(SELECT 1 FROM public.socket_atomizations
+          WHERE parent_task_id=NEW.id) THEN
+        SELECT i.* INTO v_inv FROM public.socket_parent_finalization_grants g
+         JOIN public.socket_invocations i ON i.id=g.invocation_id
+         WHERE g.parent_task_id=NEW.id AND i.agent_id=NEW.verified_by_agent_id
+           AND i.expires_at>statement_timestamp();
+      END IF;
       IF NOT FOUND OR v_inv.agent_id=v_atom.authored_by_agent
          OR v_inv.agent_id=NEW.claimed_by_agent_id THEN
         RAISE EXCEPTION 'Child verification may not reuse atomiser/executor identity';
