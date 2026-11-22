@@ -72,7 +72,9 @@ test('Luth EdDSA resource audience and owner policy unlock only the pinned ident
   assert.equal(missingClient.status,401);
   const expired=await rpc(await jwt({exp:1}));
   assert.equal(expired.status,401);
-  const forged=await rpc((await jwt()).replace(/.$/,'x'));
+  const parts=(await jwt()).split('.');
+  parts[2]=(parts[2].startsWith('A')?'B':'A')+parts[2].slice(1);
+  const forged=await rpc(parts.join('.'));
   assert.equal(forged.status,401);
 });
 
