@@ -117,11 +117,8 @@ BEGIN
      OR v_budget.max_output>(v_model->>'outputLimit')::bigint
      OR v_budget.max_total>(v_model->>'maxUsableTokens')::bigint
   THEN RETURN jsonb_build_object('status','denied','code','BUDGET_EXHAUSTED'); END IF;
-  SELECT * INTO v_grant FROM public.socket_gateway_capabilities
-   WHERE invocation_id=v_inv.id AND task_id=v_task_id AND capability=v_capability
-     AND enabled AND expires_at>statement_timestamp();
-  IF NOT FOUND THEN RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED'); END IF;
-
+  -- Authenticate a live task and invocation before charging, but meter every
+  -- signed invocation even when its tool capability is revoked.
   -- Both charges and the requested operation are in this single database transaction.
   -- Every repeated invocation creates a new consumption event, never a free replay.
   v_usage:=public.socket_record_usage(v_task_id,v_inv.id,v_inv.secret,v_claim,
@@ -129,6 +126,11 @@ BEGIN
   IF (v_usage->>'needs_atomization')::boolean THEN
     RETURN jsonb_build_object('status','denied','code','BUDGET_EXHAUSTED');
   END IF;
+
+  SELECT * INTO v_grant FROM public.socket_gateway_capabilities
+   WHERE invocation_id=v_inv.id AND task_id=v_task_id AND capability=v_capability
+     AND enabled AND expires_at>statement_timestamp();
+  IF NOT FOUND THEN RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED'); END IF;
 
   IF v_operation='protocol' THEN
     v_wire_out:=command_in->>'replyFrame';
