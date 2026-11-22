@@ -87,6 +87,16 @@ BEGIN
   INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
     VALUES(p,50,50,80),(p_stale,50,50,80),(p_crash,50,50,80);
 
+  -- Authenticated invocation credentials cannot be replaced with arbitrary
+  -- identities or secrets supplied in client-controlled payloads.
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_require_invocation(inv_exec.id,gen_random_uuid(),ARRAY['executor']);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Socket invocation missing, expired, or unauthorized' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: invalid invocation credential accepted'; END IF;
   -- Stale fence must fail without charging usage.
   rejected:=false;
   BEGIN
@@ -218,6 +228,16 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: competing executor claimed child'; END IF;
   IF (SELECT claim_token FROM public.tasks WHERE id=c1)<>claim.claim_token THEN
     RAISE EXCEPTION 'FAIL: competing claim rotated active fence'; END IF;
+  -- A legacy release-to-queued cannot make socket work globally claimable.
+  rejected:=false;
+  BEGIN
+    PERFORM public.task_ledger_release_claim(c1,inv_exec.agent_id,claim.claim_token,
+      'queued','Legacy release attempt');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Socket child cannot join legacy queued claim pool' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: legacy release leaked child to queue'; END IF;
 
   -- Legacy direct claim on sibling is fenced by the database trigger.
   rejected:=false;
@@ -271,6 +291,17 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: executor reused identity to verify'; END IF;
 
   verification:=public.socket_claim_child_verification(c1,inv_ver.id,inv_ver.secret);
+  -- Even an authorized verifier identity cannot bypass the verification RPC
+  -- by directly setting verified on the canonical task row.
+  rejected:=false;
+  BEGIN
+    UPDATE public.tasks SET verification_status='verified',
+      verified_by_agent_id=inv_ver.agent_id WHERE id=c1;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Child verification may not reuse' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: direct verification bypassed grant approval'; END IF;
   rejected:=false;
   BEGIN
     PERFORM public.socket_verify_child(c1,inv_ver.id,inv_ver.secret,
