@@ -35,7 +35,7 @@ BEGIN
       FROM pg_proc p
       WHERE p.pronamespace='public'::regnamespace
         AND p.proname=patch.function_name
-        AND p.pronargs=patch.arity;
+        AND p.pronargs=patch.arity::integer;
     IF target_oid IS NULL THEN
       RAISE EXCEPTION 'Socket-fence migration: missing function % / % arguments',
         patch.function_name,patch.arity;
