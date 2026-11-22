@@ -1,7 +1,7 @@
 ---
 name: "Task Ledger"
 slug: task-ledger
-version: 2.8.3
+version: 2.8.4
 source: Supabase Skills Database
 sourceId: 7
 status: active
@@ -99,9 +99,22 @@ Running task ownership is a short heartbeat lease.
 - Lease expiry alone is not an automatic takeover: a fresh heartbeat continues to block opportunistic reassignment. Both signals must be checked under the canonical atomic claim RPC.
 - `claim_token` is the fencing token. Recovery rotates it, increments attempts, assigns the new worker/session and appends a `lease_recovered` event containing the previous worker and last heartbeat checkpoint.
 - Heartbeats persist `current_step` plus a JSON checkpoint containing activity, progress, discoveries, blockers and next action.
-- A worker that detects fencing loss must stop. It may append a `handoff` event with its final note, but it must not overwrite canonical task ownership/progress.
+- A worker that detects fencing loss **must stop work on that specific task only**. It should append a non-mutating `task_ledger_record_handoff` event with its prior token, partial results and remaining work; it must not overwrite the new owner's canonical task state. The agent **then immediately re-enters discovery and tries an unrelated eligible free task**, rather than terminating its entire work session. An expired lease also forbids any further work on that task, even if a replacement has not yet claimed it.
 - The next worker reads the task row and append-only events before continuing.
 - Never reclaim blocked tasks, tasks under blocked/failed/cancelled/abandoned parents, unresolved blocking dependencies, or tasks at max attempts.
+
+## Task-local forfeiture and continued agent work
+
+**LEASE_LOSS_IS_NOT_AGENT_TERMINATION=true.** Use this protocol whenever a periodic `task_ledger_check_claim(task_id, holder_id, token)` returns false, a heartbeat is denied, or the lease has expired:
+
+1. Stop only the external work associated with the **lost task**. Do not attempt task heartbeat, iteration, submission, release, blocker mutation or verification using the stale fence. Stop any uncommitted side effects for that task where feasible; actions already performed must be reconciled by the new owner.
+2. Read the current authoritative task snapshot. If a replacement holder exists, do not contact or displace it.
+3. Call `task_ledger_record_handoff(task_id, previous_agent_id, previous_claim_token, handoff_note, context)` with the **old** token, an accurate completion/forfeiture note, progress, partial output, evidence references, observed side effects and safe next steps. This operation appends an event only; **it neither releases nor reclaims the occupied socket**. Never include secrets. If this note cannot be appended, leave safe recoverable evidence through an authorized alternative without mutating the old task.
+4. Forget the old active claim in the agent's working state and rehydrate the goal/task graph. Exclude sockets occupied by others, unresolved dependencies, and the forfeited task from the immediate next-work attempt. Apply system work priority, deadlines and constraints.
+5. Atomically claim a different eligible task using an existing claim RPC; execute it and persist evidence under its **new** fencing token. A failed claim is ordinary contention: refresh and try other eligible work, not the occupied socket.
+6. When no finite ledger task is claimable, discover an applicable always-available work modality and turn it into a bounded unit. If no safe work is possible, persist an accurate blocker and return; ATAX never spawns or schedules replacement agents.
+
+A transfer is a **task event**, not an instruction to stop the whole externally running agent session. Its immutable event note is not a `task_ledger_submit_result` and must not be independently verified as completion of the former task.
 
 ## Worker protocol
 
@@ -112,7 +125,7 @@ Running task ownership is a short heartbeat lease.
 5. Record every cycle with `task_ledger_record_loop_iteration`: actual input/output, observation, criterion results, loop state, tools and evidence.
 6. Submit with `task_ledger_submit_result`, including `result_in.parameter_values` when required.
 7. Do not self-verify. An independent verifier inspects the actual output/evidence and calls the verification operation.
-8. Claim another task only when the user explicitly instructs the worker to continue.
+8. When the user has requested continued work, **do not terminate on a lost/expired lease**: record the non-mutating handoff, refresh canonical context and priorities, then atomically claim another eligible, unoccupied task. The old task must not be changed. On normal completion, continue to the next eligible task as authorized. If none exists, discover finite always-available work (constraint enforcement, goal push, health, optimization) without spawning or scheduling agents.
 
 The orchestrator records goal-level iterations as tasks progress. A new worker chat must reconstruct state from Supabase, not rely on the original conversation.
 
