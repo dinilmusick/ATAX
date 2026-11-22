@@ -34,6 +34,7 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
     typeof payload.sub!=='string'||!/^[a-zA-Z0-9_.@:-]{3,120}$/.test(payload.sub)||
     typeof payload.atax_session_id!=='string'||!/^[a-zA-Z0-9_.:-]{3,160}$/.test(payload.atax_session_id)||
     typeof payload.atax_task_id!=='string'||!UUID.test(payload.atax_task_id)||
+    typeof payload.atax_claim_token!=='string'||!UUID.test(payload.atax_claim_token)||
     !Number.isInteger(payload.iat)||!Number.isInteger(payload.exp)||
     payload.exp<=now||payload.iat>now+30||payload.exp-payload.iat>1800||
     (payload.nbf!==undefined&&(!Number.isInteger(payload.nbf)||payload.nbf>now)))return null;
@@ -53,7 +54,8 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
     const key=await crypto.subtle.importKey('jwk',jwk,{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);
     const valid=await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,unbase64(parts[2]),
       encoder.encode(parts[0]+'.'+parts[1]));
-    return valid?{id:payload.sub,sessionId:payload.atax_session_id,taskId:payload.atax_task_id}:null;
+    return valid?{id:payload.sub,sessionId:payload.atax_session_id,taskId:payload.atax_task_id,
+      claimToken:payload.atax_claim_token}:null;
   }catch{return null;}
 }
 
@@ -73,7 +75,9 @@ export function createSocketWorker(env,fetcher=fetch){
         body:JSON.stringify({command_in:command})
       });
       if(!response.ok)throw Error('Canonical transaction unavailable');
-      const result=await response.json();
+      const body=await response.text();
+      if(encoder.encode(body).length>16384)throw Error('Canonical response exceeds socket boundary');
+      const result=JSON.parse(body);
       return Array.isArray(result)?null:result;
     }
   };
@@ -84,9 +88,12 @@ export function createSocketWorker(env,fetcher=fetch){
   }catch{catalog={};}
   const githubDispatch={
     resolveWorkflow(key){
-      const inputNames=Object.hasOwn(catalog,key)?catalog[key]:null;
-      return Array.isArray(inputNames)&&inputNames.every(x=>typeof x==='string'&&
-        /^[a-z][a-z0-9_]{0,63}$/.test(x))?{key,inputNames}:null;
+      const inputs=Object.hasOwn(catalog,key)?catalog[key]:null;
+      const types=new Set(['sha','uuid','slug','integer','boolean']);
+      return inputs&&typeof inputs==='object'&&!Array.isArray(inputs)&&
+        Object.entries(inputs).every(([name,type])=>
+          /^[a-z][a-z0-9_]{0,63}$/.test(name)&&types.has(type))
+        ?{key,inputs}:null;
     }
   };
   return createSocketGateway({
