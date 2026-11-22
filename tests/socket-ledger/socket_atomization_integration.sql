@@ -12,6 +12,7 @@ DECLARE
   inv_exec public.socket_invocations; inv_other public.socket_invocations;
   inv_ver public.socket_invocations; inv_other_atom public.socket_invocations;
   inv_author_ver public.socket_invocations;
+  inv_exec_verify public.socket_invocations;
   p uuid; p_stale uuid; p_crash uuid; fence uuid:=gen_random_uuid();
   fence_stale uuid:=gen_random_uuid(); fence_crash uuid:=gen_random_uuid();
   definition jsonb; bad jsonb; outcome jsonb; split_result jsonb;
@@ -39,6 +40,9 @@ BEGIN
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
     VALUES('test-atomiser','test-atom-verifier-session','controller:atomver','verifier',now()+interval '1 hour')
     RETURNING * INTO inv_author_ver;
+  INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
+    VALUES('test-executor','test-exec-verifier-session','controller:execver','verifier',now()+interval '1 hour')
+    RETURNING * INTO inv_exec_verify;
 
   definition:=jsonb_build_array(
     jsonb_build_object('name','Socket child one','description','Produce a typed artifact',
@@ -141,6 +145,8 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM public.task_dependencies
       WHERE depends_on_task_id=c1 AND task_id=c2 AND dependency_type='blocking') THEN
     RAISE EXCEPTION 'FAIL: canonical blocking dependency not recorded'; END IF;
+  IF EXISTS(SELECT 1 FROM public.tasks WHERE id IN (c1,c2) AND status<>'waiting') THEN
+    RAISE EXCEPTION 'FAIL: children leaked into legacy queued pool'; END IF;
 
   outcome:=public.socket_atomize_task(p,inv_atom.id,inv_atom.secret,fence,
     'test-split-key',definition);
@@ -244,6 +250,8 @@ BEGIN
     jsonb_build_array('execution-evidence'),'completed');
   IF child.verification_status<>'pending' THEN
     RAISE EXCEPTION 'FAIL: child did not enter verification queue'; END IF;
+  IF child.verification_claim_expires_at IS DISTINCT FROM 'infinity'::timestamptz THEN
+    RAISE EXCEPTION 'FAIL: child leaked into legacy verification queue'; END IF;
 
   rejected:=false;
   BEGIN
@@ -253,6 +261,14 @@ BEGIN
     rejected:=position('Verifier must be independent' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: author reused identity to verify'; END IF;
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_claim_child_verification(c1,inv_exec_verify.id,inv_exec_verify.secret);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Verifier must be independent' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: executor reused identity to verify'; END IF;
 
   verification:=public.socket_claim_child_verification(c1,inv_ver.id,inv_ver.secret);
   rejected:=false;
@@ -363,6 +379,15 @@ BEGIN
   PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('nested second verified')));
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_finalize_parent(nested_c1,inv_exec_verify.id,inv_exec_verify.secret,
+      jsonb_build_object('evidence',jsonb_build_array('not independent')));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('preceding executor' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: preceding executor verified nested parent'; END IF;
   child:=public.socket_finalize_parent(nested_c1,inv_ver.id,inv_ver.secret,
     jsonb_build_object('evidence',jsonb_build_array('grandchildren independently verified')));
   IF child.status<>'completed' OR child.verification_status<>'verified' THEN
