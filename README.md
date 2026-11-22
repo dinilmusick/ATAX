@@ -1,11 +1,18 @@
 # ATAX
 
-ATAX provides three distinct capabilities:
+ATAX is a durable substrate for **externally created, transient agents**. One canonical Supabase ledger holds systems, goals, tasks, dependencies, constraints, memories, skills, claims, evidence and verified results. ATAX never spawns, schedules or hosts agents.
 
-1. **Goal and task coordination — Supabase PostgreSQL.** Goals, parent tasks, dependencies, leases, loop iterations, parameters, evidence, verification and finalization are persisted and enforced by database RPCs.
-2. **Coding execution — GitHub Issues and PRs.** Each independent coding task gets one Issue as its durable execution state and one dedicated PR as its implementation artifact. Workers persist blockers and resume points in Issues; the orchestrator polls Issues/PRs/CI and writes decisions back to Issues.
-3. **Reasoning and orchestration — ChatGPT conversations.** The user opens the orchestrator and worker chats. Chats load and update shared state directly through the connected Supabase tools.
-4. **Finite compute — local container, then disposable FMRL runners.** ATAX provides only provisioning and governance; target execution occurs in the agent container or an isolated FMRL public repository that is deleted after verification.
+## Three connection modes
+
+| Mode | Entry point | Durable state |
+| --- | --- | --- |
+| **GitHub connector only** | Agents read this repository and use authorized repository tools or trusted workflows. A real live-ledger bridge needs independently configured Supabase credentials and verification. | Same Supabase ledger; GitHub alone does not grant database access |
+| **GitHub + Supabase connectors** | Existing direct ChatGPT/agent workflow: GitHub for code and workflows; Supabase for canonical context and guarded ledger RPCs. | Same Supabase ledger |
+| **ATAX remote MCP** | External AI clients connect to the owner-authenticated Cloudflare Worker at `/mcp`, which calls canonical RPCs and bounded provider tools. | Same Supabase ledger |
+
+**All three must enforce one occupied task socket at a time** through database-atomic claims, leases and fencing tokens, with external execution and independent verification. No tool/client/model/vendor-specific identity belongs in task scheduling. Tool coverage is not yet identical: the GitHub-only live-ledger bridge and native third-party MCP certification remain explicit acceptance gaps.
+
+Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Architecture**](docs/architecture.md) first. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
 
 ## Resume or create work
 
@@ -33,6 +40,7 @@ Container-first execution does not require ATAX to host target code. FMRL is a d
 ## Architecture
 
 - [Architecture](docs/architecture.md)
+- [Three connection modes and task-socket contract](docs/connection-modes.md)
 - [Template portfolio candidate audit](docs/template-portfolio-candidates.md) — selected starter per category, source revisions and commercial-license clearance status.
 - [Template portfolio coverage and acquisition manifest](docs/template-portfolio-catalog.md) — existing starters, missing product categories, exact upstream commits and private-research acquisition mode.
 - [Commercial repository acquisition policy](docs/commercial-acquisition-policy.md) — private research mirrors are separate from approval for commercial reuse.
@@ -69,7 +77,7 @@ Create permanent applications with the repository creation / Skipo tools. For ex
 
 ## Hardened worker model
 
-ATAX is designed for fragile, ephemeral agents. Workers reconstruct context from Supabase and GitHub Issues rather than chat history. Active tasks heartbeat/checkpoint about every 2 minutes and independently check ownership about every 5 minutes; tasks without a heartbeat for at least 5 minutes can be atomically recovered. Claim tokens fence stale workers. Loop contracts are authored by one worker and executed by a different worker, so success parameters cannot be self-authored and self-certified. Every worker persists progress, blockers, evidence and resume state before disappearing, and terminal completion requires independent verification.
+ATAX is designed for fragile, ephemeral agents. Workers reconstruct context from Supabase and GitHub Issues rather than chat history. Active tasks heartbeat/checkpoint about every 2 minutes and periodically check ownership. Task recovery must preserve exclusive occupancy: it must not replace a **still-valid lease** merely because a heartbeat is stale. All recovery paths must rotate fencing tokens and reject stale holders. The canonical RPC audit for these invariants is ongoing. Claim tokens fence stale workers. Loop contracts are authored by one worker and executed by a different worker, so success parameters cannot be self-authored and self-certified. Every worker persists progress, blockers, evidence and resume state before disappearing, and terminal completion requires independent verification.
 
 For the complete protocol, start with `AGENTS.md`, `skills/task-ledger/SKILL.md`, `skills/universal-task-router/SKILL.md`, `skills/coding-task-lifecycle/SKILL.md`, and `skills/persistent-multi-agent-execution/SKILL.md`.
 
