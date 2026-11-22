@@ -62,9 +62,14 @@ BEGIN
   command:=jsonb_set(command,'{claimToken}',to_jsonb(fence::text));
   command:=jsonb_set(command,'{operation}','"context_pull"'::jsonb);
   command:=jsonb_set(command,'{capability}','"socket:context:read"'::jsonb);
+  SELECT input_used INTO used1 FROM public.socket_task_budgets WHERE task_id=t;
   result1:=public.atax_socket_execute_v1(command);
+  result2:=public.atax_socket_execute_v1(command);
+  SELECT input_used INTO used2 FROM public.socket_task_budgets WHERE task_id=t;
   IF result1->>'code'<>'CAPABILITY_REVOKED'
-  THEN RAISE EXCEPTION 'FAIL: missing capability accepted: %',result1; END IF;
+     OR result2->>'code'<>'CAPABILITY_REVOKED'
+     OR used2-used1<>2*(octet_length(input)+8)
+  THEN RAISE EXCEPTION 'FAIL: denied authenticated retries must be charged cumulatively: %, %, %',result1,result2,used2-used1; END IF;
 
   command:=jsonb_set(command,'{operation}','"protocol"'::jsonb);
   command:=jsonb_set(command,'{capability}','"socket:protocol"'::jsonb);
