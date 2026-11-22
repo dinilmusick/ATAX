@@ -67,7 +67,8 @@ class Supabase:
 
     def rows(self, table: str, filters: dict[str, str]) -> list[dict]:
         qs = urllib.parse.urlencode({key: (value if value.startswith("in.(") else "eq." + value) for key, value in filters.items()})
-        code, data = self.http.request("GET", f"{self.url}/rest/v1/{table}?{qs}&select=*&order=created_at.asc&limit=25", self.token, headers={"apikey": self.token})
+        ordering = "&order=created_at.asc" if table == "socket_dispatch_requests" else ""
+        code, data = self.http.request("GET", f"{self.url}/rest/v1/{table}?{qs}&select=*&limit=25{ordering}", self.token, headers={"apikey": self.token})
         if code != 200 or not isinstance(data, list):
             raise RemoteError("ledger_read_failed")
         return data
