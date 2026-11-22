@@ -4,7 +4,9 @@ export type OverflowReason = 'input_quota'|'output_quota'|'combined_capacity';
 export type ToolEnvelope = {tool: string; payload: unknown};
 export type Snapshot = {
   socketId:string; modelId:string; tokenizerId:string; profileSetVersion:string;
-  maxUsableTokens:number; inputLimit:number; outputLimit:number; revision:number;
+  maxUsableTokens:number; inputLimit:number; outputLimit:number;
+  /** Pinned transfer framing charge and approaching-limit policy; immutable across restores. */
+  overhead:number; threshold:number; revision:number;
   attempts:number; rejectedAttempts:number; inputTokens:number; outputTokens:number;
   attemptedInputTokens:number; attemptedOutputTokens:number;
   rejectedInputTokens:number; rejectedOutputTokens:number;
