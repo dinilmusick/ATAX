@@ -92,6 +92,13 @@ BEGIN
     THEN
        candidate_old := E'and status in (''running'',''blocked'',''waiting'')\n  returning';
     END IF;
+    IF patch.function_name='task_ledger_finalize_parent'
+       AND patch.arity::integer=4
+       AND strpos(before_sql,candidate_old)=0
+       AND strpos(before_sql,'where id=task_id_in returning * into task_out;')>0
+    THEN
+       candidate_old := 'where id=task_id_in returning * into task_out;';
+    END IF;
     IF strpos(before_sql,candidate_old)=0 THEN
       -- Some installations retain the earlier five-argument heartbeat body,
       -- while the canonical isolated rebuild starts from its older migration.
