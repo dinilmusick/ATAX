@@ -138,6 +138,25 @@ BEGIN
   IF NOT (outcome->>'duplicate')::boolean THEN
     RAISE EXCEPTION 'FAIL: overflow event retry not idempotent'; END IF;
 
+  -- A stopped parent can never be split with a stale fence.
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p,inv_other_atom.id,inv_other_atom.secret,
+      gen_random_uuid(),'stale-stopped-split',definition);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('original fenced overflow report' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale stopped-parent fence accepted'; END IF;
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p,inv_other.id,inv_other.secret,fence,
+      'unapproved-stopped-split',definition);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('original fenced overflow report' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: unrelated executor atomized stopped parent'; END IF;
   -- Freeze, provenance, typed edges, and atomic child registration.
   split_result:=public.socket_atomize_task(p,inv_atom.id,inv_atom.secret,fence,
     'test-split-key',definition,jsonb_build_object('checkpoint','persisted'));
@@ -372,7 +391,7 @@ BEGIN
   PERFORM public.socket_stop_for_atomization(nested_c1,inv_exec.id,inv_exec.secret,
     claim.claim_token,'recursive-scope',jsonb_build_object('partial','checkpoint'));
   PERFORM public.socket_atomize_task(nested_c1,inv_other_atom.id,inv_other_atom.secret,
-    NULL,'nested-split',definition,jsonb_build_object('partial','checkpoint'));
+    claim.claim_token,'nested-split',definition,jsonb_build_object('partial','checkpoint'));
   IF (SELECT count(*) FROM public.socket_atomization_children
       WHERE parent_task_id=nested_c1)<>2
      OR (SELECT status FROM public.tasks WHERE id=nested_c1)<>'waiting' THEN
@@ -424,6 +443,32 @@ BEGIN
   IF child.status<>'completed' OR child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: nested parent failed verified finalization';
   END IF;
-  RAISE NOTICE 'PASS: replay, quota stop, stale fences, identity isolation, dependencies, verification, atomic recovery, recursive finalization';
+  -- A verifier's negative decision does not grant authorization to directly
+  -- rewrite the result as verified.
+  SELECT child_task_id INTO c2 FROM public.socket_atomization_children
+    WHERE parent_task_id=p_crash AND ordinal=2;
+  claim:=public.socket_claim_child(c2,inv_other.id,inv_other.secret);
+  PERFORM public.task_ledger_record_loop_iteration(c2,inv_other.agent_id,claim.claim_token,
+    1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
+    jsonb_build_array(jsonb_build_object('status','satisfied')),
+    '{}'::jsonb,'[]'::jsonb,jsonb_build_array('execution-evidence'),
+    'pass','Awaiting independent result');
+  PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
+    '{}'::jsonb,'Result awaiting review','[]'::jsonb,
+    jsonb_build_array('negative-test-result'),'completed');
+  verification:=public.socket_claim_child_verification(c2,inv_ver.id,inv_ver.secret);
+  PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
+    verification.verification_claim_token,false,
+    jsonb_build_object('reason','Negative test outcome'));
+  rejected:=false;
+  BEGIN
+    UPDATE public.tasks SET verification_status='verified',
+      verified_by_agent_id=inv_ver.agent_id WHERE id=c2;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Child verification may not reuse' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: negative verdict improperly approved direct promotion'; END IF;
+  RAISE NOTICE 'PASS: replay, quota stop, stale fences, identity isolation, dependencies, verification, atomic recovery, recursive finalization, negative verdict fencing';
 END $test$;
 ROLLBACK;
