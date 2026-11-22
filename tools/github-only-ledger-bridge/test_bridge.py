@@ -37,7 +37,7 @@ class BridgeTests(unittest.TestCase):
         _, calls = self.command("claim", {"goal_id": goal}, "ResearchAgent")
         self.assertEqual(calls[0][0], "task_ledger_claim_goal_next")
         self.assertEqual(calls[0][1]["agent_id_in"], "atax-github:researchagent")
-        self.assertEqual(calls[0][1]["lease_seconds_in"], 900)
+        self.assertEqual(calls[0][1]["lease_seconds_in"], 120)
 
     def test_no_arbitrary_sql_or_rpc(self):
         for op in ("execute_sql", "rpc", "table", "workflow_dispatch"):
@@ -58,6 +58,29 @@ class BridgeTests(unittest.TestCase):
         _, submit = self.command("submit", {"task_id": task, "claim_token": fence, "result": {}, "evidence": [{"url": "https://example.org"}]})
         self.assertEqual(submit[0][0], "task_ledger_submit_result")
         self.assertEqual(submit[0][1]["evidence_in"][0]["url"], "https://example.org")
+
+    def test_loss_handoff_does_not_mutate_socket_and_agent_can_claim_again(self):
+        task = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        fence = "11111111-2222-4333-8444-555555555555"
+        _, checked = self.command("check_claim", {"task_id": task, "claim_token": fence})
+        self.assertEqual(checked[0][0], "task_ledger_check_claim")
+        self.assertEqual(checked[0][1]["agent_id_in"], "atax-github:trusted-agent")
+
+        _, handoff = self.command("handoff", {
+            "task_id": task, "claim_token": fence,
+            "note": "Expired lease; changes committed; pending review",
+            "context": {"evidence": [{"url": "https://example.org/commit"}]},
+        })
+        self.assertEqual(handoff[0][0], "task_ledger_record_handoff")
+        self.assertEqual(handoff[0][1]["previous_agent_id_in"], "atax-github:trusted-agent")
+        self.assertEqual(handoff[0][1]["previous_claim_token_in"], fence)
+        self.assertEqual(len(handoff), 1)  # Handoff is not a submit/release/new-claim.
+        with self.assertRaises(BRIDGE.BridgeError):
+            self.command("handoff", {"task_id": task, "claim_token": fence, "note": "x", "agent_id": "spoofed"})
+
+        goal = "11111111-2222-4333-8444-555555555555"
+        _, next_claim = self.command("claim", {"goal_id": goal})
+        self.assertEqual(next_claim[0][0], "task_ledger_claim_goal_next")
 
     def test_verification_uses_actor_principal(self):
         _, claim = self.command("verification_claim", {}, "auditor")
