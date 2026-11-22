@@ -171,26 +171,40 @@ class Controller:
                 continue
             req = self._load(row["id"])
             summary["observed"] += 1
-            runs = self.gh.runs(req)
-            if len(runs) != 1:
-                summary["pending" if not runs else "failed_closed"] += 1
-                continue  # Never infer success from an ambiguous/missing run.
-            run = runs[0]
-            if run.get("status") != "completed":
-                summary["pending"] += 1
-                continue
-            conclusion = run.get("conclusion")
-            if conclusion not in {"success", "failure", "cancelled", "timed_out", "action_required"}:
+            journal = self.db.rows("socket_dispatch_cleanup_journal", {"request_id": req.id}) if req.mode == "fmrl" else []
+            if len(journal) > 1:
                 summary["failed_closed"] += 1
                 continue
-            cleanup = "not_required"
+            if journal:
+                # Run history may be gone after cleanup; use the durable observation.
+                frozen = journal[0]
+                run_id, conclusion = frozen["run_id"], frozen["conclusion"]
+                receipt = bounded_receipt(frozen["receipt"])
+            else:
+                runs = self.gh.runs(req)
+                if len(runs) != 1:
+                    summary["pending" if not runs else "failed_closed"] += 1
+                    continue  # Never infer success from an ambiguous/missing run.
+                run = runs[0]
+                if run.get("status") != "completed":
+                    summary["pending"] += 1
+                    continue
+                conclusion = run.get("conclusion")
+                if conclusion not in {"success", "failure", "cancelled", "timed_out", "action_required"}:
+                    summary["failed_closed"] += 1
+                    continue
+                run_id = str(run["id"])
+                receipt = bounded_receipt({"request_id": req.id, "correlation_id": req.correlation_id,
+                    "run_id": run_id, "conclusion": conclusion,
+                    "cleanup": "pending" if req.mode == "fmrl" else "not_required",
+                    "target_sha": req.target_sha, "observed_at": datetime.now(timezone.utc).isoformat()})
+                if req.mode == "fmrl":
+                    self.db.rpc("socket_dispatch_prepare_cleanup", {"p_request_id": req.id,
+                        "p_run_id": run_id, "p_conclusion": conclusion, "p_receipt": receipt})
             if req.mode == "fmrl":
-                cleanup = self.gh.delete_fmrl(req)
-            receipt = bounded_receipt({"request_id": req.id, "correlation_id": req.correlation_id,
-                "run_id": str(run["id"]), "conclusion": conclusion, "cleanup": cleanup,
-                "target_sha": req.target_sha, "observed_at": datetime.now(timezone.utc).isoformat()})
+                receipt = bounded_receipt(dict(receipt, cleanup=self.gh.delete_fmrl(req)))
             applied = self.db.rpc("socket_dispatch_finish_observed", {"p_request_id": req.id,
-                "p_run_id": str(run["id"]), "p_conclusion": conclusion, "p_receipt": receipt})
+                "p_run_id": run_id, "p_conclusion": conclusion, "p_receipt": receipt})
             if applied:
                 summary["terminal"] += 1
         return summary
