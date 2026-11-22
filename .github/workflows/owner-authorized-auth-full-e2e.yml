@@ -1,4 +1,5 @@
 name: Owner-authorized ULTRST signed-in OAuth E2E
+
 on:
   issues:
     types: [opened]
@@ -12,108 +13,40 @@ jobs:
     if: >-
       github.event.issue.user.id == 155351357 &&
       github.event.issue.title == '[atax-auth] full-e2e'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 13
     steps:
-      - name: Install Node.js
+      - name: Checkout public ATAX verification only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify synthetic user, OAuth consent, callback, session and logout
+      - name: Install isolated Chromium on supported Linux
         shell: bash
         run: |
-          cat > /tmp/atax-auth-e2e.mjs <<'NODE'
-          import fs from 'node:fs/promises';
-          import { randomBytes } from 'node:crypto';
-          const luth='https://luth.blueprint-ninjastudios.workers.dev';
-          const apps=['https://aiko.todadjp.workers.dev','https://srkl-engine.todadjp.workers.dev'];
-          const email='atax-e2e-'+process.env.GITHUB_RUN_ID+'@example.com';
-          const password='A1!'+randomBytes(28).toString('base64url');
-          const lines=['Live OAuth email/password end-to-end verification','Synthetic account: '+email];
-          const jars=new Map();
-          function assert(ok,code){if(!ok)throw Error(code);}
-          async function call(target,options={}){
-            const url=new URL(target);const jar=jars.get(url.origin)||new Map();
-            const headers={accept:'application/json',...(options.body!==undefined?{'content-type':'application/json'}:{}),...(jar.size?{cookie:[...jar].map(([k,v])=>k+'='+v).join('; ')}:{}),...(options.method==='POST'?{origin:url.origin,'sec-fetch-site':'same-origin'}:{}),...options.headers};
-            const response=await fetch(url,{method:options.method||'GET',headers,body:options.body===undefined?undefined:JSON.stringify(options.body),redirect:'manual',cache:'no-store',signal:AbortSignal.timeout(25000)});
-            const cookies=response.headers.getSetCookie?.()||[];
-            for(const cookie of cookies){const pair=cookie.split(';')[0],i=pair.indexOf('=');if(i>0)jar.set(pair.slice(0,i),pair.slice(i+1));}
-            jars.set(url.origin,jar);
-            return response;
-          }
-          function next(response,base){
-            const location=response.headers.get('location');
-            if(!location)return null;
-            return new URL(location,base);
-          }
-          async function urlFromConsent(response){
-            const location=next(response,luth);if(location)return location;
-            const raw=await response.text();let body={};try{body=JSON.parse(raw)}catch{}
-            const candidate=body.url||body.data?.url||body.redirectUrl;
-            return typeof candidate==='string'?new URL(candidate,luth):null;
-          }
-          async function flow(app){
-            const name=new URL(app).hostname;
-            const start=await call(app+'/api/auth/oidc/start');
-            const authorization=next(start,app);
-            assert(start.status===303&&authorization&&authorization.origin===luth&&authorization.pathname==='/api/auth/oauth2/authorize','START_INVALID_'+name+'_'+start.status);
-            lines.push(name+': official OAuth start 303');
-            let auth=await call(authorization.href);
-            let destination=next(auth,luth);
-            assert((auth.status===302||auth.status===303)&&destination,'AUTHORIZE_NO_REDIRECT_'+name+'_'+auth.status);
-            assert(destination.origin===luth||destination.origin===app,'AUTHORIZE_EXTERNAL_REDIRECT_'+name);
-            if(destination.origin===luth&&destination.pathname==='/'){
-              auth=await call(authorization.href);
-              destination=next(auth,luth);
-            }
-            assert(destination,'AUTHORIZE_LOCATION_MISSING_'+name);
-            let callback;
-            if(destination.origin===luth&&destination.pathname==='/consent'){
-              const verified=await call(luth+'/api/consent/verified'+destination.search);
-              assert(verified.status===200,'CONSENT_VERIFICATION_'+name+'_'+verified.status);
-              lines.push(name+': signed consent verified');
-              const approval=await call(luth+'/api/auth/oauth2/consent',{method:'POST',body:{accept:true}});
-              assert(approval.ok||approval.status===302||approval.status===303,'CONSENT_REJECTED_'+name+'_'+approval.status);
-              callback=await urlFromConsent(approval);
-            }else callback=destination;
-            assert(callback&&callback.origin===app&&callback.pathname==='/api/auth/oidc/callback','CALLBACK_TARGET_INVALID_'+name);
-            const response=await call(callback.href);
-            assert(response.status===303,'CALLBACK_FAILED_'+name+'_'+response.status);
-            lines.push(name+': signed OAuth callback 303');
-            const session=await call(app+'/api/auth/oidc/session');
-            const data=await session.json().catch(()=>({}));
-            assert(session.status===200&&data.authenticated===true&&data.user?.email===email,'SESSION_INVALID_'+name+'_'+session.status);
-            lines.push(name+': verified user session 200');
-            const logout=await call(app+'/api/auth/oidc/logout',{method:'POST'});
-            assert(logout.status===200,'LOGOUT_FAILED_'+name+'_'+logout.status);
-            const after=await call(app+'/api/auth/oidc/session');
-            assert(after.status===401,'LOGOUT_SESSION_STILL_VALID_'+name+'_'+after.status);
-            lines.push(name+': logout revoked session 401');
-          }
-          try{
-            const signed=await call(luth+'/api/auth/sign-up/email',{method:'POST',body:{name:'ATAX disposable E2E',email,password}});
-            assert(signed.ok,'SIGNUP_FAILED_'+signed.status);
-            lines.push('Luth synthetic email signup: '+signed.status);
-            for(const app of apps)await flow(app);
-            lines.push('ALL_ASSERTIONS_PASSED');
-          }catch(e){
-            lines.push('FAILURE: '+String(e.message||'Unexpected').slice(0,180));
-            process.exitCode=1;
-          }finally{
-            await fs.writeFile('/tmp/atax-auth-e2e-report.txt',lines.join('\n')+'\n');
-            console.log(lines.join('\n'));
-          }
-          NODE
-          node /tmp/atax-auth-e2e.mjs
-      - name: Publish non-secret test status to initiating issue
+          set -euo pipefail
+          mkdir -p /tmp/atax-auth-signedin
+          npm install --prefix /tmp/atax-auth-signedin --no-audit --no-fund --ignore-scripts --save-exact playwright@1.57.0
+          /tmp/atax-auth-signedin/node_modules/.bin/playwright install --with-deps chromium
+          cp tools/github/verify_live_email_oauth_e2e.mjs /tmp/atax-auth-signedin/verify.mjs
+      - name: Verify production email account, OAuth callback, persistence and logout
+        shell: bash
+        run: |
+          set -euo pipefail
+          node /tmp/atax-auth-signedin/verify.mjs
+      - name: Publish bounded non-secret E2E result
         if: always()
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ github.event.issue.number }}
-        shell: bash
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          if test -f /tmp/atax-auth-e2e-report.txt; then
-            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/atax-auth-e2e-report.txt
+          set -euo pipefail
+          if test -f /tmp/atax-auth-signedin-report.txt; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/atax-auth-signedin-report.txt
           else
-            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body 'Synthetic auth integration did not execute.'
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body 'Signed-in Chromium verification did not reach its assertions.'
           fi
