@@ -103,7 +103,30 @@ def execute_command(command: dict, actor: str, db: SupabaseAgentClient):
         return db.rpc("task_ledger_claim_goal_next", {
             "goal_id_in": uuid_arg(args, "goal_id"),
             "agent_id_in": identity, "agent_name_in": "GitHub bridge " + actor,
-            "agent_type_in": "worker", "capabilities_in": caps, "lease_seconds_in": 900,
+            "agent_type_in": "worker", "capabilities_in": caps, "lease_seconds_in": 120,
+        })
+
+    if op == "check_claim":
+        require_fields(args, {"task_id", "claim_token"})
+        return db.rpc("task_ledger_check_claim", {
+            "task_id_in": uuid_arg(args, "task_id"),
+            "claim_token_in": uuid_arg(args, "claim_token"),
+            "agent_id_in": identity,
+        })
+
+    if op == "handoff":
+        # This operation can only append an authenticated former-lease note;
+        # it cannot submit results or release/reclaim the current socket.
+        require_fields(args, {"task_id", "claim_token", "note"}, {"context"})
+        context = args.get("context", {})
+        if not isinstance(context, dict):
+            raise BridgeError("Handoff context must be an object")
+        return db.rpc("task_ledger_record_handoff", {
+            "task_id_in": uuid_arg(args, "task_id"),
+            "previous_claim_token_in": uuid_arg(args, "claim_token"),
+            "previous_agent_id_in": identity,
+            "handoff_note_in": short_text(args, "note", 3000),
+            "context_in": context,
         })
 
     if op == "heartbeat":
@@ -111,7 +134,7 @@ def execute_command(command: dict, actor: str, db: SupabaseAgentClient):
         return db.rpc("task_ledger_heartbeat_claim", {
             "task_id_in": uuid_arg(args, "task_id"),
             "claim_token_in": uuid_arg(args, "claim_token"),
-            "agent_id_in": identity, "lease_seconds_in": 900,
+            "agent_id_in": identity, "lease_seconds_in": 120,
             "current_step_in": short_text(args, "current_step", 1200),
             "heartbeat_context_in": {"activity": "github-bridge", "progress": "Lease renewed",
                                      "next_action": "Continue finite external work"},
@@ -146,7 +169,7 @@ def execute_command(command: dict, actor: str, db: SupabaseAgentClient):
     if op == "verification_claim":
         require_fields(args, set())
         return db.rpc("task_ledger_claim_verification", {
-            "verifier_agent_id_in": identity, "lease_seconds_in": 900,
+            "verifier_agent_id_in": identity, "lease_seconds_in": 120,
         })
 
     if op == "verify":
