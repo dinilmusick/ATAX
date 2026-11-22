@@ -12,7 +12,9 @@ ATAX is a durable substrate for **externally created, transient agents**. One ca
 
 **All three must enforce one occupied task socket at a time** through database-atomic claims, leases and fencing tokens, with external execution and independent verification. No tool/client/model/vendor-specific identity belongs in task scheduling. Tool coverage is not yet identical: the GitHub-only live-ledger bridge and native third-party MCP certification remain explicit acceptance gaps.
 
-Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Architecture**](docs/architecture.md) first. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
+Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Architecture**](docs/architecture.md) first.
+
+**Google AI Studio / React handoff:** [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend environment-variable contract](docs/ENVIRONMENT_CONFIGURATION.md) · [blank `.env.example`](.env.example). The proposed React UI is not yet deployed; sensitive provider keys must never be put in a browser build. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
 
 ## Resume or create work
 
