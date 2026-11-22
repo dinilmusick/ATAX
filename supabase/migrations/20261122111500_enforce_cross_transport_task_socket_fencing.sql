@@ -19,6 +19,7 @@ BEGIN
     ('task_ledger_claim_goal_next','6','greatest(600, least(coalesce(lease_seconds_in,600),86400))','greatest(30, least(coalesce(lease_seconds_in,120),120))'),
     ('goal_ledger_claim_task','7','greatest(600,least(coalesce(lease_seconds_in,600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
     ('task_ledger_heartbeat_claim','5','greatest(30,least(coalesce(lease_seconds_in,900),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
+    ('task_ledger_heartbeat_claim','5','greatest(3600,least(coalesce(lease_seconds_in,3600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
     ('task_ledger_heartbeat_claim','6','greatest(600,least(coalesce(lease_seconds_in,600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
     ('task_ledger_heartbeat_policy','0','''heartbeat_interval_seconds'', 120','''heartbeat_interval_seconds'', 60'),
     ('task_ledger_heartbeat_policy','0','''ownership_check_interval_seconds'', 300','''ownership_check_interval_seconds'', 60'),
@@ -63,6 +64,14 @@ BEGIN
     -- Safe if this reviewed migration is replayed via both direct Supabase and CLI.
     IF strpos(before_sql,patch.new_fragment)>0 THEN CONTINUE; END IF;
     IF strpos(before_sql,patch.old_fragment)=0 THEN
+      -- Some installations retain the earlier five-argument heartbeat body,
+      -- while the canonical isolated rebuild starts from its older migration.
+      -- Both variants are explicitly recognized; unknown drift still aborts.
+      IF patch.function_name='task_ledger_heartbeat_claim'
+         AND patch.arity::integer=5
+         AND patch.old_fragment='greatest(30,least(coalesce(lease_seconds_in,900),86400))'
+         AND strpos(before_sql,'greatest(3600,least(coalesce(lease_seconds_in,3600),86400))')>0
+      THEN CONTINUE; END IF;
       RAISE EXCEPTION 'Socket-fence migration drift: % / % fragment not found',
         patch.function_name,patch.arity;
     END IF;
