@@ -20,7 +20,8 @@ function makeFake(options={}){
       'socket:context:read','socket:output:submit','socket:atomise:request',
       'socket:workflow:request','socket:task:status'
     ]),
-    ...options
+    ...options,
+    session:'socket-C' // canonical claim session stays fixed; option alters only signed caller
   };
   const meter={count:text=>encoder.encode(text).length};
   let queue=Promise.resolve();
