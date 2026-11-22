@@ -48,16 +48,18 @@ def execute(contract: dict, payload: object, registry: dict, secrets: dict) -> d
         body = root / "request.json"
         response = root / "response.txt"
         headers = root / "headers.txt"
+        auth_headers = root / "auth_headers.txt"
         body.write_bytes(data)
         os.chmod(body, 0o600)
+        auth_headers.write_text("Authorization: Bearer " + token + "\nIdempotency-Key: " + payload["idempotency_key"] + "\n")
+        os.chmod(auth_headers, 0o600)
         cmd = ["curl", "--silent", "--show-error", "--fail-with-body",
                "--proto", "=https", "--max-redirs", "0", "--noproxy", "*",
                "--resolve", f"{parsed.hostname}:443:{ip}",
                "--connect-timeout", "5", "--max-time", "20",
                "--max-filesize", "8192", "-X", method,
                "-H", "Content-Type: application/json",
-               "-H", f"Authorization: Bearer {token}",
-               "-H", f"Idempotency-Key: {payload['idempotency_key']}",
+               "-H", f"@{auth_headers}",
                "--data-binary", f"@{body}", "-D", str(headers),
                "-o", str(response), "-w", "%{http_code}", url]
         try:
