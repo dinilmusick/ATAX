@@ -30,6 +30,14 @@ ATAX's interface is independent of the agent and the AI application. See [connec
 
 **In every mode:** incoming agents are created externally; ATAX does not know/care which model/application arrived. A task is a **socket** occupied by one valid atomic claim and fencing token at a time. All entrants must use canonical Supabase claim, heartbeat, submit, release and independent verification safeguards. GitHub Issues, workflow statuses, an MCP session and chat history are **not** substitute locks or canonical state. Do not claim full three-mode equivalence until live acceptance tests prove it.
 
+## Lease forfeiture is task-local, not agent termination
+
+At each periodic ownership check and before every write, confirm the task's canonical lease and fencing token. If the claim expired, a renewal was rejected, or a new holder owns that socket: **stop only work on the forfeited task**, never modify its canonical state, and append a best-effort completion/handoff event using `task_ledger_record_handoff` with the **old token**. Include accurate partial results, observations, evidence references, external side effects and next steps without secrets. This event is append-only; it is **not** a successful task submission or a way to reclaim the socket.
+
+Then forget the lost active claim, refresh the current goal/task/dependency graph, select an unrelated eligible **free** socket, and claim it atomically. Continue finite work within the same externally started agent session. Contention means try another eligible task; if none exists, discover finite always-available constraint/goal/health/optimization work. Never terminate an otherwise active work session solely because a lease was lost. ATAX neither spawns nor schedules the agent.
+
+This recovery rule applies identically to GitHub-only private controller, direct GitHub+Supabase, and remote MCP clients. The new owner of the forfeited task has exclusive authority; stale owners can append safe handoff notes but cannot write task progress or results.
+
 ## Mandatory live-substrate bootstrap
 
 **This bootstrap is unconditional.** At the moment an agent/session comes into play, before interpreting, classifying, answering, or acting on the incoming turn, hydrate the live Supabase substrate and canonical skill catalogue. This applies to **every turn**, including greetings, casual conversation, clarifications, questions, acknowledgements, and requests that appear purely conversational.
