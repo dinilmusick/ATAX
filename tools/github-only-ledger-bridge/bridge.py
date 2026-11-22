@@ -220,6 +220,8 @@ def main() -> int:
         print("ATAX bridge: rejected request")
         return 2
     try:
+        if not os.environ.get("SUPABASE_URL", "").startswith("https://") or not os.environ.get("SUPABASE_SECRET_KEY"):
+            raise BridgeError("TLS Supabase endpoint and scoped server secret are required")
         db = SupabaseAgentClient.from_environment()
         result = execute_command(command, actor, db)
         comment_issue(repository, number, {"ok": True, "result": result})
