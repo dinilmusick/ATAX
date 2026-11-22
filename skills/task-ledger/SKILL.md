@@ -1,7 +1,7 @@
 ---
 name: "Task Ledger"
 slug: task-ledger
-version: 2.8.2
+version: 2.8.3
 source: Supabase Skills Database
 sourceId: 7
 status: active
@@ -93,9 +93,9 @@ A task loop may pass only against that task's own criteria and evidence. Task su
 
 Running task ownership is a short heartbeat lease.
 
-- Workers checkpoint and heartbeat every ~2 minutes while active.
-- Workers independently check ownership about every 5 minutes.
-- A running task is eligible for recovery only when **both** its last heartbeat is at least 5 minutes old **and** its canonical lease has expired. A stale heartbeat never overrides a still-valid lease.
+- **Required:** Heartbeat and checkpoint at least once every 60 seconds while active; 30–60 seconds is recommended. The lease TTL is **120 seconds maximum**, including if a caller requests 600/900 seconds. A worker that cannot send heartbeats during a long tool call must be prepared for its claim to expire; do not silently keep a task occupied.
+- Workers check fenced ownership before each canonical mutation and ideally every 30–60 seconds.
+- A running task is eligible for recovery only when **both** its last heartbeat is at least **120 seconds** old **and** its canonical lease has expired. A stale heartbeat never overrides a still-valid lease, and an expired holder must stop immediately (even before reassignment).
 - Lease expiry alone is not an automatic takeover: a fresh heartbeat continues to block opportunistic reassignment. Both signals must be checked under the canonical atomic claim RPC.
 - `claim_token` is the fencing token. Recovery rotates it, increments attempts, assigns the new worker/session and appends a `lease_recovered` event containing the previous worker and last heartbeat checkpoint.
 - Heartbeats persist `current_step` plus a JSON checkpoint containing activity, progress, discoveries, blockers and next action.
@@ -123,7 +123,7 @@ Three authorized paths reach the *same* canonical Supabase substrate:
 - GitHub plus Supabase connectors: operate GitHub directly and hydrate/claim/verify using the Supabase connector's guarded RPCs. It does not depend on MCP.
 - ATAX remote MCP: owner-authenticated Cloudflare Worker calls the same Supabase RPCs, with separately configured Worker secrets. MCP is an alternative transport, not a resident agent.
 
-**Socket law:** queued -> atomic exclusive claim with unexpired fencing token -> execution externally -> evidence submitted -> independently verified -> finalized. A task cannot be reclaimed before its valid lease expires. Expired holders cannot renew, release, submit or append iterations with obsolete fences. Opaque agent identifiers are claim holders only, never AI-vendor identity or a scheduler.
+**Socket law:** queued -> atomic exclusive claim with unexpired fencing token -> execution externally -> evidence submitted -> independently verified -> finalized. A task becomes eligible for re-claim after 120 seconds of no heartbeat and an expired lease; the first subsequent atomic claimant takes it. No persistent resident agent or in-substrate scheduler detects/revokes it automatically. Expired holders cannot renew, release, submit or append iterations with obsolete fences. Opaque agent identifiers are claim holders only, never AI-vendor identity or a scheduler.
 
 For target application work, run locally in the arriving agent's own container first. When authorized remote GitHub compute is required for private target source, use a disposable FMRL public bridge; never execute target code in ATAX's own Actions runner. Delete FMRL and verify 404. Do not use the retired `agent-compute` issue-triggered ATAX runner.
 
