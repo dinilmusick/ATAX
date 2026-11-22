@@ -120,11 +120,9 @@ async function authenticate(request,env, fetcher){
       if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|fmrl:execute)$/.test(scope))scopes.add(scope);
     }
   }
-  // Separate externally created agents (one stable OAuth client ID per application)
-  // while authorizing them against the same single-owner subject.
-  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(claims.iss+'\u0000'+claims.sub+'\u0000'+claims.azp)));
-  const agentId='mcp-'+Array.from(digest.slice(0,16),b=>b.toString(16).padStart(2,'0')).join('');
-  return {id:agentId,ownerSubject:claims.sub,authMethod:'jwt',scopes};
+  // ATAX cares about authorized work, not which app supplies the external agent.
+  // Per-task claim tokens enforce ownership without naming Claude or Gemini.
+  return {id:claims.sub,authMethod:'jwt',scopes};
 }
 function allowedOrigin(req, env){
   const origin=req.headers.get('origin'); if(!origin)return true;
