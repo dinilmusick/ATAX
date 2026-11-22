@@ -9,3 +9,13 @@ Final reconciler can implement an **external adapter shim** exporting `createAda
 Contract summary: `claim -> bounded pull/push -> stop-on-overflow -> separate planner atomizes -> different agent claims child -> pinned delegated workflow -> independent verification`. Status and meter state are durable per task, never reset by reconnect. Claim identities include principal, task, session, and fence. Every provider and tool accounting increment is cumulative and append-only. Inputs, outputs, retries, failed attempts and repeated chunks count. Direct mutations and raw credentials are forbidden.
 
 See `docs/task-socket-conformance.md` for provider sourcing, calibration methods, expected failures and integrated release gates.
+## Agent K hardening
+
+The additional attestation.test.mjs and adapter-adversarial.test.mjs cover untrusted calibration data and independent negative gates. The calibration CLI requires ATAX_SOCKET_TRUST_STORE when an observation JSON is supplied, but remains uncalibrated by default.
+
+    node --test tests/task-socket-conformance/*.test.mjs
+    node tests/task-socket-conformance/calibration-cli.mjs
+    ATAX_SOCKET_TRUST_STORE=/secure/keys.json node tests/task-socket-conformance/calibration-cli.mjs /secure/observation.json
+    ATAX_SOCKET_CONFORMANCE_ADAPTER=/absolute/path/disposable-shim.mjs node --test tests/task-socket-conformance/adapter-contract.test.mjs tests/task-socket-conformance/adapter-adversarial.test.mjs
+
+Tests using the reference fake do not certify live provider access, database, gateway or GitHub execution. See docs/task-socket-conformance.md section 7 for exact trust requirements, red release gates and evidence status.
