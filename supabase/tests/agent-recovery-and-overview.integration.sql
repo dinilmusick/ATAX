@@ -8,6 +8,7 @@ declare
   goal_id_value uuid;
   first_claim public.tasks;
   early_claim public.tasks;
+  premature_claim public.tasks;
   recovered public.tasks;
   overview jsonb;
   goal_row jsonb;
@@ -76,6 +77,17 @@ begin
       current_step='Stale heartbeat for recovery'
   where id=first_claim.id;
 
+  select * into premature_claim
+  from public.task_ledger_claim_goal_next(
+    goal_id_value,'recovery-worker-premature','Premature Worker','worker',
+    array['recovery-test']::text[],900
+  );
+  if premature_claim.id is not null then
+    raise exception 'Stale heartbeat must not override active lease';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered
   from public.task_ledger_claim_goal_next(
     goal_id_value,'recovery-worker-new','Recovery Worker','worker',
@@ -117,7 +129,7 @@ begin
     raise exception 'Overview did not aggregate running task';
   end if;
 
-  raise notice 'PASS: bounded-v2 direct task, five-minute heartbeat recovery, fencing and complete overview';
+  raise notice 'PASS: bounded-v2 direct task, five-minute heartbeat and expired-lease recovery, fencing and complete overview';
 end;
 $test$;
 rollback;
