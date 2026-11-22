@@ -29,6 +29,14 @@ BEGIN
   returning * into task_out;','where id = task_id_in and (status<>''running'' or (claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp())))
   returning * into task_out;'),
     ('task_ledger_claim_verification','2','where t.verification_status=''pending'' and t.result_submitted_at is not null','where t.verification_status=''pending'' and t.result_submitted_at is not null and t.claimed_by_agent_id is distinct from verifier_agent_id_in'),
+('task_ledger_heartbeat_policy','0','''lease_expiry_is_recovery_gate'', false','''lease_expiry_is_recovery_gate'', true'),
+    ('record_checkpoint_predicate_result','10','if t.execution_model <> ''bounded-v2'' then','if t.status=''running'' and (t.claim_token is null or t.claim_expires_at<=statement_timestamp() or t.claimed_by_agent_id is distinct from executor_id_in or t.claim_token::text is distinct from fencing_token_in) then raise exception ''Active task socket requires valid checkpoint predicate fencing''; end if;
+  if t.execution_model <> ''bounded-v2'' then'),
+    ('report_checkpoint_blocker','7','if t.execution_model <> ''bounded-v2'' then','if t.status=''running'' and (t.claim_token is null or t.claim_expires_at<=statement_timestamp() or t.claimed_by_agent_id is distinct from agent_id_in or t.claim_token is distinct from claim_token_in) then raise exception ''Active task socket requires valid blocker-report fencing''; end if;
+  if t.execution_model <> ''bounded-v2'' then'),
+    ('task_ledger_revise_definition','8','if old_task.status not in (''queued'', ''running'', ''waiting'') then','if old_task.status=''running'' and old_task.claim_expires_at>statement_timestamp() then raise exception ''Release the active socket lease before revising task definition''; end if;
+  if old_task.status not in (''queued'', ''running'', ''waiting'') then'),
+    ('goal_ledger_finalize','3','and not (p.status=''completed'' and p.verification_status=''verified'')','and not (p.status=''completed'' and p.verification_status=''verified'') and (p.status<>''running'' or p.claim_expires_at is null or p.claim_expires_at<=statement_timestamp())'),
     ('task_ledger_verify_result','4','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'';','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'' and (t.verification_claim_token is null or t.verification_claim_expires_at<=statement_timestamp());')
   ) AS v(function_name,arity,old_fragment,new_fragment)
   LOOP
