@@ -178,7 +178,9 @@ test('no anonymous access, no origin and no extra provider-facing request fields
   assert.equal(reason(await call(gateway,PULL,{...BASE,repository:'owner/repo'})),'INVALID_ARGUMENTS');
   assert.equal(reason(await call(gateway,PUSH,{...BASE,output:{ok:true},api_url:'https://example.org'})),'INVALID_ARGUMENTS');
   assert.equal(reason(await call(gateway,PULL,{...BASE,limit:1000000})),'INVALID_ARGUMENTS');
-  assert.equal(state.input,0);
+  // Invalid authenticated tool requests still consume the signing socket's budget.
+  assert.ok(state.input>0);
+  assert.equal(state.outputs.length,0);
 });
 test('signed task identity, canonical owner and session all independently constrain requests',async()=>{
   const signed=makeFake({signedTask:OTHER});
