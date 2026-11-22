@@ -31,7 +31,7 @@ for (const [name, app, mode] of apps) {
     await page.goto(app, { waitUntil: 'domcontentloaded', timeout: 40000 });
     const emailChoice = page.getByRole('link', { name: /continue with email/i });
     await emailChoice.waitFor({ state: 'visible', timeout: 40000 });
-    await page.getByRole('button', { name: /continue with google/i }).waitFor({ state: 'visible', timeout: 15000 });
+    await page.getByRole('link', { name: /continue with google/i }).waitFor({ state: 'visible', timeout: 15000 });
     const gateCopy = await page.locator('body').innerText();
     if (/SIGN IN TO WORKSPACE/i.test(gateCopy) || /^\s*OR\s*$/m.test(gateCopy)) {
       throw new Error('REDUNDANT_GATE_COPY');
