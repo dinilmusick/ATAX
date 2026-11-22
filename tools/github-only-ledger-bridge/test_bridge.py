@@ -86,7 +86,7 @@ class BridgeTests(unittest.TestCase):
         task = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
         old = "11111111-2222-4333-8444-555555555555"
         result, calls = self.command("handoff", {
-            "task_id": task, "old_claim_token": old,
+            "task_id": task, "claim_token": old,
             "note": "Lease was lost; partial output saved, remaining validation pending.",
             "context": {"progress": "completed implementation",
                         "evidence": ["https://example.org/verified-pr"],
@@ -102,7 +102,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(new_claim[0][0], "task_ledger_claim_goal_next")
         self.assertEqual(new_claim[0][1]["agent_id_in"], "atax-github:researcher")
         with self.assertRaises(BRIDGE.BridgeError):
-            self.command("handoff", {"task_id": task, "old_claim_token": "bad", "note": "fake"})
+            self.command("handoff", {"task_id": task, "claim_token": "bad", "note": "fake"})
 
     def test_verification_uses_actor_principal(self):
         _, claim = self.command("verification_claim", {}, "auditor")
