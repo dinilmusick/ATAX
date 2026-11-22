@@ -33,14 +33,14 @@ for (const [name, app, mode] of apps) {
     await emailChoice.waitFor({ state: 'visible', timeout: 40000 });
     await page.getByRole('button', { name: /continue with google/i }).waitFor({ state: 'visible', timeout: 15000 });
     const gateCopy = await page.locator('body').innerText();
-    if (/SIGN IN TO WORKSPACE/i.test(gateCopy) || /^\\s*OR\\s*$/m.test(gateCopy)) {
+    if (/SIGN IN TO WORKSPACE/i.test(gateCopy) || /^\s*OR\s*$/m.test(gateCopy)) {
       throw new Error('REDUNDANT_GATE_COPY');
     }
     await emailChoice.click();
     stage = 'hosted_email_form';
     await page.locator('form input[type="email"]').waitFor({ state: 'visible', timeout: 40000 });
     const emailFormCopy = await page.locator('body').innerText();
-    if (/SIGN IN TO WORKSPACE/i.test(emailFormCopy) || /^\\s*OR\\s*$/m.test(emailFormCopy)) {
+    if (/SIGN IN TO WORKSPACE/i.test(emailFormCopy) || /^\s*OR\s*$/m.test(emailFormCopy)) {
       throw new Error('REDUNDANT_EMAIL_COPY');
     }
     if (new URL(page.url()).hostname !== 'luth.blueprint-ninjastudios.workers.dev') {
