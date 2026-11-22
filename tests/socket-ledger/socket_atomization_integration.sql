@@ -13,6 +13,7 @@ DECLARE
   inv_ver public.socket_invocations; inv_other_atom public.socket_invocations;
   inv_author_ver public.socket_invocations;
   inv_exec_verify public.socket_invocations;
+  inv_unrelated_worker public.socket_invocations;
   p uuid; p_stale uuid; p_crash uuid; fence uuid:=gen_random_uuid();
   fence_stale uuid:=gen_random_uuid(); fence_crash uuid:=gen_random_uuid();
   definition jsonb; bad jsonb; outcome jsonb; split_result jsonb;
@@ -43,6 +44,9 @@ BEGIN
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
     VALUES('test-executor','test-exec-verifier-session','controller:execver','verifier',now()+interval '1 hour')
     RETURNING * INTO inv_exec_verify;
+  INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
+    VALUES('test-unrelated-worker','test-unrelated-worker-session','controller:unrelated','worker',now()+interval '1 hour')
+    RETURNING * INTO inv_unrelated_worker;
 
   definition:=jsonb_build_array(
     jsonb_build_object('name','Socket child one','description','Produce a typed artifact',
@@ -150,7 +154,7 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale stopped-parent fence accepted'; END IF;
   rejected:=false;
   BEGIN
-    PERFORM public.socket_atomize_task(p,inv_other.id,inv_other.secret,fence,
+    PERFORM public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,fence,
       'unapproved-stopped-split',definition);
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
