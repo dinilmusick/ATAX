@@ -119,6 +119,8 @@ jobs:
           _,existing=api("GET",f"/git/ref/tags/{tag}")
           if existing:
               raise RuntimeError("Archive tag already exists; do not overwrite")
+          git("config","user.name","ATAX Branch Archive")
+          git("config","user.email","41898282+github-actions[bot]@users.noreply.github.com")
           git("tag","-a",tag,commit,"-m",
               "ATAX one-time archive of stale branch heads; manifest issue #1720")
           git("push","origin",f"refs/tags/{tag}")
