@@ -59,6 +59,20 @@ The canonical database must reject a competing claimant while the existing lease
 
 All transports must route through the same atomic claim, heartbeat, evidence submission, release, verifier claim and finalization invariants. A GitHub Issue, PR label, MCP session or in-memory mutex cannot substitute for the canonical task-socket lock.
 
+## Fenced-out agent continues on another task
+
+```text
+lost-or-expired-lease(task A)
+  → stop external work affecting A
+  → append non-mutating handoff(task A, old fence, partial result, evidence, next step)
+  → refresh Supabase task socket availability
+  → select an eligible free task B (not task A or another occupied socket)
+  → atomic claim(task B) → execute using B's new fence
+  → repeat as work remains
+```
+
+A lease-loss event **forfeits the task socket, not the entire externally running agent**. If no free finite task is eligible, the agent may discover applicable always-available work under the canonical modality catalogue. It does not wait for the substrate to spawn it or schedule another agent. Task A's replacement owner remains exclusively entitled to canonical writes. A stale holder's `task_ledger_record_handoff` is append-only audit evidence, not a task update, submission, release or ownership transfer.
+
 ## Execution and verification
 
 - Compute normally occurs in the arriving agent's own container on the **target repository**. ATAX itself must never serve as the checkout or runner for target code.
