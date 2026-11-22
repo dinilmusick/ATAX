@@ -271,4 +271,36 @@ class TestRelay(unittest.TestCase):
             with self.assertRaises(ContractError):
                 ExecutionRequest.from_record(sample(mode='fmrl',runner_repository=runner))
 
+class TestFMRLWorkflowBoundary(unittest.TestCase):
+    def test_private_checkout_is_never_in_atax_controller(self):
+        from pathlib import Path
+        workflow = (Path(__file__).resolve().parents[3] / '.github/workflows/socket-execution-controller.yml').read_text()
+        self.assertIn('Checkout trusted ATAX control-plane code only', workflow)
+        self.assertNotIn('PRIVATE_REPO_TOKEN', workflow)
+        self.assertNotIn('FMRL_TARGET_REPOSITORY', workflow)
+        self.assertNotIn('npm ci', workflow)
+
+    def test_fmrl_has_fenced_preflight_before_private_checkout(self):
+        workflow = Path(__file__).with_name('socket-fmrl.example.yml').read_text()
+        preflight = workflow.index('Validate task fence, exact target SHA')
+        checkout = workflow.index('Checkout pinned private target INSIDE transient FMRL runner')
+        operation = workflow.index('Perform ONLY fixed test/build operation')
+        cleanup = workflow.index('Always erase transient private source')
+        self.assertLess(preflight, checkout)
+        self.assertLess(checkout, operation)
+        self.assertLess(operation, cleanup)
+        self.assertIn('socket_dispatch_fence_valid', workflow)
+        self.assertIn("FMRL_TARGET_REF", workflow)
+        self.assertIn("'FMRL-'", workflow)
+        self.assertIn('GIT_ASKPASS', workflow)
+        self.assertIn('git remote remove origin', workflow)
+        self.assertIn('if: always()', workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertNotIn('actions/checkout', workflow)
+        runtime = workflow[operation:]
+        self.assertNotIn('PRIVATE_REPO_TOKEN', runtime)
+        self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', runtime)
+        self.assertNotIn('FMRL_TARGET_REPOSITORY', runtime)
+
+
 if __name__=='__main__': unittest.main()
