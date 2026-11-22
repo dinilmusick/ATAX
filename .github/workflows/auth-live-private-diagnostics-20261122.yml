@@ -31,11 +31,11 @@ jobs:
           ASKPASS
           chmod 700 "$helper"
           export GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0
-          for repository in Aiko; do
+          for repository in Aiko Srkl-Engine; do
             mkdir -p "/tmp/auth-${repository}"
             git -c credential.helper= clone --quiet --no-checkout               "https://github.com/dinilmusick/${repository}.git" "/tmp/auth-${repository}/repo" >/dev/null 2>&1
-            if [ "$repository" = Aiko ]; then exact="d4989ed3fbae402b683abf2777ec6ac8e7c89bbd";
-            else exact="7f541bcaee3f495df67d29da57b36d0259fa6c03"; fi
+            if [ "$repository" = Aiko ]; then exact="ad8c83fc5c676cca303e5990dd485b1b7c9abf96";
+            else exact="175d089a335c8732b30d50b895a9e6ef6bd91945"; fi
             git -C "/tmp/auth-${repository}/repo" checkout --quiet --detach "$exact" >/dev/null 2>&1
             test "$(git -C "/tmp/auth-${repository}/repo" rev-parse HEAD)" = "$exact"
             echo "PRIVATE_CHECKOUT_VERIFIED=${repository}"
@@ -45,11 +45,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for repository in Aiko; do
+          for repository in Aiko Srkl-Engine; do
             cd "/tmp/auth-${repository}/repo"
             npm ci --ignore-scripts --no-audit --no-fund >/tmp/auth-${repository}/npm.log 2>&1
             if [ "$repository" = Aiko ]; then command=(npm run test:integration); 
-            else command=(npm run test:architecture); fi
+            else command=(npm run test:luth-transport); fi
             set +e
             "${command[@]}" >/tmp/auth-${repository}/test.log 2>&1
             code="$?"
@@ -66,7 +66,7 @@ jobs:
           test -n "$GH_TOKEN"
           python3 - <<'PY'
           import json,re,pathlib
-          for repo,pr in [('Aiko',105)]:
+          for repo,pr in [('Aiko',106),('Srkl-Engine',61)]:
             root=pathlib.Path('/tmp/auth-'+repo)
             content=(root/'test.log').read_text(errors='replace')
             status=int((root/'status').read_text().strip())
@@ -90,15 +90,15 @@ jobs:
               line=re.sub(r'(?:Bearer|token|secret|password|authorization)[=:]\S+','[credential]',line,flags=re.I)
               context.append(''.join(c for c in line if c.isprintable())[:230])
             body=('Private canonical-auth verification on exact merged main.\n'+
-                 'Suite: '+('test:integration' if repo=='Aiko' else 'test:architecture')+
+                 'Suite: '+('test:integration' if repo=='Aiko' else 'test:luth-transport')+
                  '\nExit code: '+str(status)+'\nFiltered test error identifiers only:\n'+
                  '\n'.join('- '+s for s in selected[:65])+
                  '\nSanitized test failure context:\n'+'\n'.join(context[-80:])+
                  '\nRaw private test logs and clone remain on the disposable runner only.')
             pathlib.Path('/tmp/auth-'+repo+'/body.json').write_text(json.dumps({'body':body}))
           PY
-          for repository in Aiko; do
-            if [ "$repository" = Aiko ]; then pr=105; else pr=60; fi
+          for repository in Aiko Srkl-Engine; do
+            if [ "$repository" = Aiko ]; then pr=106; else pr=61; fi
             gh api -X POST "repos/dinilmusick/${repository}/issues/${pr}/comments"               --input "/tmp/auth-${repository}/body.json" >/dev/null
             echo "PRIVATE_DIAGNOSTIC_COMMENT_POSTED=${repository}"
           done
