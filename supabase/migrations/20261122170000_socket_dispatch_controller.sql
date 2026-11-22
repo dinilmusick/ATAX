@@ -94,6 +94,34 @@ drop trigger if exists socket_dispatch_immutable on public.socket_dispatch_reque
 create trigger socket_dispatch_immutable before update on public.socket_dispatch_requests
 for each row execute function public.socket_dispatch_immutability();
 
+-- Recursively reject credential-shaped keys and credential token prefixes on the
+-- authoritative database path, not only in optional client-side validation.
+create or replace function public.socket_dispatch_payload_safe(p_value jsonb, p_depth integer default 0)
+returns boolean language plpgsql immutable strict set search_path=pg_catalog,public as $safe$
+declare kv record; element jsonb; decoded text;
+begin
+ if p_depth > 8 then return false; end if;
+ if jsonb_typeof(p_value)='object' then
+   for kv in select key,value from jsonb_each(p_value) loop
+     if length(kv.key)>128 or kv.key ~* '(secret|password|token|credential|authorization|api[_-]?key|private[_-]?key)'
+        or not public.socket_dispatch_payload_safe(kv.value,p_depth+1) then return false; end if;
+   end loop;
+ elsif jsonb_typeof(p_value)='array' then
+   if jsonb_array_length(p_value)>64 then return false; end if;
+   for element in select value from jsonb_array_elements(p_value) loop
+     if not public.socket_dispatch_payload_safe(element,p_depth+1) then return false; end if;
+   end loop;
+ elsif jsonb_typeof(p_value)='string' then
+   decoded := p_value #>> '{}';
+   if length(decoded)>1024 or decoded ~* '^(ghp_|ghs_|github_pat_|sk-)' then return false; end if;
+ end if;
+ return true;
+end $safe$;
+alter table public.socket_dispatch_requests
+  add constraint socket_dispatch_safe_input check(public.socket_dispatch_payload_safe(input_payload));
+revoke all on function public.socket_dispatch_payload_safe(jsonb,integer) from public,anon,authenticated;
+grant execute on function public.socket_dispatch_payload_safe(jsonb,integer) to service_role;
+
 -- Service-role intake. Socket gateway must independently authorise the caller;
 -- SQL rechecks exact task+session+fence and allowlist inside this transaction.
 create or replace function public.socket_dispatch_submit(
@@ -167,9 +195,17 @@ begin
  if p_limit < 1 or p_limit > 50 then raise exception 'outbox batch bound exceeded'; end if;
  select * into cfg from public.socket_dispatch_config where singleton=true and enabled=true;
  if not found then return 0; end if;
- if cfg.github_token_secret_id is null then return 0; end if;
- select decrypted_secret into token_value from vault.decrypted_secrets where id=cfg.github_token_secret_id;
- if token_value is null or length(token_value)<10 then return 0; end if;
+ if cfg.github_token_secret_id is not null then
+   select decrypted_secret into token_value from vault.decrypted_secrets where id=cfg.github_token_secret_id;
+ end if;
+ if token_value is null or length(token_value)<10 then
+   update public.socket_dispatch_outbox
+   set state='blocked_credentials',last_error_class='missing_github_token',
+       next_attempt_at=now()+interval '5 minutes',updated_at=now()
+   where state in ('queued','retry','sent','blocked_credentials')
+     and next_attempt_at<=now();
+   return 0;
+ end if;
  for item in select o.request_id,o.state,o.attempts,o.http_request_id,o.next_attempt_at,
       r.correlation_id,r.status as request_status
   from public.socket_dispatch_outbox o join public.socket_dispatch_requests r on r.id=o.request_id
