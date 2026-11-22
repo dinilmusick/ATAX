@@ -22,6 +22,23 @@ DECLARE
   c1 uuid; c2 uuid; nested_c1 uuid; child public.tasks; claim public.tasks;
   verification public.tasks; msg text; rejected boolean;
 BEGIN
+  -- The socket tables and RPCs are server-only. A publishable/anon role must
+  -- never read invocation secrets or call the control-plane primitives.
+  IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname LIKE 'socket_%'
+      AND c.relkind IN ('r','p') AND NOT c.relrowsecurity
+  ) THEN RAISE EXCEPTION 'FAIL: socket table missing row-level security'; END IF;
+  IF has_table_privilege('anon','public.socket_invocations','SELECT')
+     OR has_table_privilege('authenticated','public.socket_invocations','SELECT')
+     OR has_table_privilege('anon','public.socket_usage_events','INSERT')
+     OR has_function_privilege('anon',
+       'public.socket_atomize_task(uuid,uuid,uuid,uuid,text,jsonb,jsonb)','EXECUTE')
+     OR has_function_privilege('authenticated',
+       'public.socket_record_usage(uuid,uuid,uuid,uuid,uuid,text,bigint,text,jsonb)','EXECUTE')
+     OR NOT has_function_privilege('service_role',
+       'public.socket_atomize_task(uuid,uuid,uuid,uuid,text,jsonb,jsonb)','EXECUTE')
+  THEN RAISE EXCEPTION 'FAIL: socket control-plane privileges leaked'; END IF;
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
     VALUES('test-atomiser','test-atom-session','controller:atom','worker',now()+interval '1 hour')
     RETURNING * INTO inv_atom;
