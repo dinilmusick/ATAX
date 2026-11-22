@@ -130,6 +130,8 @@ def bounded_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         raise ContractError("invalid terminal result")
     if "artifact_ref" in receipt and (not isinstance(receipt["artifact_ref"], str) or len(receipt["artifact_ref"]) > MAX_ARTIFACT_REF or not receipt["artifact_ref"].startswith("github-artifact://")):
         raise ContractError("artifact reference must be immutable and controlled")
+    if receipt.get("cleanup", "not_required") not in {"not_required", "pending", "independent_404"}:
+        raise ContractError("invalid cleanup attestation")
     canonical(receipt, MAX_RECEIPT_BYTES)
     reject_sensitive(receipt)
     return receipt
