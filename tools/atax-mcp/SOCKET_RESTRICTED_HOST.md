@@ -17,6 +17,8 @@ The restricted host MUST expose **only this socket MCP server** to task-bound ag
 | atax_socket_workflow_request | socket:workflow:request | Typed outbox intent, not direct GitHub dispatch |
 | atax_socket_task_status | socket:task:status | Metered minimal task status |
 
+MCP protocol discovery and handshakes (`initialize`, `ping`, `tools/list`, `resources/list`, `prompts/list`, unknown methods and the initialized notification) are **not free side channels**. Each authenticated valid JSON-RPC message invokes the canonical fenced `protocol` transaction under `socket:protocol` capability. Revoked capability, expired lease and stale fence must deny even discovery. Input, retry and full fixed output frame are cumulatively charged, with overflow forcing atomisation. Malformed unauthenticated transport is rejected before a socket can be identified; ingress rate limiting is a separate host responsibility.
+
 Direct repository modifications, arbitrary SQL, unrestricted file reads and provider calls are **not tools**. Every call is bound to the signed principal, session and task ID, canonical active fenced claim, current lease, canonical task capability and cumulative input/output quota. Cross-task use, revoked capabilities and stale claims always fail closed. Repeated context reads and retries count cumulatively. Overflow requires a durable atomic stop → atomise → release transaction with partial progress preserved.
 
 The signed OAuth resource token must be an RSA RS256 at+jwt access token with exact HTTPS issuer, audience and approved client (azp); sub, iat, exp, atax_task_id, atax_session_id and atax_claim_token are required. Expiry is at most 30 minutes. The gateway does not mint identities or accept identity in tool args. Browser Origin headers are denied.
@@ -31,7 +33,7 @@ Required settings: SUPABASE_URL (canonical project), SUPABASE_SECRET_KEY (Worker
 
 Agent C intentionally uses **own fake adapters for tests** and never writes to Agent B's migration paths. The production Worker calls one canonical server-side transaction: POST /rest/v1/rpc/atax_socket_execute_v1 with a single JSON argument named command_in. This RPC must be implemented by the final reconciler, using the independent Agent A/B/D work, before enabling socket execution.
 
-Command fields: operation, capability, principalId, sessionId, taskId, claimToken, payload, inboundTokens, replyId, maxReplyBytes, rejectReason.
+Command fields: operation, capability, principalId, sessionId, taskId, claimToken, payload, inboundTokens, replyId, maxReplyBytes, rejectReason. For `operation=protocol`, add `replyFrame` (the **exact gateway-authored JSON-RPC wire response**, or empty string for acknowledged notifications) and require `capability=socket:protocol`. The transaction verifies the current claim and meters this frame **before** its contents are returned to the agent. No mutable client-provided response frame is accepted. If the canonical RPC does not implement this operation, protocol requests fail closed; the maintainer MCP endpoint remains separate.
 
 The RPC MUST in one durable PostgreSQL transaction:
 
