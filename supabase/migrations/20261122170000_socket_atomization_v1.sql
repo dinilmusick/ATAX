@@ -323,7 +323,7 @@ BEGIN
       completion_parameters,checkpoints,loop_script_status,loop_author_agent_id,
       request_mode,work_modality,metadata)
     VALUES(v_parent.goal_id,v_parent.system_id,v_inv.agent_id,v_inv.agent_id,'atomizer',
-      v_child->>'name',v_child->>'description','queued',v_parent.priority,
+      v_child->>'name',v_child->>'description','waiting',v_parent.priority,
       parent_in,v_parent.target,v_parent.task_type,
       v_child || jsonb_build_object('general_pattern',
         coalesce(v_child->>'general_pattern','input → execute → observe → verify'),
@@ -409,7 +409,8 @@ BEGIN
   END IF;
   IF v_child.task_role<>'execution' OR v_child.loop_script_status<>'ready'
     OR v_child.attempt_count>=v_child.max_attempts
-    OR NOT (v_child.status='queued' OR
+    OR EXISTS(SELECT 1 FROM public.socket_atomizations WHERE parent_task_id=child_in)
+    OR NOT (v_child.status='waiting' OR
       (v_child.status='running' AND v_child.claim_expires_at<=statement_timestamp()
         AND v_child.heartbeat_at<=statement_timestamp()-interval '2 minutes')) THEN
     RAISE EXCEPTION 'Child is not available for a fresh claim';
@@ -458,7 +459,8 @@ BEGIN
   END IF;
   IF v_child.status<>'completed' OR v_child.verification_status<>'pending'
     OR v_child.result_submitted_at IS NULL OR
-    coalesce(v_child.verification_claim_expires_at,'-infinity'::timestamptz)>statement_timestamp() THEN
+    (coalesce(v_child.verification_claim_expires_at,'-infinity'::timestamptz)>statement_timestamp()
+      AND v_child.verification_claim_expires_at<>'infinity'::timestamptz) THEN
     RAISE EXCEPTION 'Child is not awaiting independent verification';
   END IF;
   INSERT INTO public.socket_child_verification_grants(child_task_id,invocation_id,claim_token)
@@ -567,6 +569,12 @@ BEGIN
   JOIN public.socket_atomization_children c ON c.parent_task_id=a.parent_task_id
   WHERE c.child_task_id=NEW.id;
   IF FOUND THEN
+    -- Keep submitted children out of the legacy global verifier selector.
+    -- Infinity is an unclaimed socket-specific review marker, NOT a lease.
+    IF OLD.status='running' AND NEW.status='completed'
+       AND NEW.verification_status='pending' AND NEW.result_submitted_at IS NOT NULL THEN
+      NEW.verification_claim_expires_at:='infinity'::timestamptz;
+    END IF;
     IF NEW.status='running' AND
        (OLD.status IS DISTINCT FROM 'running' OR NEW.claim_token IS DISTINCT FROM OLD.claim_token) THEN
       SELECT i.* INTO v_inv FROM public.socket_child_claim_grants g
