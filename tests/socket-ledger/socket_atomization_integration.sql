@@ -196,6 +196,16 @@ BEGIN
   IF EXISTS(SELECT 1 FROM public.socket_usage_events WHERE task_id=p_stale) THEN
     RAISE EXCEPTION 'FAIL: stale usage mutated events';
   END IF;
+  -- A new authorized atomizer must inherit the durable progress from the
+  -- original stopping invocation if no replacement progress is supplied.
+  PERFORM public.socket_stop_for_atomization(p_stale,inv_atom.id,inv_atom.secret,
+    fence_stale,'scope-recovery',
+    jsonb_build_object('checkpoint','partial-progress-from-previous-invocation'));
+  PERFORM public.socket_atomize_task(p_stale,inv_other_atom.id,inv_other_atom.secret,
+    fence_stale,'separate-atomizer-split',definition);
+  IF NOT EXISTS(SELECT 1 FROM public.socket_atomizations a WHERE a.parent_task_id=p_stale
+      AND a.partial_progress->>'checkpoint'='partial-progress-from-previous-invocation') THEN
+    RAISE EXCEPTION 'FAIL: atomizer dropped preserved stop checkpoint'; END IF;
 
   -- An exact duplicate event is a retry; a separate event is new usage.
   outcome:=public.socket_record_usage(p,inv_atom.id,inv_atom.secret,fence,
