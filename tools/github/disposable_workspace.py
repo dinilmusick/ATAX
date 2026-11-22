@@ -410,6 +410,45 @@ jobs:
               safe_classes=sorted(items.intersection(allowed_categories))
               print('FMRL Skipo migration categories: '+(
                   ','.join(safe_classes) if safe_classes else 'none'))
+              # Consolidated bounded diagnoses from legacy PRs #1550/#1465.
+              # Only fixed category labels leave the private transient runner.
+              # No lines/columns, filenames, package names or raw logs.
+              migration_signatures={
+                  'missing-shipped-contract':r'Missing package-shipped migration contract',
+                  'missing-provider-contract':r'No migration contract shipped by',
+                  'bad-contract-schema':r'Invalid migration contract identity/schema',
+                  'pending-journal':r'Pending migration journal',
+                  'unapplied-steps':r'Unapplied dependency migrations',
+                  'installed-identity':r'Installed package identity mismatch',
+                  'installed-lock-mismatch':r'Manifest/installed/lockfile mismatch',
+                  'invalid-importer':r'Missing or inconsistent pnpm importer entry',
+                  'unsupported-lock':r'Unsupported pnpm lockfile',
+                  'invalid-version':r'Invalid exact dependency version',
+                  'bad-specifier':r'Unsupported or ambiguous package specifier',
+                  'missing-declaration':r'Required migration dependency not declared',
+                  'incompatible-requirement':r'violates required range',
+                  'conflicting-requirements':r'Conflicting dependency constraints',
+                  'missing-package-file':r'FileNotFoundError',
+              }
+              migration_labels=sorted(name for name,pat in migration_signatures.items()
+                  if re.search(pat,output,re.I))
+              print('FMRL dependency migration categories: '+(
+                  ','.join(migration_labels[:8]) if migration_labels else 'none'))
+              if 'ERR_PNPM_BROKEN_LOCKFILE' in output:
+                  pnpm_parse_signatures={
+                      'multiple-documents':r'expected a single document in the stream',
+                      'unexpected-scalar':r'unexpected event: expected string scalar',
+                      'duplicate-yaml-key':r'duplicated mapping key',
+                      'yaml-indentation':r'bad indentation|mapping values are not allowed',
+                      'yaml-document-boundary':r'end of the stream or a document separator is expected',
+                      'yaml-unexpected-end':r'unexpected end of the stream',
+                      'yaml-unknown-anchor':r'unidentified alias|unknown anchor',
+                      'invalid-lockfile-shape':r'invalid type|expected.*mapping|unexpected mapping',
+                  }
+                  matched=next((name for name,pat in pnpm_parse_signatures.items()
+                      if re.search(pat,output,re.I)), 'unclassified')
+                  print('FMRL lockfile parse cause: '+matched)
+
               allowed_states={'spawn-error','process-unavailable',
                   'invalid-json','report-rejected','diagnostic-clean','unclassified'}
               receipts=re.findall(

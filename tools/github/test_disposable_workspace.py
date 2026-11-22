@@ -432,6 +432,28 @@ class FmrlTests(unittest.TestCase):
         self.assertNotIn('print(output)', runner)
 
 
+    def test_private_dependency_migration_categories_are_bounded(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("migration_signatures={", runner)
+        self.assertIn("'installed-lock-mismatch'", runner)
+        self.assertIn("'missing-provider-contract'", runner)
+        self.assertIn("FMRL dependency migration categories:", runner)
+        self.assertIn("migration_labels[:8]", runner)
+        self.assertIn("FMRL dependency migration categories:", controller)
+        self.assertNotIn("print(output)", runner)
+
+    def test_broken_pnpm_lockfile_exposes_only_fixed_cause(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("pnpm_parse_signatures={", runner)
+        self.assertIn("ERR_PNPM_BROKEN_LOCKFILE", runner)
+        self.assertIn("multiple-documents", runner)
+        self.assertIn("FMRL lockfile parse cause:", runner)
+        self.assertIn("FMRL lockfile parse cause:", controller)
+        self.assertNotIn("mark.group", runner)
+        self.assertNotIn("print(output)", runner)
+
     def test_skipo_public_policy_and_semantic_codes_are_explicitly_allowlisted(self):
         runner = (ROOT / "disposable_workspace.py").read_text()
         self.assertIn("'SEM105'", runner)
