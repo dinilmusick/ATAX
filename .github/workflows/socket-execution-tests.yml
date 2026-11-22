@@ -25,6 +25,10 @@ jobs:
         run: |
           python3 -m compileall -q tools/github/socket-execution
           python3 -m unittest discover -s tools/github/socket-execution -p 'test_*.py' -v
+      - name: Parse protected target and FMRL workflow examples
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0), aliases: true)' tools/github/socket-execution/socket-target.example.yml
+          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0), aliases: true)' tools/github/socket-execution/socket-fmrl.example.yml
       - name: Migration security and endpoint declaration smoke test
         run: |
           set -euo pipefail
