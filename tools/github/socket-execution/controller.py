@@ -220,7 +220,18 @@ class Controller:
                     self.db.rpc("socket_dispatch_prepare_cleanup", {"p_request_id": req.id,
                         "p_run_id": run_id, "p_conclusion": conclusion, "p_receipt": receipt})
             if req.mode == "fmrl":
-                receipt = bounded_receipt(dict(receipt, cleanup=self.gh.delete_fmrl(req)))
+                try:
+                    deletion = self.gh.delete_fmrl(req)
+                except RemoteError as exc:
+                    # Journal already holds the observed terminal run; persist why
+                    # deletion could not be attested so repeated failures are visible.
+                    recorded = self.db.rpc("socket_dispatch_cleanup_failed", {
+                        "p_request_id": req.id, "p_error_class": exc.category,
+                    })
+                    if recorded is not True:
+                        raise RemoteError("cleanup_failure_not_recorded") from None
+                    raise
+                receipt = bounded_receipt(dict(receipt, cleanup=deletion))
             applied = self.db.rpc("socket_dispatch_finish_observed", {"p_request_id": req.id,
                 "p_run_id": run_id, "p_conclusion": conclusion, "p_receipt": receipt})
             if applied:
