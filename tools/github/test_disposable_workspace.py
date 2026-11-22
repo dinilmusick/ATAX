@@ -431,5 +431,14 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('FMRL Skipo migration categories:', controller)
         self.assertNotIn('print(output)', runner)
 
+
+    def test_skipo_public_policy_and_semantic_codes_are_explicitly_allowlisted(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        self.assertIn("'SEM105'", runner)
+        self.assertIn("'SKP-POL-OWN-KLOKS'", runner)
+        self.assertIn("SKP-POL-[A-Z0-9-]+|SEM[0-9]{3}", runner)
+        self.assertIn("seen.intersection(approved)", runner)
+        self.assertNotIn("print(output)", runner)
+
 if __name__ == "__main__":
     unittest.main()
