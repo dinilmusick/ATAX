@@ -41,6 +41,11 @@ export function verifyCalibrationAttestation(record, { trustedSigners, profile, 
         t.evaluation.verifier !== p.independentVerifier ||
         typeof t.evaluation.pass !== 'boolean' || t.evaluation.pass !== t.success ||
         !/^[a-f0-9]{64}$/i.test(t.evaluation.outputSha256 ?? '')) reject('unmeasured or unevaluated trial');
+    // A passing trial cannot claim correctness outside its own token budget.
+    // Failed trials may exceed it (for example an explicit overflow probe).
+    if (t.success && (t.outputTokens === 0 || t.inputTokens + t.outputTokens > t.budgetTokens)) {
+      reject('passing trial exceeds token budget or has no evaluated output');
+    }
     if (seen.has(t.responseId)) reject('duplicate response ID');
     seen.add(t.responseId);
   }
