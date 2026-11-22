@@ -255,6 +255,10 @@ BEGIN
        OR v_old.authored_by_invocation<>invocation_in THEN
       RAISE EXCEPTION 'Parent already atomised by a different request';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.socket_overflow_reports o
+       WHERE o.task_id=parent_in AND o.claim_token=fence_in) THEN
+      RAISE EXCEPTION 'Split replay requires its original overflow fence';
+    END IF;
     RETURN jsonb_build_object('duplicate',true,'parent_id',parent_in,
       'child_ids',(SELECT jsonb_agg(child_task_id ORDER BY ordinal)
         FROM public.socket_atomization_children WHERE parent_task_id=parent_in));
@@ -266,9 +270,12 @@ BEGIN
       RAISE EXCEPTION 'Stale or foreign split fence';
     END IF;
   ELSIF v_parent.status='waiting' THEN
-    IF NOT EXISTS(SELECT 1 FROM public.socket_overflow_reports WHERE task_id=parent_in)
+    IF NOT EXISTS(SELECT 1 FROM public.socket_overflow_reports o
+       JOIN public.socket_invocations source_inv ON source_inv.id=o.reported_by
+       WHERE o.task_id=parent_in AND o.claim_token=fence_in
+       AND (v_inv.role='atomizer' OR source_inv.id=v_inv.id))
        OR v_parent.claim_token IS NOT NULL THEN
-      RAISE EXCEPTION 'Waiting parent lacks an overflow report or still has a claim';
+      RAISE EXCEPTION 'Waiting split requires the original fenced overflow report and approved atomizer';
     END IF;
   ELSE
     RAISE EXCEPTION 'Only an active fenced socket or stopped overflow can be atomised';
@@ -498,7 +505,7 @@ BEGIN
       THEN report_in->'evidence' ELSE '[]'::jsonb END),0)=0) THEN
     RAISE EXCEPTION 'Independent verification needs nonempty evidence';
   END IF;
-  UPDATE public.socket_child_verification_grants SET result_approved=true
+  UPDATE public.socket_child_verification_grants SET result_approved=verified_in
     WHERE child_task_id=child_in AND invocation_id=invocation_in
       AND claim_token=verification_fence_in;
   UPDATE public.tasks SET
@@ -531,7 +538,13 @@ BEGIN
     OR v_inv.session_id=v_atom.authored_in_session
     OR EXISTS(SELECT 1 FROM public.socket_child_claim_grants g
        JOIN public.socket_invocations executor ON executor.id=g.invocation_id
-       WHERE g.child_task_id=parent_in AND executor.agent_id=v_inv.agent_id) THEN
+       WHERE g.child_task_id=parent_in AND executor.agent_id=v_inv.agent_id)
+    OR EXISTS(SELECT 1 FROM public.socket_overflow_reports o
+       JOIN public.socket_invocations origin ON origin.id=o.reported_by
+       WHERE o.task_id=parent_in AND origin.agent_id=v_inv.agent_id)
+    OR EXISTS(SELECT 1 FROM public.socket_atomization_children c
+       JOIN public.tasks child ON child.id=c.child_task_id
+       WHERE c.parent_task_id=parent_in AND child.claimed_by_agent_id=v_inv.agent_id) THEN
     RAISE EXCEPTION 'Atomiser or preceding executor may not independently finalize the parent';
   END IF;
   IF NOT EXISTS(SELECT 1 FROM public.socket_atomization_children
