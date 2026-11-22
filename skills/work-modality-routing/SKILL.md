@@ -1,7 +1,7 @@
 ---
 name: "Work Modality Routing"
 slug: work-modality-routing
-version: 2.3.0
+version: 2.3.1
 source: Supabase Skills Database
 sourceId: 47
 status: active
@@ -27,6 +27,10 @@ The database work-modality catalogue is authoritative. Never invent a modality.
 ## Transient-agent substrate
 
 Agents are spawned externally by ChatGPT. ATAX never spawns or schedules agents. Incoming agents, after mandatory hydration, load system context, goals, constraints, memories, skills, evidence and work, execute, persist and verify, then leave.
+
+## Lease loss stays local to one task
+
+When `task_ledger_check_claim` fails or the lease expires, immediately forfeit **that one task**, append `task_ledger_record_handoff` with the old fencing token and safe partial-work evidence, and stop all further writes against that socket. The same externally started agent then rehydrates priorities and tries to claim a **different** eligible free task. A new task's claim creates a new independent fencing token. If no finite task is available, check the authoritative always-available work catalogue below. **Never halt a still-active agent solely because a previous socket was forfeited**, and never have ATAX spawn or schedule agents.
 
 ## Always-Available Work
 

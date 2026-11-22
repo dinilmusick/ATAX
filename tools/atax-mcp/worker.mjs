@@ -39,6 +39,7 @@ const TOOLS = [
   tool('atax_task_claim_next', 'Atomically claim the next eligible task using caller identity', 'atax:write', one('claim task',{capabilities:{type:'array',items:S.text('Agent capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)}), (a,db,p) => db.rpc('task_ledger_claim_next',{agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],lease_seconds_in:a.lease_seconds??300})),
   tool('atax_goal_claim_task', 'Atomically claim an eligible task within a specific goal', 'atax:write', one('claim from goal',{goal_key:S.text('Goal key'),capabilities:{type:'array',items:S.text('Capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)},['goal_key']), (a,db,p)=>db.rpc('atax_goal_claim_safe',{goal_key_in:a.goal_key,agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],session_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
   tool('atax_task_check_claim', 'Check claim ownership and fencing token', 'atax:write', one('check claim',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('task_ledger_check_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token})),
+  tool('atax_task_handoff', 'After losing/expiring a socket lease, append a bounded, non-mutating completion/handoff note, then discover and claim other available work. This never restores the old lease.', 'atax:write', one('forfeited socket note',{task_id:S.text('Previously claimed task UUID',36),claim_token:S.text('Old fencing token UUID',36),note:S.text('What was attempted, observed results and unfinished work',3000),context:{type:'object',description:'Evidence, partial results and safe next steps; do not include secrets'}},['task_id','claim_token','note']), (a,db,p)=>db.rpc('task_ledger_record_handoff',{task_id_in:a.task_id,previous_agent_id_in:p.id,previous_claim_token_in:a.claim_token,handoff_note_in:a.note,context_in:a.context??{}})),
   tool('atax_task_heartbeat', 'Renew a fenced task lease and record progress', 'atax:write', one('heartbeat',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),current_step:S.text('Current step',1200),lease_seconds:S.int('Lease length',60,900),heartbeat_context:{type:'object',description:'Structured progress, blockers, discoveries, next action'}},['task_id','claim_token','current_step']), (a,db,p)=>db.rpc('task_ledger_heartbeat_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,current_step_in:a.current_step,lease_seconds_in:a.lease_seconds??300,heartbeat_context_in:a.heartbeat_context??{}})),
   tool('atax_task_record_loop', 'Persist one fenced Omni Loop iteration, observations and evidence', 'atax:write', one('loop',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),iteration_no:S.int('Iteration number',1,1000000),input_payload:S.json('Applied input'),output_payload:S.json('Observed output'),observation:S.json('Observation'),criterion_results:S.json('Criterion outcomes'),loop_state:S.json('Loop state'),tools_used:S.json('Tool evidence'),evidence:S.json('Evidence'),verdict:S.text('Verdict',120),next_action:S.text('Next action',1200)},['task_id','claim_token','iteration_no','verdict','next_action']), (a,db,p)=>db.rpc('task_ledger_record_loop_iteration',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,iteration_no_in:a.iteration_no,input_payload_in:a.input_payload??{},output_payload_in:a.output_payload??{},observation_in:a.observation??{},criterion_results_in:a.criterion_results??{},loop_state_in:a.loop_state??{},tools_used_in:a.tools_used??{},evidence_in:a.evidence??{},verdict_in:a.verdict,next_action_in:a.next_action})),
   tool('atax_task_submit', 'Submit result and evidence for independent verification; never self-verify', 'atax:write', one('submit',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),result:S.json('Result object'),summary:S.text('Result summary',2000),tools_used:S.json('Used tools'),evidence:S.json('Verification evidence'),status:S.text('Result status',80)},['task_id','claim_token','summary']), (a,db,p)=>db.rpc('task_ledger_submit_result',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,result_in:a.result??{},result_summary_in:a.summary,tools_used_in:a.tools_used??[],evidence_in:a.evidence??[],status_in:a.status??'completed'})),
@@ -80,7 +81,7 @@ async function authenticate(request,env, fetcher){
   const parts=token.split('.'); if(parts.length!==3)return null;
   let head,claims;
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  // OAuth access tokens are RFC 9068 at+jwt; reject Luth session JWTs
+  // OAuth access tokens are RFC 9068 at+jwt; reject unrelated session JWTs
   // even if they are signed by the same authorization server.
   if(!isObj(head)||!isObj(claims)||head.typ!=='at+jwt'||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'||
      typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp))return null;
@@ -110,8 +111,8 @@ async function authenticate(request,env, fetcher){
   }catch{return null;}
   const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
   // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
-  // Only a pinned Luth owner subject may receive capabilities defined by server policy.
-  // Never map all authenticated Luth accounts to the owner or verifier role.
+  // Only a pinned OAuth owner subject may receive capabilities defined by server policy.
+  // Never map all authenticated issuer accounts to the owner or verifier role.
   if(claims.sub===String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'') &&
      typeof env.MCP_ATAX_OWNER_JWT_SUBJECT==='string' &&
      env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
@@ -188,7 +189,7 @@ async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
     if(params.protocolVersion&&!SUPPORTED.has(params.protocolVersion))return err(id,-32602,'Unsupported MCP protocol version');
-    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
+    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. Heartbeat and check claim every 30-60 seconds; leases expire after at most 120 seconds. On lost claim, stop writing the old socket, call atax_task_handoff with the old token and a partial-work note, then call atax_task_claim_next or atax_goal_claim_task to find another free socket. Do NOT exit solely because the prior lease was lost. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
@@ -228,7 +229,7 @@ export function createHandler(fetcher=fetch){
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      // The authorization server (Luth) owns OAuth metadata and dynamic client registration.
+      // The independently configured authorization server owns OAuth metadata and dynamic client registration.
       // ATAX is a protected resource, never a second token issuer.
       return json({resource,authorization_servers:server?[server]:[],bearer_methods_supported:['header'],
         scopes_supported:['openid','profile','email','offline_access']});

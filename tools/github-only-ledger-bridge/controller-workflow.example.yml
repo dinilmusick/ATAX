@@ -1,0 +1,33 @@
+# COPY THIS FILE into .github/workflows/atax-ledger-bridge.yml
+# of an OWNER-CONTROLLED **PRIVATE** GitHub repository.
+# Never activate this workflow in public dinilmusick/ATAX.
+name: ATAX private GitHub-only ledger bridge
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: atax-ledger-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  bridge:
+    if: github.event.repository.private == true && vars.ATAX_BRIDGE_REF != ''
+    runs-on: ubuntu-latest
+    environment: atax-ledger
+    timeout-minutes: 5
+    steps:
+      - name: Fetch reviewed and SHA-pinned ATAX bridge
+        uses: actions/checkout@v4
+        with:
+          repository: dinilmusick/ATAX
+          ref: ${{ vars.ATAX_BRIDGE_REF }}
+          persist-credentials: false
+      - name: Process ONE private, allowlisted ledger operation
+        run: python3 tools/github-only-ledger-bridge/bridge.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          ATAX_BRIDGE_ALLOWED_ACTORS: ${{ vars.ATAX_BRIDGE_ALLOWED_ACTORS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

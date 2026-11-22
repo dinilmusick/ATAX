@@ -1,75 +1,51 @@
-# Connect ATAX to Claude and Gemini via canonical Luth OAuth
+# Connect the independent ATAX MCP Worker to Claude and Gemini
 
-## Architecture
+## Standalone single-owner design
 
-ATAX runs a stateless, publicly addressable Streamable HTTP MCP resource server.
-Luth is the **only** OAuth 2.1 authorization server and owns authentication,
-consent, RFC 7591 Dynamic Client Registration (DCR), token and refresh issuance.
-ATAX does not issue client IDs, client secrets, or OAuth tokens.
+The ATAX Cloudflare Worker is a **stateless, Streamable HTTP MCP resource server**, not an OAuth provider, agent runtime, or tenant credential vault. ATAX requires only its **own** configured Supabase key, named GitHub and Cloudflare secrets, and an owner authentication scheme. It has **no mandatory Luth, ULTRST, Vercel or third-party authorization-server dependency**.
 
-| Connection field | Value |
-| --- | --- |
-| Connector name | ATAX |
-| MCP Server URL | `https://atax-mcp.dextro1n1laevo.workers.dev/mcp` |
-| OAuth authorization server | `https://luth.blueprint-ninjastudios.workers.dev/api/auth` (verify exact issuer from live metadata) |
-| OAuth client ID / secret | Leave blank for **dynamic registration**. Luth creates unique credentials per client. |
-| Authentication | OAuth authorization code + S256 PKCE; consent in Luth |
-| Required resource audience | Exact MCP URL above |
-| OAuth login scopes | `openid profile email offline_access` |
-| ATAX capability scopes | **Not granted by OAuth scopes alone**. Server-side owner allowlist and explicit `MCP_AUTH_OWNER_SCOPES` policy are both required. |
+MCP endpoint: `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`.
 
-## Required production setup
+## Option A — private single-owner bearer (fastest setup)
 
-Set these on the `atax-mcp` Worker (Cloudflare account `dextro1n1laevo`):
+Configure in the selected Cloudflare Worker:
 
-- `SUPABASE_URL` — canonical ATAX project API URL, non-secret
-- `SUPABASE_SECRET_KEY` — dedicated privileged Supabase key, Cloudflare **secret** only
-- `MCP_AUTH_AUTHORIZATION_SERVER` — exact issuer from Luth live metadata
-- `MCP_AUTH_ISSUER` — exact `iss` in Luth resource access tokens
-- `MCP_AUTH_JWKS_URL` — actual live Better Auth JWKS endpoint
-- `MCP_AUTH_AUDIENCE` — exactly `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`
-- `MCP_ATAX_OWNER_JWT_SUBJECT` — explicit Luth *owner user's verified* `sub` (not an email/domain/Origin)
-- `MCP_AUTH_OWNER_SCOPES` — policy e.g. `atax:read atax:write` (avoid `atax:verify` on the same identity as task execution)
+- `SUPABASE_URL`: canonical ATAX Supabase URL, non-secret
+- `SUPABASE_SECRET_KEY`: canonical ledger server key, **Worker secret**
+- `GH_KEY_<ALIAS>`: one or more GitHub account tokens, **Worker secrets**
+- `CF_KEY_<ALIAS>`: optional Cloudflare account tokens, **Worker secrets**
+- `MCP_SHARED_TOKEN_SHA256`: **SHA-256 hex digest** of a high-entropy, owner-only bearer token, **Worker secret**
+- `MCP_SHARED_SUBJECT`: one stable owner subject
+- `MCP_SHARED_SCOPES`: only the tools needed for that token; `atax:read atax:write` and separately authorized GitHub/Cloudflare/FMRL scopes as appropriate; verifier must be separately authorized
 
-Do not place any tokens, credentials, personal identifiers, or secrets in this file,
-source, issues, CI logs or chat. Existing shared bearer token bootstrap remains
-isolated and must not be distributed to Claude or Gemini.
+**Never place the bearer token itself in a Worker plain variable or in source.** Each MCP client that supports an external `Authorization: Bearer <token>` header can use the endpoint directly. An HTTPS client without custom-header support cannot necessarily use this method; do not claim universal client compatibility based on a protocol smoke test.
 
-Luth must **register the ATAX MCP URL as an OAuth protected resource** and
-link each connector client to that resource. Better Auth issues a JWT resource
-access token only when a resource is requested; it may otherwise issue an opaque
-token that ATAX correctly rejects. Use the official Better Auth resource
-registration and per-client grants. Retain `enforcePerClientResources`: do not
-globally disable audience restrictions merely to get onboarding working.
+## Option B — optional standards-based OAuth resource tokens
 
-## Connect in Claude
+Some Claude/Gemini connector experiences require OAuth 2.1 authorization rather than an externally supplied bearer header. If such a client requires OAuth, ATAX can be configured as a JWT-verifying **resource server** with an authorization server of the owner's choice. No specific provider is hard-coded.
 
-Claude → Customize → Connectors → Add custom connector.
-Name: `ATAX`. MCP server URL: above. Add, connect, authorize in Luth,
-and consent. Do not supply a static client ID/secret if DCR succeeds.
-Claude's custom connector authentication is managed by Claude's account.
+- `MCP_AUTH_AUTHORIZATION_SERVER`: HTTPS issuer discovery URL advertised to the client
+- `MCP_AUTH_ISSUER`: verified token `iss`
+- `MCP_AUTH_JWKS_URL`: HTTPS public signing keys (JSON Web Key Set)
+- `MCP_AUTH_AUDIENCE`: exact protected MCP resource URL
+- `MCP_ATAX_OWNER_JWT_SUBJECT`: the one verified owner `sub`
+- `MCP_AUTH_OWNER_SCOPES`: explicit ATAX permissions, excluding independent verifier authority unless separately justified
 
-## Connect in Gemini Apps
+The selected authorization server must actually support authorization-code flow with PKCE, appropriate client registration and audience-bound access tokens if the client requires them. **The ATAX Worker does not itself issue OAuth access tokens or perform dynamic client registration.** Therefore Option B cannot be certified merely by setting its issuer variables.
 
-Open `https://gemini.google.com/devmode`. Create new custom MCP app,
-enter the same HTTPS MCP server URL, leave advanced client ID and secret blank
-for DCR, and select Dynamic Client Registration under Authentication.
-Authorize in Luth and inspect discovered tool schemas and Event Log.
-If your Gemini UI requires manual client credentials, register a separate
-client at Luth's `/api/auth/oauth2/register` and store the resulting
-client secret in Gemini's secure configuration rather than in ATAX source.
+## Client setup
 
-## Certification checks (do not claim success without live evidence)
+For any Claude or Gemini build that supports custom remote MCP connectors, provide the HTTPS endpoint above. Use bearer configuration only where the client exposes a safe Authorization-header setting; otherwise use a separately configured standards-compliant OAuth provider. Check the client's current product/region availability and permitted connection methods before claiming compatibility. These steps are not evidence that Gemini or Claude has actually accepted this Worker.
 
-1. `GET /health` returns 200 and stateless MCP protocol information.
-2. Both `/.well-known/oauth-protected-resource` and path-specific `/mcp` discovery return `resource` and exact Luth authorization server.
-3. Luth's live OAuth metadata returns 200 with valid `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `response_types_supported: ["code"]` (or containing it), and PKCE S256.
-4. Real Claude and Gemini clients perform DCR → login/consent → token exchange. Tokens are issued for the exact MCP resource, not a broad Luth-only audience.
-5. `initialize`, `tools/list`, `atax_context`, and `atax_skill_get` succeed for a configured owner identity.
-6. Missing, invalid, expired, wrong-audience, non-owner and insufficient-scope tokens fail closed.
-7. Independent verifier is a **distinct** identity; task lease claims, scoped writes, result submission and verification are tested without self-verification.
-8. CI checks the exact source commit; deploy only with credentials configured and finish a live two-provider test.
+Once authorized, the client should run `initialize` → `tools/list` → `atax_context` and `atax_skill_get`. When it claims a task, use the returned fencing token for heartbeat and submissions. On expired/lost ownership, call `atax_task_handoff` with the old token, partial results and evidence, then discover another free socket through `atax_task_claim_next` or a goal-scoped claim. **Do not terminate the agent merely because the former task lease was lost.**
 
-**Status:** Source support and contract tests are not proof of deployed production
-configuration or successful third-party OAuth login. Public URLs and issuer
-must be probed from a network-enabled environment before user onboarding.
+## Production acceptance
+
+1. Verify `GET /health` and `POST /mcp` negative-auth behavior; these are not proof of live owner access.
+2. Verify the Worker has all required secret binding **names**, never print values.
+3. Complete an authenticated owner `initialize`, `tools/list`, `atax_context`, and `atax_skill_get`.
+4. Exercise an isolated real ledger task claim, heartbeat and result submission, with independently authorized verification; test denial of a stale token and successful append-only handoff followed by another claim.
+5. Verify direct GitHub and Supabase connectors still work independently of the Worker.
+6. Verify actual native Claude/Gemini connection for each client separately; classify untested clients as unverified.
+
+The Worker, scripts and account configuration must remain independent of Luth. No credential contents belong in public GitHub, logs, prompts, issues or GitHub Actions artifacts.

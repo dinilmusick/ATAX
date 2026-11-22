@@ -78,6 +78,8 @@ MCP server URL: https://<your-worker-hostname>/mcp
 Authorization: Bearer <your-client-access-token>
 ```
 
+**When claim validation fails:** the agent stops updating the old task and calls `atax_task_handoff` with `task_id`, the lost `claim_token`, a partial-work note and optional evidence context. The event is append-only and does **not** renew the old claim. The same external agent then calls `atax_task_claim_next` or `atax_goal_claim_task` to occupy another available socket. Do not terminate the overall session merely because one lease expired.
+
 An authenticated client sends `initialize`, `notifications/initialized`, `tools/list`, then `tools/call` (e.g. `atax_context`) to hydrate live state. For work, call `atax_skill_get` and `atax_goal_overview`, then claim work with fenced task tools. `atax_verification_claim` must run with an **independent verifier identity**; never self-certify. See `tools/list` for current schemas.
 
 ## Parity and tests

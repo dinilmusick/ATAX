@@ -24,11 +24,21 @@ When a detailed skill or repository document conflicts with the stable ATAX cont
 
 ATAX's interface is independent of the agent and the AI application. See [connection modes](docs/connection-modes.md).
 
-- **GitHub connector only:** agents use this repository's instructions, tools and trusted GitHub workflows. Live Supabase ledger operations require a separately authorized credential-bearing client/bridge, not bare repository access; full bridge parity remains to be verified.
+- **GitHub connector only:** agents use this repository's instructions, tools and trusted GitHub workflows. Live Supabase ledger operations require a separately authorized credential-bearing client/bridge, not bare repository access; A [private GitHub controller bridge](tools/github-only-ledger-bridge/README.md) is implemented but requires separately configured secrets, access, and live certification; full bridge parity remains to be verified.
 - **GitHub + Supabase connectors:** existing direct-connector path reads/writes live state through the connected Supabase RPC tools and operates GitHub through its connector; **do not redirect it through MCP**.
 - **Remote ATAX MCP:** authenticated clients use the owner-configured Cloudflare Worker `/mcp` endpoint, whose bounded tools call the **same** ledger RPCs. Worker credentials are Cloudflare secrets, independent from GitHub Actions repository secrets.
 
+**After a lost lease:** immediately stop work on the old socket, write a bounded append-only handoff/completion note through `task_ledger_record_handoff` using the lost fencing token, refresh canonical availability and try to claim another eligible task. The old task must never be mutated or marked complete by a fenced-out holder. Losing a socket does **not** terminate the external agent; ATAX itself never schedules the next agent.
+
 **In every mode:** incoming agents are created externally; ATAX does not know/care which model/application arrived. A task is a **socket** occupied by one valid atomic claim and fencing token at a time. All entrants must use canonical Supabase claim, heartbeat, submit, release and independent verification safeguards. GitHub Issues, workflow statuses, an MCP session and chat history are **not** substitute locks or canonical state. Do not claim full three-mode equivalence until live acceptance tests prove it.
+
+## Lease forfeiture is task-local, not agent termination
+
+At each periodic ownership check and before every write, confirm the task's canonical lease and fencing token. If the claim expired, a renewal was rejected, or a new holder owns that socket: **stop only work on the forfeited task**, never modify its canonical state, and append a best-effort completion/handoff event using `task_ledger_record_handoff` with the **old token**. Include accurate partial results, observations, evidence references, external side effects and next steps without secrets. This event is append-only; it is **not** a successful task submission or a way to reclaim the socket.
+
+Then forget the lost active claim, refresh the current goal/task/dependency graph, select an unrelated eligible **free** socket, and claim it atomically. Continue finite work within the same externally started agent session. Contention means try another eligible task; if none exists, discover finite always-available constraint/goal/health/optimization work. Never terminate an otherwise active work session solely because a lease was lost. ATAX neither spawns nor schedules the agent.
+
+This recovery rule applies identically to GitHub-only private controller, direct GitHub+Supabase, and remote MCP clients. The new owner of the forfeited task has exclusive authority; stale owners can append safe handoff notes but cannot write task progress or results.
 
 ## Mandatory live-substrate bootstrap
 

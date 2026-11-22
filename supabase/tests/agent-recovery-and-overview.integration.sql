@@ -8,16 +8,17 @@ declare
   goal_id_value uuid;
   first_claim public.tasks;
   early_claim public.tasks;
+  premature_claim public.tasks;
   recovered public.tasks;
   overview jsonb;
   goal_row jsonb;
 begin
   created := public.goal_ledger_create_with_tasks(
     'Recovery Smoke ' || replace(gen_random_uuid()::text,'-',''),
-    'Rollback-only five-minute stale-heartbeat recovery test',
+    'Rollback-only two-minute stale-heartbeat recovery test',
     jsonb_build_object('purpose','bounded-v2 recovery integration fixture'),
     'Check claim fencing and overview visibility.',
-    jsonb_build_array('A stale direct task can be atomically reclaimed after five minutes'),
+    jsonb_build_array('A stale direct task can be atomically reclaimed after two minutes'),
     'recovery-test-orchestrator',
     jsonb_build_object(
       'name','Recovery test leaf',
@@ -56,7 +57,7 @@ begin
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '4 minutes 59 seconds',
+  set heartbeat_at=now()-interval '1 minute 59 seconds',
       claim_expires_at=now()-interval '1 minute',
       current_step='Recent heartbeat despite expired lease'
   where id=first_claim.id;
@@ -67,13 +68,24 @@ begin
     array['recovery-test']::text[],900
   );
   if early_claim.id is not null then
-    raise exception 'Task was reclaimed before five-minute heartbeat threshold';
+    raise exception 'Task was reclaimed before two-minute heartbeat threshold';
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '5 minutes 1 second',
+  set heartbeat_at=now()-interval '2 minutes 1 second',
       claim_expires_at=now()+interval '15 minutes',
       current_step='Stale heartbeat for recovery'
+  where id=first_claim.id;
+
+  select * into premature_claim
+  from public.task_ledger_claim_goal_next(
+    goal_id_value,'recovery-worker-premature','Premature Worker','worker',
+    array['recovery-test']::text[],900
+  );
+  if premature_claim.id is not null then
+    raise exception 'Stale heartbeat must not override active lease';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
   where id=first_claim.id;
 
   select * into recovered
@@ -117,7 +129,7 @@ begin
     raise exception 'Overview did not aggregate running task';
   end if;
 
-  raise notice 'PASS: bounded-v2 direct task, five-minute heartbeat recovery, fencing and complete overview';
+  raise notice 'PASS: bounded-v2 direct task, two-minute heartbeat and expired-lease recovery, fencing and complete overview';
 end;
 $test$;
 rollback;

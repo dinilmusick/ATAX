@@ -26,6 +26,8 @@ The substrate's relevant state is the socket itself:
 - `verified / finalized` → acceptance recorded after independent verification.
 - If a lease expires or its heartbeat becomes stale, recovery may issue a **new** fencing token. Any holder of the old token must be refused further mutations. External side effects outside the substrate are not automatically cancellable: agents should use idempotency/reconciliation for those effects.
 
+**Lease-loss continuation:** an external agent that finds `task_ledger_check_claim` false must forfeit that socket, append `task_ledger_record_handoff(task_id, old_claim_holder, old_claim_token, note, context)` (partial work, evidence and remaining steps), then rehydrate and atomically claim another eligible free task. It must not call submit, release or heartbeat on the lost socket. Losing one socket never ends the agent session by itself. The substrate does not initiate or schedule this transition; the agent does.
+
 This is **exclusive authorized occupancy**, not a claim that only one external AI process can exist. GitHub and direct Supabase agents and MCP agents must all use the same canonical atomic claim/lease/fencing RPCs; no transport may invent its own local lock.
 
 **Implementation boundary:** existing PostgreSQL task RPC signatures still accept an opaque `agent_id` for compatibility and audit/claim checking. That is an internal claim-holder reference, **not** a Gemini/Claude identity, agent registry, orchestrator, or reason to pick work. Never derive it from the AI application's vendor/name. Removing it from DB interfaces requires its own guarded migration; until then, the claim token and database row locks remain decisive for excluding concurrent claimers. Verification still requires a separate claim and independent evidence; using one operator account does not itself prove independence.
@@ -36,7 +38,7 @@ This is **exclusive authorized occupancy**, not a claim that only one external A
 | --- | --- | --- |
 | `SUPABASE_URL` | Public configuration | The one canonical ATAX Supabase API origin |
 | `SUPABASE_SECRET_KEY` | **Secret** | Dedicated, server-side Supabase key; never exposed through an MCP response |
-| `MCP_ATAX_OWNER_JWT_SUBJECT` | Operator-supplied configuration | **Exact verified** Luth owner subject, not an email address or a wildcard |
+| `MCP_ATAX_OWNER_JWT_SUBJECT` | Operator-supplied configuration | **Exact verified** owner subject from the configured optional OAuth issuer, not an email address or a wildcard |
 | `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE` | Public configuration | Verify signed OAuth resource tokens |
 | `MCP_AUTH_OWNER_SCOPES` | Public policy | Explicitly enables authorized MCP tools for the one owner |
 

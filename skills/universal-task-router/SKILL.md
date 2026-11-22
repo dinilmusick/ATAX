@@ -1,7 +1,7 @@
 ---
 name: "Universal Task Router"
 slug: universal-task-router
-version: 3.4.1
+version: 3.4.4
 source: Supabase Skills Database
 sourceId: 28
 status: active
@@ -224,3 +224,8 @@ obstacle-system-tweak is a first-class modality. Select the highest-notoriety du
 
 ### Work request persistence
 Actionable prompts may be recorded in public.work_requests. Persist request_mode, modality, prompt, resolved Goal/Task, agent/session and terminal status. Conversational requests have no modality.
+
+## Mandatory fenced-out task routing (2026-11-22)
+
+LEASE_LOSS_IS_TASK_LOCAL. When the agent observes that its former lease expired or `task_ledger_check_claim` is false: stop **only** external work for the forfeited task; never submit, release, heartbeat or mutate it with the stale token. Best-effort append `task_ledger_record_handoff` (old token, accurate completion note, partial result, evidence and next action). This is audit-only, not completion. Rehydrate the global ledger and find another eligible free socket; atomically claim it under a **new** token and continue the same external agent session. An absent free task triggers bounded always-available work selection. Do not stop the whole agent merely because the previous socket was lost; do not create/schedule agents in ATAX.
+

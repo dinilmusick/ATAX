@@ -88,6 +88,57 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for independent verification',evidence:[{url:'test://result'}]});
   assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
 });
+test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
+  const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const claim_token='11111111-2222-4333-8444-555555555555';
+  const names=(await(await post('tools/list')).json()).result.tools.map(x=>x.name);
+  assert.ok(names.includes('atax_task_handoff'));
+  const note=await call('atax_task_handoff',{
+    task_id,claim_token,note:'Expired claim; partial build done, remaining tests noted',
+    context:{work_done:['compiled'],next_action:'handoff to successor'}
+  });
+  assert.equal(note.status,200);
+  assert.equal(note.payload.result.structuredContent.result.rpc,'task_ledger_record_handoff');
+  const args=note.payload.result.structuredContent.result.params;
+  assert.equal(args.previous_agent_id_in,'test-external-agent');
+  assert.equal(args.previous_claim_token_in,claim_token);
+  assert.deepEqual(args.context_in.work_done,['compiled']);
+  assert.equal((await call('atax_task_handoff',{task_id,claim_token})).payload.result.isError,true);
+  const next=await call('atax_task_claim_next',{capabilities:['backend'],lease_seconds:120});
+  assert.equal(next.payload.result.structuredContent.result.rpc,'task_ledger_claim_next');
+  assert.equal(next.payload.result.structuredContent.result.params.lease_seconds_in,120);
+});
+
+test('a fenced-out caller can leave a non-mutating handoff then discover another task',async()=>{
+  const listed=await(await post('tools/list')).json();
+  assert.ok(listed.result.tools.some(t=>t.name==='atax_task_handoff'));
+  const sampleTaskId=['f5c29f36','27ba','4d6e','a6b2','a3c6757668c9'].join('-');
+  const oldFence=['94a0197b','e59c','458a','99a8','d4027920f62d'].join('-');
+  const before=requests.length;
+  const out=await call('atax_task_handoff',{
+    task_id:sampleTaskId,claim_token:oldFence,
+    note:'Lost exclusive socket; implementation done but verification remains.',
+    context:{partial_result:'PR opened',evidence:['https://example.org/pr'],
+      next_action:'New owner should verify changes'}
+  });
+  assert.equal(out.status,200);
+  const result=out.payload.result.structuredContent.result;
+  assert.equal(result.rpc,'task_ledger_record_handoff');
+  assert.deepEqual(result.params,{
+    task_id_in:sampleTaskId,previous_agent_id_in:'test-external-agent',
+    previous_claim_token_in:oldFence,
+    handoff_note_in:'Lost exclusive socket; implementation done but verification remains.',
+    context_in:{partial_result:'PR opened',evidence:['https://example.org/pr'],
+      next_action:'New owner should verify changes'}
+  });
+  assert.equal(requests.length,before+1,'Handoff must not attempt release/submit/renew');
+  assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,note:'No old fence'})).payload.result.isError,true);
+  const next=await call('atax_task_claim_next',{capabilities:[]});
+  assert.equal(next.payload.result.structuredContent.result.rpc,'task_ledger_claim_next');
+  assert.equal(next.payload.result.structuredContent.result.params.agent_id_in,'test-external-agent');
+  const readOnly={...env,MCP_SHARED_SCOPES:'atax:read'};
+  assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,claim_token:oldFence,note:'x'},{env:readOnly})).payload.result.isError,true);
+});
 test('independent verification uses distinct scope and identity, never self-authorizes verification',async()=>{
   const readonly={...env,MCP_SHARED_SCOPES:'atax:read atax:write'};
   assert.equal((await call('atax_verification_claim',{}, {env:readonly})).payload.result.isError,true);
