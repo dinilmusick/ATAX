@@ -49,6 +49,7 @@ class FakeDB:
         self.calls=[]
         self.receipt=None
         self.cleanup_journal=None
+        self.cleanup_error_class=None
         self.fail_finish_once=False
 
     def rows(self, table, filters):
@@ -78,12 +79,18 @@ class FakeDB:
             self.cleanup_journal={'run_id':args['p_run_id'], 'conclusion':args['p_conclusion'],
                                   'receipt':copy.deepcopy(args['p_receipt'])}
             return True
+        if name == 'socket_dispatch_cleanup_failed':
+            if not self.cleanup_journal:
+                return False
+            self.cleanup_error_class=args['p_error_class']
+            return True
         if name == 'socket_dispatch_finish_observed':
             if self.fail_finish_once:
                 self.fail_finish_once=False
                 raise RemoteError('ledger_unavailable')
             self.state='succeeded' if args['p_conclusion']=='success' else 'failed'
             self.receipt=args['p_receipt']
+            self.cleanup_error_class=None
             return True
         raise AssertionError(name)
 
@@ -211,6 +218,31 @@ class TestRelay(unittest.TestCase):
         gh.cleanup_error='fmrl_cleanup_not_verified'
         with self.assertRaises(RemoteError): c.reconcile()
         self.assertEqual(db.state,'accepted')
+        self.assertEqual(db.cleanup_error_class,'fmrl_cleanup_not_verified')
+        self.assertEqual(db.cleanup_journal['conclusion'],'success')
+        gh.cleanup_error=None
+        gh.matches=[] # durable journal must survive loss of target run history
+        self.assertEqual(c.reconcile()['terminal'],1)
+        self.assertIsNone(db.cleanup_error_class)
+        self.assertEqual(db.receipt['cleanup'],'independent_404')
+
+    def test_failed_cleanup_error_persistence_fails_closed(self):
+        class FailingEvidenceDB(FakeDB):
+            def rpc(self,name,args):
+                if name == 'socket_dispatch_cleanup_failed':
+                    return False
+                return super().rpc(name,args)
+        fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
+        db,gh=FailingEvidenceDB(sample(mode='fmrl',runner_repository=fmrl)),FakeGithub()
+        c=Controller(db,gh)
+        c.dispatch(ID,CORR)
+        gh.matches=[complete_run()]
+        gh.cleanup_error='fmrl_cleanup_not_verified'
+        with self.assertRaises(RemoteError) as cm:
+            c.reconcile()
+        self.assertEqual(cm.exception.category,'cleanup_failure_not_recorded')
+        self.assertEqual(db.state,'accepted')
+        self.assertEqual(db.cleanup_journal['receipt']['cleanup'],'pending')
 
     def test_crash_after_delete_recovers_from_durable_cleanup_journal(self):
         fmrl='owner/FMRL-'+CORR.replace('-','')[:20]
