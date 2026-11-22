@@ -81,9 +81,9 @@ BEGIN
     IF patch.function_name='task_ledger_update'
        AND patch.arity::integer=10
        AND strpos(before_sql,candidate_old)=0
-       AND strpos(before_sql,E'where id=task_id_in and agent_id=agent_id_in\\n  returning')>0
+       AND strpos(before_sql,E'where id=task_id_in and agent_id=agent_id_in\n  returning')>0
     THEN
-       candidate_old := E'where id=task_id_in and agent_id=agent_id_in\\n  returning';
+       candidate_old := E'where id=task_id_in and agent_id=agent_id_in\n  returning';
     END IF;
     IF strpos(before_sql,candidate_old)=0 THEN
       -- Some installations retain the earlier five-argument heartbeat body,
