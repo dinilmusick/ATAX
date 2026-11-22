@@ -1,13 +1,15 @@
 /** ATAX Socket V1. Dependency-free, pinned conservative text metering. */
 export const TOKENIZER_ID = 'utf8-byte-upper-bound-v1';
-export const PROFILE_SET_VERSION = '2026-11-22.1';
+export const PROFILE_SET_VERSION = '2026-11-22.2';
 export const UNKNOWN_CONTEXT_TOKENS = 8192;
-export const VERIFIED_MODELS = Object.freeze({
+export const VERIFIED_MODELS = Object.freeze(Object.fromEntries(Object.entries({
   'gpt-4o-mini': {provider:'openai',contextWindowTokens:128000,evidence:'https://platform.openai.com/docs/models/gpt-4o-mini'},
   'claude-haiku-4-5-20251001': {provider:'anthropic',contextWindowTokens:200000,evidence:'https://docs.anthropic.com/en/docs/about-claude/models/overview'},
   'gemini-3.1-flash-lite': {provider:'google',contextWindowTokens:1048576,evidence:'https://ai.google.dev/gemini-api/docs/models'},
-  'grok-4.7': {provider:'xai',contextWindowTokens:500000,evidence:'https://docs.x.ai/developers/grok-4-7'}
-});
+  'grok-4.7': {provider:'xai',contextWindowTokens:500000,evidence:'https://docs.x.ai/developers/grok-4-7'},
+  // Documented '65k' Cerebras FREE tier; 64,000 is intentionally below the rounded claim.
+  'cerebras/gpt-oss-120b:free': {provider:'cerebras',contextWindowTokens:64000,evidence:'https://inference-docs.cerebras.ai/models/overview'}
+}).map(([id, profile]) => [id, Object.freeze(profile)])));
 const encode = new TextEncoder();
 const integer = (v,n,min=0) => {
   if (!Number.isSafeInteger(v) || v < min) throw new RangeError(n+' must be a safe integer >= '+min);
@@ -30,6 +32,12 @@ const json = value => {
     if(!Array.isArray(v)&&Object.getPrototypeOf(v)!==Object.prototype&&Object.getPrototypeOf(v)!==null)
       throw new TypeError('plain JSON values only');
     if(seen.has(v)) throw new TypeError('cyclic JSON not supported');
+    if(Array.isArray(v)) {
+      // JSON.stringify turns holes into null; map() silently skips them.
+      // Refuse sparse inputs rather than measure fewer bytes than the wire body.
+      for(let i=0;i<v.length;i++)
+        if(!Object.prototype.hasOwnProperty.call(v,i)) throw new TypeError('sparse JSON arrays unsupported');
+    }
     seen.add(v);
     const result=Array.isArray(v)?'['+v.map(walk).join(',')+']'
       :'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+walk(v[k])).join(',')+'}';
@@ -46,11 +54,21 @@ export function estimateTextTokens(text) {
 export function resolveBudget(modelId, options={}) {
   const id=name(modelId,'modelId').toLowerCase();
   if(!options||typeof options!=='object'||Array.isArray(options)) throw new TypeError('options must be object');
-  const profile=options.profile??VERIFIED_MODELS[id];
-  if(profile!==undefined&&(!profile||typeof profile.evidence!=='string'||!profile.evidence.startsWith('https://')))
-    throw new TypeError('verified capacity requires HTTPS source');
-  const verified=profile!==undefined;
-  const contextWindowTokens=verified?integer(profile.contextWindowTokens,'contextWindowTokens',1):UNKNOWN_CONTEXT_TOKENS;
+  const known=VERIFIED_MODELS[id];
+  const override=options.profile;
+  // An untrusted HTTPS URL is not a verification of arbitrary model capacity.
+  // Overrides only LOWER the pinned capacity (or the unknown-model fallback).
+  const pinnedWindow=known?.contextWindowTokens??UNKNOWN_CONTEXT_TOKENS;
+  if(override!==undefined) {
+    if(!override || typeof override!=='object' ||
+      typeof override.evidence!=='string' || !/^https:\/\//.test(override.evidence))
+      throw new TypeError('capacity override requires HTTPS source');
+    integer(override.contextWindowTokens,'contextWindowTokens',1);
+    if(override.contextWindowTokens>pinnedWindow)
+      throw new RangeError('untrusted profile cannot increase pinned capacity');
+  }
+  const verified=known!==undefined;
+  const contextWindowTokens=override?.contextWindowTokens??pinnedWindow;
   const ceiling=Math.floor(contextWindowTokens*0.4);
   const maxUsableTokens=Math.min(ceiling,
     integer(options.reliabilityCeilingTokens??ceiling,'reliabilityCeilingTokens',1),
@@ -64,8 +82,8 @@ export function resolveBudget(modelId, options={}) {
   if(typeof threshold!=='number'||!Number.isFinite(threshold)||threshold<=0||threshold>1)
     throw new RangeError('approachFraction must be (0,1]');
   const overhead=integer(options.messageOverheadTokens??8,'messageOverheadTokens');
-  return Object.freeze({modelId:id,provider:profile?.provider??'unknown',verified,
-    evidence:profile?.evidence??'conservative-unverified-fallback',contextWindowTokens,
+  return Object.freeze({modelId:id,provider:known?.provider??'unknown',verified,
+    evidence:override?.evidence??known?.evidence??'conservative-unverified-fallback',contextWindowTokens,
     verifiedMaxUsableTokens:ceiling,maxUsableTokens,inputLimit,outputLimit,
     threshold,overhead,tokenizerId:TOKENIZER_ID,profileSetVersion:PROFILE_SET_VERSION});
 }
@@ -73,7 +91,8 @@ function check(s,b,socketId) {
   if(!s||typeof s!=='object'||Array.isArray(s)||
     s.socketId!==socketId||s.modelId!==b.modelId||
     s.tokenizerId!==TOKENIZER_ID||s.profileSetVersion!==PROFILE_SET_VERSION||
-    s.maxUsableTokens!==b.maxUsableTokens||s.inputLimit!==b.inputLimit||s.outputLimit!==b.outputLimit)
+    s.maxUsableTokens!==b.maxUsableTokens||s.inputLimit!==b.inputLimit||s.outputLimit!==b.outputLimit||
+    s.overhead!==b.overhead||s.threshold!==b.threshold)
       throw new Error('snapshot identity/profile mismatch');
   for(const key of ['revision','attempts','rejectedAttempts','inputTokens','outputTokens',
     'attemptedInputTokens','attemptedOutputTokens','rejectedInputTokens','rejectedOutputTokens'])
@@ -93,6 +112,7 @@ export function createSocketBudgetMeter(socketId,modelId,options={},restored) {
   let state=check(restored??{socketId,modelId:budget.modelId,
     tokenizerId:TOKENIZER_ID,profileSetVersion:PROFILE_SET_VERSION,
     maxUsableTokens:budget.maxUsableTokens,inputLimit:budget.inputLimit,outputLimit:budget.outputLimit,
+    overhead:budget.overhead,threshold:budget.threshold,
     revision:0,attempts:0,rejectedAttempts:0,inputTokens:0,outputTokens:0,
     attemptedInputTokens:0,attemptedOutputTokens:0,rejectedInputTokens:0,rejectedOutputTokens:0},budget,socketId);
   const snapshot=()=>Object.freeze({...state,consumedTokens:state.inputTokens+state.outputTokens,
