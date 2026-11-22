@@ -122,7 +122,7 @@ test('JWKS bearer validation verifies RSA signature, issuer, audience, expiry an
   const jwt=await sign();
   const scoped=await(await invoke(jwt)).json();
   const scopedNames=scoped.result.tools.map(x=>x.name);
-  assert.ok(scopedNames.includes('atax_provider_accounts_list'));
+  assert.ok(!scopedNames.includes('atax_provider_accounts_list'));
   assert.ok(!scopedNames.includes('atax_context'));
   assert.ok(!scopedNames.includes('atax_task_claim_next'));
   assert.ok(!scopedNames.includes('atax_github_repository_inspect'));
@@ -138,12 +138,12 @@ test('JWKS bearer validation verifies RSA signature, issuer, audience, expiry an
   assert.equal(deniedCall.result.isError,true);
   const prompts=await(await rpc('prompts/list')).json();
   assert.deepEqual(prompts.result.prompts,[]);
-  const permittedProvider=await(await rpc('tools/call',{name:'atax_provider_accounts_list',arguments:{}})).json();
-  assert.equal(permittedProvider.result.isError,undefined);
-  assert.deepEqual(permittedProvider.result.structuredContent.result.accounts.map(x=>x.aliases),[[],[],[]]);
+  const deniedProvider=await(await rpc('tools/call',{name:'atax_provider_accounts_list',arguments:{}})).json();
+  assert.equal(deniedProvider.result.isError,true);
   const explicitOwner={...jwksEnv,MCP_ATAX_OWNER_JWT_SUBJECT:'test-jwks-user'};
   const admitted=await(await rpc('tools/list',{},explicitOwner)).json();
   assert.ok(admitted.result.tools.some(t=>t.name==='atax_context'));
+  assert.ok(admitted.result.tools.some(t=>t.name==='atax_provider_accounts_list'));
   const admittedRead=await(await rpc('resources/read',{uri:'atax://context/overview'},explicitOwner)).json();
   assert.equal(JSON.parse(admittedRead.result.contents[0].text).rpc,'agent_context_overview');
   const wrongOwner={...jwksEnv,MCP_ATAX_OWNER_JWT_SUBJECT:'somebody-else'};
@@ -206,10 +206,11 @@ test('creation schemas reject invalid task arrays, acceptance arrays and priorit
 });
 
 const gitEnv={...env,MCP_SHARED_SCOPES:'atax:read atax:github:read atax:github:create atax:fmrl:execute',MCP_GITHUB_OWNER:'dinilmusick',
-  GITHUB_REPOSITORY_TOKEN:'git-create-sample-test-only',GITHUB_FMRL_DISPATCH_TOKEN:'git-actions-sample-test-only',
+  GH_KEY_PERSONAL:'git-create-sample-test-only',
   MCP_FMRL_ALLOWED_TARGETS:'dinilmusick/Skipo,dinilmusick/Kone'};
 const fakeGitHub=(records=[])=>async(url,options={})=>{
   records.push({url,options});
+  if(url==='https://api.github.com/user')return Response.json({login:'dinilmusick'});
   if(url==='https://api.github.com/user/repos' && options.method==='POST'){
     const body=JSON.parse(options.body);
     return Response.json({full_name:'dinilmusick/'+body.name,html_url:'https://github.com/dinilmusick/'+body.name,private:body.private,default_branch:'main'}, {status:201});
@@ -261,8 +262,8 @@ test('permanent GitHub repository creation uses correct API and verifies exact o
 test('permanent repository path never skips github-specific auth or dispatch allowlist',async()=>{
   const denied=await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,MCP_SHARED_SCOPES:'atax:read atax:write'}});
   assert.equal(denied.isError,true);
-  assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,GITHUB_REPOSITORY_TOKEN:''}})).isError,true);
-  assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,MCP_GITHUB_OWNER:'malicious'}})).isError,true);
+  assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,GH_KEY_PERSONAL:''}})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'a'.repeat(40)},{env:{...gitEnv,MCP_GITHUB_OWNER:'malicious'}})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'a'.repeat(40)},{env:{...gitEnv,MCP_FMRL_ALLOWED_TARGETS:''}})).isError,true);
 });
 test('FMRL dispatch is controller-only, allowlisted, pinned exact SHA, correlates without leaking tokens',async()=>{
@@ -277,7 +278,7 @@ test('FMRL dispatch is controller-only, allowlisted, pinned exact SHA, correlate
   assert.equal(payload.inputs.ref,ref);
   assert.equal(payload.inputs.request_id,result.structuredContent.result.request_id);
   assert.equal(payload.inputs.repository,'dinilmusick/Skipo');
-  assert.ok(!JSON.stringify(result).includes('git-actions-sample-test-only'));
+  assert.ok(!JSON.stringify(result).includes('git-create-sample-test-only'));
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/ATAX',ref})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Unknown',ref})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'bad'})).isError,true);
@@ -319,7 +320,7 @@ test('FMRL incomplete and missing cleanup cannot be misreported as successful',a
 
 
 test('MCP named GitHub accounts use selected token and do not use canonical owner for alternate identities',async()=>{
-  const chosen={...gitEnv,GH_TOKEN_PERSONAL:'personal-token-value',GH_TOKEN_WORK:'work-token-value'};
+  const chosen={...gitEnv,GH_KEY_PERSONAL:'personal-token-value',GH_KEY_WORK:'work-token-value'};
   const seen=[];
   const remote=async(url,opts={})=>{
     seen.push({url,opts});
@@ -342,19 +343,20 @@ test('MCP named GitHub accounts use selected token and do not use canonical owne
   assert.equal(seen.length,3);
 });
 
-test('MCP exposes provider diagnostics only with correct scopes and authenticated aliases',async()=>{
+test('MCP exposes only GitHub and Cloudflare provider diagnostics with owner scopes',async()=>{
   const cfg={...gitEnv,
-    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read atax:vercel:read',
-    GH_TOKEN_WORK:'git-work-secret',
-    CLOUDFLARE_TOKEN_WORK:'cf-work-secret',
-    VERCEL_TOKEN_WORK:'vercel-work-secret'
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read',
+    GH_KEY_WORK:'git-work-secret',
+    CF_KEY_WORK:'cf-work-secret'
   };
   const fetched=(await(await post('tools/list',{}, {env:cfg})).json()).result.tools.map(t=>t.name);
   assert.ok(fetched.includes('atax_provider_accounts_list'));
   assert.ok(fetched.includes('atax_cloudflare_accounts_list'));
-  assert.ok(fetched.includes('atax_vercel_projects_list'));
+  assert.ok(!fetched.some(name=>name.includes('vercel')));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
   const list=await makeGitCall('atax_provider_accounts_list',{}, {env:cfg});
-  assert.equal(list.structuredContent.result.accounts.find(x=>x.provider==='vercel').aliases[0],'WORK');
+  const configured=list.structuredContent.result.accounts;
+  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare']);
+  assert.deepEqual(configured.find(x=>x.provider==='cloudflare').aliases,['WORK']);
   assert.equal((await makeGitCall('atax_cloudflare_accounts_list',{account:'WORK'},{env:gitEnv})).isError,true);
 });
