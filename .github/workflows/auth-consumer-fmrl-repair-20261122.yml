@@ -1,4 +1,4 @@
-name: ATAX authenticated private dependency-lock repair 20261122
+name: ATAX canonical OAuth package-lock repair
 on:
   push:
     paths:
@@ -6,12 +6,22 @@ on:
 permissions:
   contents: read
 jobs:
-  verify_aiko:
+  repair_aiko:
     if: github.ref == 'refs/heads/ops/auth-consumer-fmrl-repair-20261122' && github.actor == 'dinilmusick'
     uses: ./.github/workflows/private-repo-ci.yml
     with:
       repository: dinilmusick/Aiko
-      ref: 2dc612f908f37081433714c3d8cde694fa82dc8c
-      branch: release/auth-bff-floks-current-20261122
-      mode: direct
+      ref: d538385875ccfbeef50aa38c73bae5f7ca525d50
+      branch: fix/portable-oidc-regression-contract-20261122
+      mode: repair
+    secrets: inherit
+  repair_srkl:
+    needs: repair_aiko
+    if: github.ref == 'refs/heads/ops/auth-consumer-fmrl-repair-20261122' && github.actor == 'dinilmusick'
+    uses: ./.github/workflows/private-repo-ci.yml
+    with:
+      repository: dinilmusick/Srkl-Engine
+      ref: 397c4f7df48adb04c0d452eca56c0827db82d7c3
+      branch: fix/portable-oidc-regression-contract-20261122
+      mode: repair
     secrets: inherit
