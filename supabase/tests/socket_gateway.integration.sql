@@ -30,7 +30,7 @@ BEGIN
     claim_expires_at,task_definition)
   VALUES('test-rpc-origin','test-rpc-origin','Canonical socket RPC test','running','execution',
     principal,principal,session_key,fence,now()+interval '1 hour',
-    jsonb_build_object('name','Socket RPC test','actions',
+    jsonb_build_object('name','Socket RPC test','general_pattern','hydrate → execute → verify','actions',
       jsonb_build_array(jsonb_build_object('description','One finite action'))))
   RETURNING id INTO t;
   INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
