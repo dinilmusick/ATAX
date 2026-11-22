@@ -346,7 +346,7 @@ class FmrlTests(unittest.TestCase):
         assert "throw new Error('Direct CI failed: '+name+' exit='+r.status)" in workflow
         assert "FMRL Skipo migration categories:" in workflow
         assert "rm -f /tmp/fmrl-direct-raw.log" in workflow
-        assert "console.log('FMRL diagnostic unavailable')" in workflow
+        assert "console.log('FMRL Frnes diagnostic state: '+state)" in workflow
 
     def test_frnes_skipo_status_classes_are_fixed_and_public_safe(self):
         source = (ROOT / "disposable_workspace.py").read_text()
@@ -358,6 +358,29 @@ class FmrlTests(unittest.TestCase):
             self.assertIn(category, source)
         self.assertIn("items.intersection(allowed_categories)", source)
         self.assertIn("FMRL Skipo migration categories:", source)
+
+    def test_frnes_diagnostic_state_receipt_is_fixed_and_nonsecret(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("FMRL Frnes diagnostic state:", runner)
+        self.assertIn("FMRL Frnes diagnostic state:", controller)
+        self.assertIn("stdio:['ignore','pipe','pipe']", runner)
+        self.assertIn("maxBuffer:16*1024*1024", runner)
+        self.assertIn("allowed_states={'spawn-error','process-unavailable'", runner)
+        self.assertIn("state=receipts[-1] if receipts", runner)
+        self.assertIn("throw new Error('Direct CI failed: '+name+' exit='+r.status)", runner)
+
+    def test_frnes_verifier_exception_class_receipt_is_closed_enum(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("FMRL Frnes verifier JSON:", runner)
+        self.assertIn("FMRL Frnes exception class:", runner)
+        self.assertIn("FMRL Frnes verifier JSON:", controller)
+        self.assertIn("FMRL Frnes exception class:", controller)
+        self.assertIn("['exec','skipo','verify','.']", runner)
+        self.assertIn("fixedTypes=new Set(['FileNotFoundError'", runner)
+        self.assertIn("allowed_errors={'FileNotFoundError'", runner)
+        self.assertIn("fixedTypes.has(code)?code:'none'", runner)
 
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
