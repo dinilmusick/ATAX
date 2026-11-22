@@ -6,6 +6,7 @@ declare
   fixture_goal_id uuid;
   first_claim public.tasks;
   early_claim public.tasks;
+  premature_claim public.tasks;
   recovered public.tasks;
   handoff public.task_events;
   old_token uuid;
@@ -64,6 +65,16 @@ begin
   set heartbeat_at=now()-interval '5 minutes 1 second'
   where id=first_claim.id;
 
+  -- A stale heartbeat must NOT defeat an unexpired lease.
+  select * into premature_claim from public.task_ledger_claim_next(
+    'heartbeat-hardening-premature','Premature Worker','worker',array['heartbeat-hardening']::text[],600
+  );
+  if premature_claim.id is not null then
+    raise exception 'Stale heartbeat bypassed a still-valid socket lease';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered from public.task_ledger_claim_next(
     'heartbeat-hardening-new','Recovery Worker','worker',array['heartbeat-hardening']::text[],600
   );
@@ -100,7 +111,7 @@ begin
     raise exception 'Handoff event was not recorded';
   end if;
 
-  raise notice 'PASS: 5-minute heartbeat recovery, durable checkpoint context, fencing and handoff evidence';
+  raise notice 'PASS: stale heartbeat plus expired lease recovery, durable checkpoint context, fencing and handoff evidence';
 end;
 $test$;
 rollback;
