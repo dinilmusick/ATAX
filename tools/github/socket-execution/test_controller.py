@@ -291,7 +291,7 @@ class TestFMRLWorkflowBoundary(unittest.TestCase):
         self.assertLess(operation, cleanup)
         self.assertIn('socket_dispatch_fence_valid', workflow)
         self.assertIn("FMRL_TARGET_REF", workflow)
-        self.assertIn("'FMRL-'", workflow)
+        self.assertIn("'/FMRL-'", workflow)
         self.assertIn('GIT_ASKPASS', workflow)
         self.assertIn('git remote remove origin', workflow)
         self.assertIn('if: always()', workflow)
