@@ -19,13 +19,13 @@ The restricted host MUST expose **only this socket MCP server** to task-bound ag
 
 Direct repository modifications, arbitrary SQL, unrestricted file reads and provider calls are **not tools**. Every call is bound to the signed principal, session and task ID, canonical active fenced claim, current lease, canonical task capability and cumulative input/output quota. Cross-task use, revoked capabilities and stale claims always fail closed. Repeated context reads and retries count cumulatively. Overflow requires a durable atomic stop → atomise → release transaction with partial progress preserved.
 
-The signed OAuth resource token must be an RSA RS256 at+jwt access token with exact HTTPS issuer, audience and approved client (azp); sub, iat, exp, atax_task_id and atax_session_id are required. Expiry is at most 30 minutes. The gateway does not mint identities or accept identity in tool args. Browser Origin headers are denied.
+The signed OAuth resource token must be an RSA RS256 at+jwt access token with exact HTTPS issuer, audience and approved client (azp); sub, iat, exp, atax_task_id, atax_session_id and atax_claim_token are required. Expiry is at most 30 minutes. The gateway does not mint identities or accept identity in tool args. Browser Origin headers are denied.
 
 ## Deployment configuration
 
 Deploy the separate Worker using npx wrangler deploy --config tools/atax-mcp/wrangler.socket.toml **only after reconciliation and independent verification**.
 
-Required settings: SUPABASE_URL (canonical project), SUPABASE_SECRET_KEY (Worker secret), SOCKET_AUTH_ISSUER, SOCKET_AUTH_JWKS_URL (same HTTPS origin), SOCKET_AUTH_AUDIENCE (socket-only resource audience), SOCKET_AUTH_CLIENT_ID (approved azp), and SOCKET_WORKFLOW_CATALOG_JSON. The workflow catalog is a JSON object of approved workflow keys to permitted input names, e.g. {"safe_ci":["revision"]}. Empty or malformed catalog disables workflow requests. Do not inject GitHub or Cloudflare secrets into this Worker.
+Required settings: SUPABASE_URL (canonical project), SUPABASE_SECRET_KEY (Worker secret), SOCKET_AUTH_ISSUER, SOCKET_AUTH_JWKS_URL (same HTTPS origin), SOCKET_AUTH_AUDIENCE (socket-only resource audience), SOCKET_AUTH_CLIENT_ID (approved azp), and SOCKET_WORKFLOW_CATALOG_JSON. The workflow catalog is a JSON object of approved workflow keys to permitted input names, e.g. {"safe_ci":{"revision":"sha"}}. Supported workflow input types are sha (40 hexadecimal characters), uuid, slug, integer and boolean; input names and value types are both checked. Empty or malformed catalog disables workflow requests. Do not inject GitHub or Cloudflare secrets into this Worker.
 
 ## Production adapter contract for Agents A, B and D
 
