@@ -1,0 +1,56 @@
+-- ATAX task-socket fencing: additive, signature-preserving corrections.
+-- Each replacement must match exactly one existing function definition; the
+-- entire migration aborts atomically if production drift is detected.
+-- Running task recovery requires BOTH stale heartbeat and expired claim lease.
+-- All fenced executor mutations require a still-live claim token.
+DO $migration$
+DECLARE
+  patch record;
+  target_oid oid;
+  before_sql text;
+  after_sql text;
+BEGIN
+  FOR patch IN SELECT * FROM (VALUES
+    ('task_ledger_claim_next','5','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('task_ledger_claim_goal_next','6','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('goal_ledger_claim_task','7','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('task_ledger_check_claim','3','and claim_token=claim_token_in','and claim_token=claim_token_in and claim_expires_at>statement_timestamp()'),
+    ('task_ledger_heartbeat_claim','5','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
+    ('task_ledger_heartbeat_claim','6','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
+    ('task_ledger_release_claim','5','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
+    ('task_ledger_submit_result','8','status=''running'' for update','status=''running'' and claim_expires_at>statement_timestamp() for update'),
+    ('task_ledger_finalize_loop_script','7','status=''running'' and task_role=''loop_authoring''','status=''running'' and claim_expires_at>statement_timestamp() and task_role=''loop_authoring'''),
+    ('task_ledger_record_iteration','11','AND claim_token=claim_token_in AND status=''running'') THEN','AND claim_token=claim_token_in AND status=''running'' AND claim_expires_at>statement_timestamp() FOR UPDATE) THEN'),
+    ('task_ledger_update','10','where id=task_id_in and agent_id=agent_id_in returning','where id=task_id_in and agent_id=agent_id_in and claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp()) and status_in is distinct from ''running'' and status_in is distinct from ''completed'' returning'),
+    ('task_ledger_heartbeat','5','and status in (''running'',''blocked'',''waiting'') returning','and status in (''running'',''blocked'',''waiting'') and claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp()) returning'),
+    ('resolve_checkpoint_blocker','6','if not found then raise exception ''task not found''; end if;','if not found then raise exception ''task not found''; end if; if t.status=''running'' and t.claim_expires_at>statement_timestamp() then raise exception ''Active task socket cannot be requeued by blocker resolution''; end if;'),
+    ('task_ledger_record_parent_loop_iteration','12','and t.status in (''queued'',''running'',''blocked'')','and t.status in (''queued'',''running'',''blocked'') and (t.status<>''running'' or (t.claim_token is null and (t.claim_expires_at is null or t.claim_expires_at<=statement_timestamp())))'),
+    ('task_ledger_finalize_parent','4','where id = task_id_in
+  returning * into task_out;','where id = task_id_in and (status<>''running'' or (claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp())))
+  returning * into task_out;'),
+    ('task_ledger_verify_result','4','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'';','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'' and (t.verification_claim_token is null or t.verification_claim_expires_at<=statement_timestamp());')
+  ) AS v(function_name,arity,old_fragment,new_fragment)
+  LOOP
+    SELECT p.oid INTO target_oid
+      FROM pg_proc p
+      WHERE p.pronamespace='public'::regnamespace
+        AND p.proname=patch.function_name
+        AND p.pronargs=patch.arity;
+    IF target_oid IS NULL THEN
+      RAISE EXCEPTION 'Socket-fence migration: missing function % / % arguments',
+        patch.function_name,patch.arity;
+    END IF;
+    before_sql:=pg_get_functiondef(target_oid);
+    IF strpos(before_sql,patch.old_fragment)=0 THEN
+      RAISE EXCEPTION 'Socket-fence migration drift: % / % fragment not found',
+        patch.function_name,patch.arity;
+    END IF;
+    IF length(before_sql)-length(replace(before_sql,patch.old_fragment,''))<>length(patch.old_fragment) THEN
+      RAISE EXCEPTION 'Socket-fence migration ambiguous target: % / %',
+        patch.function_name,patch.arity;
+    END IF;
+    after_sql:=replace(before_sql,patch.old_fragment,patch.new_fragment);
+    EXECUTE after_sql;
+  END LOOP;
+END;
+$migration$;
