@@ -34,8 +34,8 @@ jobs:
           for repository in Aiko Srkl-Engine; do
             mkdir -p "/tmp/auth-${repository}"
             git -c credential.helper= clone --quiet --no-checkout               "https://github.com/dinilmusick/${repository}.git" "/tmp/auth-${repository}/repo" >/dev/null 2>&1
-            if [ "$repository" = Aiko ]; then exact="8cfda8fd76fffb011df1ceaec29ea14b92ec15c7";
-            else exact="fc5bbe20aeb45a97337f8894c4a6e923e352e6b0"; fi
+            if [ "$repository" = Aiko ]; then exact="4bb3bba2fe917acb241bbd775a8d1af903ce1edd";
+            else exact="e649bcd4c70b14de24cd5a1a14e08b5fc4157ebb"; fi
             git -C "/tmp/auth-${repository}/repo" checkout --quiet --detach "$exact" >/dev/null 2>&1
             test "$(git -C "/tmp/auth-${repository}/repo" rev-parse HEAD)" = "$exact"
             echo "PRIVATE_CHECKOUT_VERIFIED=${repository}"
