@@ -13,7 +13,7 @@ export function isOwnerPrincipal(env,principal) {
   if (principal.authMethod==='shared')
     return !!env.MCP_SHARED_TOKEN_SHA256 && principal.id===String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
   const owner=String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'').trim();
-  return principal.authMethod==='jwt' && owner.length>=3 && principal.id===owner;
+  return principal.authMethod==='jwt' && owner.length>=3 && principal.ownerSubject===owner;
 }
 function configuredAccounts(env,provider) {
   const prefixes=PREFIX[provider];
