@@ -1,4 +1,4 @@
-import {createSocketGateway} from './socket-gateway.mjs';
+import {createSocketGateway,readBoundedText} from './socket-gateway.mjs';
 
 const encoder = new TextEncoder();
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -43,8 +43,8 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
     throw Error('JWKS issuer origin mismatch');
   const response=await fetcher(jwksUrl,{redirect:'error',headers:{accept:'application/json'}});
   if(!response.ok)return null;
-  const raw=await response.text();
-  if(encoder.encode(raw).length>32768)return null;
+  const raw=await readBoundedText(response,32768);
+  if(raw===null)return null;
   let keys;
   try{keys=JSON.parse(raw).keys;}catch{return null;}
   const jwk=Array.isArray(keys)?keys.find(k=>k.kid===head.kid&&k.kty==='RSA'&&
@@ -75,8 +75,8 @@ export function createSocketWorker(env,fetcher=fetch){
         body:JSON.stringify({command_in:command})
       });
       if(!response.ok)throw Error('Canonical transaction unavailable');
-      const body=await response.text();
-      if(encoder.encode(body).length>16384)throw Error('Canonical response exceeds socket boundary');
+      const body=await readBoundedText(response,16384);
+      if(body===null)throw Error('Canonical response exceeds socket boundary');
       const result=JSON.parse(body);
       return Array.isArray(result)?null:result;
     }
