@@ -38,10 +38,24 @@ jobs:
           export GIT_ASKPASS=/tmp/oidc-verify/askpass GIT_TERMINAL_PROMPT=0
           for repo in Kone Brwlr-Engine; do
             export GIT_AUTH_TOKEN="$PRIVATE_REPO_TOKEN"
-            git -c credential.helper= clone --quiet --depth 1 \
+            if ! git -c credential.helper= clone --quiet --depth 1 \
               --branch feat/unified-oidc-skipo-20261122 \
               "https://github.com/dinilmusick/$repo.git" "/tmp/oidc-verify/$repo" \
-              >/tmp/oidc-verify/clone.log 2>&1
+              >/tmp/oidc-verify/clone.log 2>&1; then
+              if [ -n "$CODING_REPO_TOKEN" ]; then
+                export GIT_AUTH_TOKEN="$CODING_REPO_TOKEN"
+                git -c credential.helper= clone --quiet --depth 1 \
+                  --branch feat/unified-oidc-skipo-20261122 \
+                  "https://github.com/dinilmusick/$repo.git" "/tmp/oidc-verify/$repo" \
+                  >/tmp/oidc-verify/clone-write-token.log 2>&1 || {
+                  if grep -qi 'Repository not found' /tmp/oidc-verify/clone-write-token.log;then
+                    echo "PRIVATE_REPO_TOKEN_SCOPE_DENIED=$repo"
+                  else echo "PRIVATE_CLONE_FAILURE=$repo"; fi
+                  exit 128
+                }
+              else echo "PRIVATE_CLONE_FAILURE=$repo"; exit 128
+              fi
+            fi
             cd "/tmp/oidc-verify/$repo"
             test "$(git branch --show-current)" = "feat/unified-oidc-skipo-20261122"
             echo "PRIVATE_CLONE_VERIFIED=$repo"
