@@ -10,6 +10,7 @@ declare
   recovered public.tasks;
   handoff public.task_events;
   old_token uuid;
+  expired_heartbeat_rejected boolean := false;
 begin
   insert into public.goals(name,created_by_agent_id,status)
   values ('Fixture heartbeat-hardening ' || replace(gen_random_uuid()::text,'-',''),'heartbeat-hardening-orchestrator','ready')
@@ -49,6 +50,22 @@ begin
   if not public.task_ledger_check_claim(first_claim.id,'heartbeat-hardening-old',old_token) then
     raise exception 'Active worker failed its ownership check';
   end if;
+
+  -- Expiration fences even the prior holder: it cannot silently revive a lost lease.
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+  begin
+    perform public.task_ledger_heartbeat_claim(
+      first_claim.id,'heartbeat-hardening-old',old_token,'Illegal renewal',600,
+      '{}'::jsonb
+    );
+  exception when others then expired_heartbeat_rejected:=true;
+  end;
+  if not expired_heartbeat_rejected then
+    raise exception 'Expired claim holder renewed its socket lease';
+  end if;
+  update public.tasks set claim_expires_at=now()+interval '10 minutes'
+  where id=first_claim.id;
 
   update public.tasks
   set heartbeat_at=now()-interval '4 minutes 59 seconds'
