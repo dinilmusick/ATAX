@@ -24,7 +24,7 @@ BEGIN
     VALUES('test-atomiser','test-atom-session','controller:atom','worker',now()+interval '1 hour')
     RETURNING * INTO inv_atom;
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
-    VALUES('test-atomiser','test-atom-fresh-session','controller:atom-fresh','executor',now()+interval '1 hour')
+    VALUES('test-atomiser','test-atom-fresh-session','controller:atom-fresh','worker',now()+interval '1 hour')
     RETURNING * INTO inv_same;
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,expires_at)
     VALUES('test-executor','test-exec-session','controller:exec','executor',now()+interval '1 hour')
@@ -101,6 +101,35 @@ BEGIN
     rejected:=position('Socket invocation missing, expired, or unauthorized' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: invalid invocation credential accepted'; END IF;
+  -- The agent ID alone is insufficient: a later session cannot reuse an old
+  -- invocation's fenced claim, even with the correct token.
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_record_usage(p_stale,inv_same.id,inv_same.secret,
+      fence_stale,gen_random_uuid(),'input',1);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Stale or foreign socket lease' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: same agent ID inherited usage fence across sessions'; END IF;
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_stop_for_atomization(p_stale,inv_same.id,inv_same.secret,
+      fence_stale,'different-session-stop');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Stale or foreign socket lease' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: same agent ID stopped another session'; END IF;
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p_stale,inv_same.id,inv_same.secret,
+      fence_stale,'different-session-split',definition);
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Stale or foreign split fence' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: same agent ID split another session'; END IF;
   -- Stale fence must fail without charging usage.
   rejected:=false;
   BEGIN
