@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS public.socket_child_verification_grants (
   child_task_id uuid PRIMARY KEY REFERENCES public.socket_atomization_children(child_task_id),
   invocation_id uuid NOT NULL REFERENCES public.socket_invocations(id),
   claim_token uuid NOT NULL,
+  result_approved boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS public.socket_parent_finalization_grants (
@@ -463,10 +464,10 @@ BEGIN
       AND v_child.verification_claim_expires_at<>'infinity'::timestamptz) THEN
     RAISE EXCEPTION 'Child is not awaiting independent verification';
   END IF;
-  INSERT INTO public.socket_child_verification_grants(child_task_id,invocation_id,claim_token)
-   VALUES(child_in,invocation_in,v_token)
+  INSERT INTO public.socket_child_verification_grants(child_task_id,invocation_id,claim_token,result_approved)
+   VALUES(child_in,invocation_in,v_token,false)
    ON CONFLICT(child_task_id) DO UPDATE SET invocation_id=EXCLUDED.invocation_id,
-     claim_token=EXCLUDED.claim_token,created_at=now();
+     claim_token=EXCLUDED.claim_token,result_approved=false,created_at=now();
   UPDATE public.tasks SET verification_claimed_by_agent_id=v_inv.agent_id,
     verification_claim_token=v_token,
     verification_claim_expires_at=now()+make_interval(secs=>greatest(30,least(lease_seconds_in,3600))),
@@ -497,6 +498,9 @@ BEGIN
       THEN report_in->'evidence' ELSE '[]'::jsonb END),0)=0) THEN
     RAISE EXCEPTION 'Independent verification needs nonempty evidence';
   END IF;
+  UPDATE public.socket_child_verification_grants SET result_approved=true
+    WHERE child_task_id=child_in AND invocation_id=invocation_in
+      AND claim_token=verification_fence_in;
   UPDATE public.tasks SET
     verification_status=CASE WHEN verified_in THEN 'verified' ELSE 'rejected' END,
     verification_report=coalesce(report_in,'{}'::jsonb),
@@ -569,6 +573,21 @@ BEGIN
   JOIN public.socket_atomization_children c ON c.parent_task_id=a.parent_task_id
   WHERE c.child_task_id=NEW.id;
   IF FOUND THEN
+    IF NEW.status='queued' THEN
+      RAISE EXCEPTION 'Socket child cannot join legacy queued claim pool';
+    END IF;
+    IF OLD.status='running' AND NEW.status<>'running'
+      AND NEW.status IN ('waiting','completed','failed','blocked') THEN
+      SELECT i.* INTO v_inv FROM public.socket_child_claim_grants g
+        JOIN public.socket_invocations i ON i.id=g.invocation_id
+       WHERE g.child_task_id=NEW.id AND g.claim_token=OLD.claim_token
+         AND i.agent_id=OLD.claimed_by_agent_id
+         AND i.session_id=OLD.claimed_session_id
+         AND i.expires_at>statement_timestamp();
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Child release/submission requires the authenticated existing claim';
+      END IF;
+    END IF;
     -- Keep submitted children out of the legacy global verifier selector.
     -- Infinity is an unclaimed socket-specific review marker, NOT a lease.
     IF OLD.status='running' AND NEW.status='completed'
@@ -603,6 +622,7 @@ BEGIN
       SELECT i.* INTO v_inv FROM public.socket_child_verification_grants g
        JOIN public.socket_invocations i ON i.id=g.invocation_id
        WHERE g.child_task_id=NEW.id AND i.agent_id=NEW.verified_by_agent_id
+         AND g.result_approved=true
          AND i.expires_at>statement_timestamp();
       -- A recursively atomised child becomes a non-leaf parent. It is verified
       -- only by finalizing its own verified descendants; the nested parent's
