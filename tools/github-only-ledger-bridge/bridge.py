@@ -166,6 +166,22 @@ def execute_command(command: dict, actor: str, db: SupabaseAgentClient):
             "tools_used_in": ["github-only-ledger-bridge"],
         })
 
+    if op == "handoff":
+        # A lost task lease does not end this external agent's work session.
+        # The old token is used only to annotate immutable history, NEVER
+        # to release, submit, renew or mutate the new holder's task socket.
+        require_fields(args, {"task_id", "old_claim_token", "note"}, {"context"})
+        context = args.get("context", {})
+        if not isinstance(context, dict) or len(json.dumps(context).encode("utf-8")) > 8000:
+            raise BridgeError("Invalid handoff context")
+        return db.rpc("task_ledger_record_handoff", {
+            "task_id_in": uuid_arg(args, "task_id"),
+            "previous_agent_id_in": identity,
+            "previous_claim_token_in": uuid_arg(args, "old_claim_token"),
+            "handoff_note_in": short_text(args, "note", 3000),
+            "context_in": context,
+        })
+
     if op == "verification_claim":
         require_fields(args, set())
         return db.rpc("task_ledger_claim_verification", {
