@@ -24,7 +24,7 @@ When a detailed skill or repository document conflicts with the stable ATAX cont
 
 ATAX's interface is independent of the agent and the AI application. See [connection modes](docs/connection-modes.md).
 
-- **GitHub connector only:** agents use this repository's instructions, tools and trusted GitHub workflows. Live Supabase ledger operations require a separately authorized credential-bearing client/bridge, not bare repository access; full bridge parity remains to be verified.
+- **GitHub connector only:** agents use this repository's instructions, tools and trusted GitHub workflows. Live Supabase ledger operations require a separately authorized credential-bearing client/bridge, not bare repository access; A [private GitHub controller bridge](tools/github-only-ledger-bridge/README.md) is implemented but requires separately configured secrets, access, and live certification; full bridge parity remains to be verified.
 - **GitHub + Supabase connectors:** existing direct-connector path reads/writes live state through the connected Supabase RPC tools and operates GitHub through its connector; **do not redirect it through MCP**.
 - **Remote ATAX MCP:** authenticated clients use the owner-configured Cloudflare Worker `/mcp` endpoint, whose bounded tools call the **same** ledger RPCs. Worker credentials are Cloudflare secrets, independent from GitHub Actions repository secrets.
 
