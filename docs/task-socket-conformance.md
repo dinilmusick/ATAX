@@ -118,3 +118,40 @@ atomized parent ──all children independently verified + separate final audit
 ### Known limitation: mock versus integrated
 
 Mocks prove contract logic is testable and that the test cases detect violations in the reference oracle, not that any live controller meets the contract. This Agent E deliverable deliberately does not modify the Agents A–D production gateway, database or workflows. Final integration is a separate independently verified task.
+## 7. Independent Agent K hardening of source PR #1731
+
+Source HEAD pinned for review: 896ce4a18396d64fe9a4d14afaa38cb3fb8ae29e, 2026-11-22. Canonical Agent K task: task-k-certify-model-tier-conformance-fixture-and-integrated-5ccfd45a; issue #1738.
+
+### Evidence categories (never conflate)
+
+- SOURCE_REPLAY_PASS: 27/27 original source tests passed in an independently assembled isolated V8 source-function harness at the exact pinned blob SHAs. This was NOT a native Node test runner execution.
+- NODE_NATIVE: NOT_RUN until a clean Node 22+ checkout executes the command below and saves a TAP transcript. Successful unrelated CI workflows do not substitute for this.
+- MOCK_ONLY: The added attestation tests sign fake observations using ephemeral locally generated keys. They do not measure providers or establish quota access.
+- LIVE_PROVIDER / DATABASE / MCP_GATEWAY / GITHUB_ACTIONS: NOT_RUN until an independent actor executes real disposable integration tests and attaches records. Never promote an unrun gate to PASS.
+
+### Signed calibration evidence: schema v1
+
+The earlier pure deriveReliableCeiling helper is a threshold computation, not evidence authentication. The Agent K attestation module validates independent Ed25519 signing before the calibration CLI will accept an external observation.
+
+The signed JSON must contain schemaVersion 1, kind provider-observation, and provenance with provider, model, tier, apiVersion, tokenizer, executor, independentVerifier, observedAt ISO timestamp and responseIds. Each trial needs positive budgetTokens/inputTokens, nonnegative integer outputTokens, a distinct responseId, SHA-256 prompt digest, boolean success, plus independently evaluated pass and SHA-256 output digest. Response IDs must exactly cover all trials; executor and evaluator must differ. No provider keys or raw sensitive prompts belong in records. Evidence expires after 30 days and must not be future-dated.
+
+The attestation object has algorithm Ed25519, keyId, signedBy, signatureBase64. The signature is over UTF-8 recursively key-sorted JSON of the entire record EXCLUDING the attestation object, with arrays kept in original order. The keyId must resolve in an externally provisioned trustedSignerKey map: never trust a public key supplied by the observation itself. signedBy must match the independent verifier. Missing signing evidence, altered input/output counts, invalid hashes, duplicate response IDs, self-evaluation, stale records, untrusted keys, and provider/model/tier mismatch are UNTRUSTED_CALIBRATION failures. A valid signature establishes only evidence integrity and accountable observer identity; it is NOT automatic proof of genuine provider calls, response correctness or account-specific tier entitlement.
+
+A trust store is JSON mapping signer IDs to trusted PEM Ed25519 PUBLIC keys. Store any private signing key elsewhere, never in git.
+
+Commands from a clean checkout:
+
+    node --test tests/task-socket-conformance/*.test.mjs
+    node tests/task-socket-conformance/calibration-cli.mjs
+    ATAX_SOCKET_TRUST_STORE=/secure/trusted-observers.json node tests/task-socket-conformance/calibration-cli.mjs /secure/real-signed-provider-observation.json
+    ATAX_SOCKET_CONFORMANCE_ADAPTER=/absolute/path/integrated-shim.mjs node --test tests/task-socket-conformance/adapter-contract.test.mjs tests/task-socket-conformance/adapter-adversarial.test.mjs
+
+The evidence-path CLI must refuse records without a trusted store, including the committed synthetic fixture. The default CLI without evidence still prints conservative UNCALIBRATED limits. The provider's published exact context C is an UPPER bound, not a measured reliability guarantee. The ATAX ceiling must never exceed floor(0.40*C), the system/output reserves, or a lower independently calibrated limit. Rounded or unknown capacities retain the 4096-token fallback; the unknown exact output cap remains 1024. Consumer Free-plan access must never be inferred from API tier documentation.
+
+### Disposable integrated adapter contract for final Agent F
+
+Implement createAdapter({budget,maxPayloadBytes}) exporting the contract in adapter-contract.mjs. The adapter must implement createTask, claim, pull, push, usage, reconnect, tick, get, atomize, requestWorkflow, dispatchAck, dispatchFinish, submit, verify, directTarget, readCredential and unrestrictedFetch, returning stable machine error codes. Every test creates a fresh disposable namespace, immutable target revision and authorized allowlist. tick uses an isolated clock or controlled lease-expiration fixture, NOT direct mutation of the production claim ledger. The adapter must never import the reference fake.
+
+Required evidence: immutable source and test SHAs; native Node output; redacted request and metering event IDs including failed attempts/retries; canonical database claim/session/fence; atomic split and verified child transitions; authenticated restricted-tool denial logs; pinned GitHub job request/ack/terminal evidence; signed provider observations with independent result evaluations; and teardown confirmation. Avoid durable writes to real ATAX task keys during integration. A supplied shim that only simulates gateway, database or GitHub activity is a mock and receives MOCK_ONLY, not LIVE PASS.
+
+Security release failures include: context usage reset, missing token accounting, accepted forged principal/session/fence, stale lease access, output over provider-specific cap even if combined budget fits, self-planning or self-verification, partial child inserts, direct writes or credential disclosure, mutable revision, unauthorized target, idempotency collision, nonterminal/failed/oversized dispatch promoted to success, or skipped negative tests. The reference mock has only a shared budget and DOES NOT establish enforcement of a smaller provider-specific output cap; Agent F must test that boundary against the actual metering implementation. All absent evidence remains NOT_RUN/BLOCKED. Agent F owns final integration and a different independent reviewer must verify Agent K's changes. No production certification is claimed here.
