@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS public.socket_output_submissions (
 );
 CREATE INDEX IF NOT EXISTS socket_output_submission_task_idx
   ON public.socket_output_submissions(task_id,submitted_at DESC);
-DO $
+DO $$
 DECLARE tab text;
 BEGIN
  FOR tab IN SELECT unnest(ARRAY['socket_gateway_capabilities','socket_gateway_workflows','socket_output_submissions']) LOOP
@@ -50,7 +50,7 @@ BEGIN
   EXECUTE format('REVOKE ALL ON TABLE public.%I FROM public,anon,authenticated',tab);
   EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.%I TO service_role',tab);
  END LOOP;
-END $;
+END $$;
 -- A task-bound role may append only. In particular it cannot silently rewrite
 -- a submitted artifact or erase evidence used by a separate verifier.
 REVOKE UPDATE,DELETE ON public.socket_output_submissions FROM service_role;
