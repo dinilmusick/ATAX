@@ -28,6 +28,7 @@ BEGIN
     ('task_ledger_finalize_parent','4','where id = task_id_in
   returning * into task_out;','where id = task_id_in and (status<>''running'' or (claim_token is null and (claim_expires_at is null or claim_expires_at<=statement_timestamp())))
   returning * into task_out;'),
+    ('task_ledger_claim_verification','2','where t.verification_status=''pending'' and t.result_submitted_at is not null','where t.verification_status=''pending'' and t.result_submitted_at is not null and t.claimed_by_agent_id is distinct from verifier_agent_id_in'),
     ('task_ledger_verify_result','4','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'';','where t.id=task_id_in and t.status=''completed'' and t.verification_status=''pending'' and (t.verification_claim_token is null or t.verification_claim_expires_at<=statement_timestamp());')
   ) AS v(function_name,arity,old_fragment,new_fragment)
   LOOP
