@@ -9,11 +9,9 @@ workers_dev = true
 SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
 MCP_GITHUB_OWNER = "dinilmusick"
 
-# Public, non-secret Luth issuer/resource metadata for Claude and Gemini OAuth DCR.
-# Do not add the owner subject or privileged Supabase key here.
-MCP_AUTH_AUTHORIZATION_SERVER = "https://luth.blueprint-ninjastudios.workers.dev/api/auth"
-MCP_AUTH_ISSUER = "https://luth.blueprint-ninjastudios.workers.dev/api/auth"
-MCP_AUTH_JWKS_URL = "https://luth.blueprint-ninjastudios.workers.dev/api/auth/jwks"
-MCP_AUTH_AUDIENCE = "https://atax-mcp.dextro1n1laevo.workers.dev/mcp"
-MCP_AUTH_OWNER_SCOPES = "atax:read atax:write atax:github:read atax:github:create atax:cloudflare:read atax:fmrl:execute"
-
+# Single-owner secret bootstrap is the default, without any Luth or ULTRST dependency.
+# Set MCP_SHARED_TOKEN_SHA256 (secret) and MCP_SHARED_SUBJECT / MCP_SHARED_SCOPES
+# (appropriate owner-only variables) in the deployed Worker settings.
+# OAuth is optional: supply your own issuer/JWKS/audience/authorization-server
+# settings explicitly if a particular client requires OAuth discovery.
+# Do not hard-code a separate ULTRST/Luth service as an ATAX dependency.
