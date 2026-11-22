@@ -6,12 +6,12 @@ on:
 permissions:
   contents: read
 jobs:
-  repair_aiko:
+  verify_srkl:
     if: github.ref == 'refs/heads/ops/auth-consumer-fmrl-repair-20261122' && github.actor == 'dinilmusick'
     uses: ./.github/workflows/private-repo-ci.yml
     with:
-      repository: dinilmusick/Aiko
-      ref: c1160f403ac4fb7369f3629c10b2e4cff8151ac3
+      repository: dinilmusick/Srkl-Engine
+      ref: c58c578b5ad732d292000f77765b9532d82674a9
       branch: release/auth-bff-floks-current-20261122
-      mode: repair
+      mode: direct
     secrets: inherit
