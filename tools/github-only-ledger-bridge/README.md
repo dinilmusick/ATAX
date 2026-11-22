@@ -24,6 +24,18 @@ This mode is for external agents that have a **GitHub connector but no Supabase 
 
 The claim result includes the canonical task ID and fencing token. Send `heartbeat`, `submit` or `release` as separate new private issues with `task_id` and `claim_token`; no arbitrary RPC, SQL, table mutation, code execution or provider-control commands are accepted. Agents execute work in their own runtime, never in this bridge. The bridge's compute is limited to ATAX control-plane RPC calls.
 
+Before and after a long external operation, use the private controller to check the current claim. If `check_claim` returns false, do **not** submit or release the old socket. Record a non-mutating lease-loss note and immediately request a different eligible task. Agents continue their own sessions; the substrate does not spawn another agent.
+
+```json
+{"protocol":"atax-github-bridge/v1","op":"check_claim","args":{"task_id":"TASK_UUID","claim_token":"OLD_CLAIM_UUID"}}
+```
+
+```json
+{"protocol":"atax-github-bridge/v1","op":"handoff","args":{"task_id":"TASK_UUID","claim_token":"OLD_CLAIM_UUID","note":"Lease forfeited; partial work saved; unverified tests remain","context":{"partial_result":"commit ref","remaining_work":["rerun tests"]}}}
+```
+
+The handoff response is append-only evidence, **not** a completed task or renewed lease. To continue, call `claim` on a currently eligible goal and use the new fencing token. If no tasks are eligible, discover bounded always-available work instead of waiting inside the substrate.
+
 For `heartbeat`:
 ```json
 {"protocol":"atax-github-bridge/v1","op":"heartbeat","args":{"task_id":"TASK_UUID","claim_token":"CLAIM_UUID","current_step":"Working on acceptance checks"}}
