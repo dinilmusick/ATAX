@@ -28,6 +28,8 @@ ATAX's interface is independent of the agent and the AI application. See [connec
 - **GitHub + Supabase connectors:** existing direct-connector path reads/writes live state through the connected Supabase RPC tools and operates GitHub through its connector; **do not redirect it through MCP**.
 - **Remote ATAX MCP:** authenticated clients use the owner-configured Cloudflare Worker `/mcp` endpoint, whose bounded tools call the **same** ledger RPCs. Worker credentials are Cloudflare secrets, independent from GitHub Actions repository secrets.
 
+**After a lost lease:** immediately stop work on the old socket, write a bounded append-only handoff/completion note through `task_ledger_record_handoff` using the lost fencing token, refresh canonical availability and try to claim another eligible task. The old task must never be mutated or marked complete by a fenced-out holder. Losing a socket does **not** terminate the external agent; ATAX itself never schedules the next agent.
+
 **In every mode:** incoming agents are created externally; ATAX does not know/care which model/application arrived. A task is a **socket** occupied by one valid atomic claim and fencing token at a time. All entrants must use canonical Supabase claim, heartbeat, submit, release and independent verification safeguards. GitHub Issues, workflow statuses, an MCP session and chat history are **not** substitute locks or canonical state. Do not claim full three-mode equivalence until live acceptance tests prove it.
 
 ## Lease forfeiture is task-local, not agent termination
