@@ -8,9 +8,9 @@ const issuer = 'https://luth.example/api/auth';
 const keyPair = await webcrypto.subtle.generateKey({name:'Ed25519'},true,['sign','verify']);
 const pub = await webcrypto.subtle.exportKey('jwk',keyPair.publicKey);
 pub.kid='luth-ed25519-key'; pub.alg='EdDSA';
-const fetcher = async url => {
+const fetcher = async (url,options={}) => {
   if (url === 'https://luth.example/api/auth/jwks')return Response.json({keys:[pub]});
-  if (String(url).includes('/rpc/'))return Response.json({ok:true});
+  if (String(url).includes('/rpc/'))return Response.json({ok:true,params:JSON.parse(options.body||'{}')});
   throw Error('Unexpected upstream request');
 };
 const handler=createHandler(fetcher);
@@ -81,4 +81,17 @@ test('independent verification cannot be conferred by read/write owner OAuth pol
   const names=(await res.json()).result.tools.map(x=>x.name);
   assert.ok(!names.includes('atax_verification_submit'));
   assert.ok(!names.includes('atax_verification_claim'));
+});
+
+test('same owner across OAuth clients uses identical substrate identity and fenced claims',async()=>{
+  const args={jsonrpc:'2.0',id:101,method:'tools/call',params:{name:'atax_task_claim_next',arguments:{capabilities:['backend'],lease_seconds:300}}};
+  const call=async(token)=>handler(new Request(resource,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(args)}),config);
+  const clientA=await (await call(await jwt({azp:'oauth-client-a'}))).json();
+  const clientB=await (await call(await jwt({azp:'oauth-client-b'}))).json();
+  const first=clientA.result.structuredContent.result.params.agent_id_in;
+  const second=clientB.result.structuredContent.result.params.agent_id_in;
+  assert.equal(first,'owner-1');
+  assert.equal(second,'owner-1');
+  const unauthorized=await (await call(await jwt({sub:'someone-else'}))).json();
+  assert.equal(unauthorized.result.isError,true);
 });

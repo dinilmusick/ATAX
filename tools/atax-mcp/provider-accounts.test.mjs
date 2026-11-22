@@ -1,105 +1,82 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {availableAccounts,resolveProviderAccount,providerTools} from './provider-accounts.mjs';
+import {availableAccounts,resolveProviderAccount,isOwnerPrincipal,providerTools} from './provider-accounts.mjs';
 
 const owner={id:'owner',authMethod:'shared'};
-const client={id:'client',authMethod:'jwt'};
+const oauthOwner={id:'oauth-owner',authMethod:'jwt'};
+const outsider={id:'outsider',authMethod:'jwt'};
 const env={
-  MCP_SHARED_SUBJECT:'owner',
-  MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',
-  GH_TOKEN_PERSONAL:'git-personal-secret',
-  GH_TOKEN_WORK:'git-work-secret',
-  CLOUDFLARE_TOKEN_PERSONAL:'cf-personal-secret',
-  CLOUDFLARE_TOKEN_WORK:'cf-work-secret',
+  MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'test-digest',
+  MCP_ATAX_OWNER_JWT_SUBJECT:'oauth-owner',
+  GH_KEY_PERSONAL:'github-personal-test', GH_KEY_WORK:'github-work-test',
+  CF_KEY_PERSONAL:'cloudflare-personal-test', CF_KEY_WORK:'cloudflare-work-test',
   CLOUDFLARE_ACCOUNT_ID_WORK:'abc12345',
-  VERCEL_TOKEN_PERSONAL:'vercel-personal-secret',
-  VERCEL_TOKEN_WORK:'vercel-work-secret',
-  VERCEL_TEAM_ID_WORK:'team_work',
-  MCP_PROVIDER_ACCOUNT_GRANTS:JSON.stringify({client:{github:['WORK'],cloudflare:['WORK'],vercel:['WORK']}})
 };
-const find=(name)=>providerTools.find(x=>x.name===name);
+const find=name=>providerTools.find(x=>x.name===name);
 const invoke=(name,args,principal=owner,config=env,fetcher=async()=>Response.json({}))=>
   find(name).invoke(args,null,principal,{env:config,fetcher});
 
-test('discover dynamic provider aliases without exposing their secret values',async()=>{
-  assert.deepEqual(availableAccounts(env,owner,'github'),['PERSONAL','WORK']);
-  assert.deepEqual(availableAccounts(env,client,'github'),['WORK']);
-  assert.deepEqual(availableAccounts(env,client,'cloudflare'),['WORK']);
-  const output=await invoke('atax_provider_accounts_list',{},client);
-  assert.deepEqual(output.accounts.find(x=>x.provider==='github').aliases,['WORK']);
-  assert.ok(!JSON.stringify(output).includes('secret'));
-  assert.ok(!JSON.stringify(output).includes('token'));
+test('single shared or pinned OAuth owner discovers named accounts; outsiders never do',async()=>{
+  for(const user of [owner,oauthOwner]){
+    assert.equal(isOwnerPrincipal(env,user),true);
+    assert.deepEqual(availableAccounts(env,user,'github'),['PERSONAL','WORK']);
+    assert.deepEqual(availableAccounts(env,user,'cloudflare'),['PERSONAL','WORK']);
+  }
+  assert.equal(isOwnerPrincipal(env,outsider),false);
+  assert.deepEqual(availableAccounts(env,outsider,'github'),[]);
+  assert.deepEqual(availableAccounts(env,outsider,'cloudflare'),[]);
+  assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[]]);
+  const listed=await invoke('atax_provider_accounts_list',{},oauthOwner);
+  assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare']);
+  assert.ok(!JSON.stringify(listed).includes('github-personal-test'));
+  assert.ok(!JSON.stringify(listed).includes('cloudflare-work-test'));
+  assert.ok(!providerTools.some(t=>t.name.includes('vercel')));
 });
 
-test('account suffix selects exact credential and never falls back to different account',()=>{
-  assert.equal(resolveProviderAccount(env,owner,'github','WORK').token,'git-work-secret');
+test('select exact named secret; no automatic choice with multiple accounts',()=>{
+  assert.equal(resolveProviderAccount(env,owner,'github','work').token,'github-work-test');
+  assert.equal(resolveProviderAccount(env,oauthOwner,'github','PERSONAL').token,'github-personal-test');
   assert.throws(()=>resolveProviderAccount(env,owner,'github'),/Specify an account alias/);
-  assert.throws(()=>resolveProviderAccount(env,client,'github','PERSONAL'),/not authorized/);
-  assert.throws(()=>resolveProviderAccount(env,client,'github','../WORK'),/Invalid account/);
-  assert.throws(()=>resolveProviderAccount(env,{id:'unauthorized'},'github','WORK'),/not authorized/);
-  assert.throws(()=>resolveProviderAccount(env,client,'github','NO_SUCH_ACCOUNT'),/not authorized/);
+  assert.throws(()=>resolveProviderAccount(env,owner,'github','../WORK'),/Invalid account/);
+  assert.throws(()=>resolveProviderAccount(env,outsider,'github','WORK'),/not authorized/);
+  assert.throws(()=>resolveProviderAccount(env,{id:'owner',authMethod:'jwt'},'github','PERSONAL'),/not authorized/);
+  assert.throws(()=>resolveProviderAccount(env,owner,'github','MISSING'),/not authorized/);
 });
 
-test('single secret works without account argument; legacy token preserved for bootstrap',()=>{
-  const single={...env,GH_TOKEN_WORK:undefined,CLOUDFLARE_TOKEN_WORK:undefined,VERCEL_TOKEN_WORK:undefined};
+test('one secret works without account; old named prefixes migrate safely',()=>{
+  const single={...env,GH_KEY_WORK:undefined,CF_KEY_WORK:undefined};
   assert.equal(resolveProviderAccount(single,owner,'github').alias,'PERSONAL');
-  const legacy={MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',GITHUB_REPOSITORY_TOKEN:'old-github-token'};
-  assert.equal(resolveProviderAccount(legacy,owner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}).token,'old-github-token');
-  assert.throws(()=>resolveProviderAccount(legacy,client,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}));
+  assert.equal(resolveProviderAccount(single,owner,'cloudflare').alias,'PERSONAL');
+  const old={...env,GH_KEY_PERSONAL:undefined,GH_KEY_WORK:undefined,GH_TOKEN_OLD:'older-github-test',
+    CF_KEY_PERSONAL:undefined,CF_KEY_WORK:undefined,CLOUDFLARE_TOKEN_OLD:'older-cloudflare-test'};
+  assert.deepEqual(availableAccounts(old,owner,'github'),['OLD']);
+  assert.equal(resolveProviderAccount(old,owner,'github').token,'older-github-test');
+  assert.deepEqual(availableAccounts(old,oauthOwner,'cloudflare'),['OLD']);
+  assert.throws(()=>resolveProviderAccount({...env,GH_TOKEN_WORK:'ambiguous'},owner,'github','WORK'),/Duplicate/);
 });
 
-test('JWT identity cannot impersonate bootstrap owner by reusing the same subject',()=>{
-  const forgedOwner={id:'owner',authMethod:'jwt'};
-  assert.deepEqual(availableAccounts(env,forgedOwner,'github'),[]);
-  assert.deepEqual(availableAccounts(env,forgedOwner,'cloudflare'),[]);
-  assert.deepEqual(availableAccounts(env,forgedOwner,'vercel'),[]);
-  assert.throws(()=>resolveProviderAccount(env,forgedOwner,'github','WORK'),/not authorized/);
-  assert.throws(()=>resolveProviderAccount(env,forgedOwner,'github','PERSONAL'),/not authorized/);
-  assert.throws(()=>resolveProviderAccount(env,{id:'owner'},'github','PERSONAL'),/not authorized/);
-  const legacy={MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'synthetic-owner-digest',GITHUB_REPOSITORY_TOKEN:'old-github-token'};
-  assert.throws(()=>resolveProviderAccount(legacy,forgedOwner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}),/not authorized/);
-  assert.equal(resolveProviderAccount(legacy,owner,'github',undefined,{legacyKey:'GITHUB_REPOSITORY_TOKEN'}).token,'old-github-token');
-});
-
-test('Cloudflare calls selected token; response strips provider secrets and extra fields',async()=>{
+test('Cloudflare provider calls use only requested credential; redact upstream extras',async()=>{
   const requests=[];
-  const fetcher=async(url,opts)=>{
-    requests.push({url,opts});
-    if(url.includes('/workers/scripts'))return Response.json({success:true,result:[{id:'example-worker',modified_on:'2026-11-20',secret:'NEVER_RETURN'}]});
-    return Response.json({success:true,result:[{id:'abc12345',name:'My CF Account',secret:'NEVER_RETURN'}]});
+  const fetcher=async(url,options)=>{
+    requests.push({url,options});
+    if(url.includes('/workers/scripts'))return Response.json({success:true,result:[{id:'app',modified_on:'2026-11-22',secret:'DO_NOT_RETURN'}]});
+    return Response.json({success:true,result:[{id:'abc12345',name:'Account',secret:'DO_NOT_RETURN'}]});
   };
-  const accounts=await invoke('atax_cloudflare_accounts_list',{account:'WORK'},client,env,fetcher);
-  const workers=await invoke('atax_cloudflare_workers_list',{account:'WORK'},client,env,fetcher);
+  const accounts=await invoke('atax_cloudflare_accounts_list',{account:'WORK'},oauthOwner,env,fetcher);
+  const scripts=await invoke('atax_cloudflare_workers_list',{account:'WORK'},oauthOwner,env,fetcher);
   assert.equal(accounts.accounts[0].id,'abc12345');
-  assert.equal(workers.scripts[0].id,'example-worker');
-  assert.ok(requests.every(r=>r.opts.headers.authorization==='Bearer cf-work-secret'));
-  assert.ok(!JSON.stringify(workers).includes('NEVER_RETURN'));
-  assert.throws(()=>resolveProviderAccount(env,client,'cloudflare','PERSONAL'),/not authorized/);
-  await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'WORK',account_id:'different'},client,env,fetcher),/differs/);
+  assert.equal(scripts.scripts[0].id,'app');
+  assert.ok(requests.every(x=>x.options.headers.authorization==='Bearer cloudflare-work-test'));
+  assert.ok(!JSON.stringify({accounts,scripts}).includes('DO_NOT_RETURN'));
+  await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'WORK',account_id:'wrong'},owner,env,fetcher),/differs/);
+  await assert.rejects(invoke('atax_cloudflare_accounts_list',{account:'WORK'},outsider,env,fetcher),/not authorized/);
 });
 
-test('Vercel queries selected team and project, with bounded normalized results',async()=>{
-  const requests=[];
-  const fetcher=async(url,opts)=>{
-    requests.push({url,opts});
-    return Response.json(url.includes('/v6/')?{deployments:[{uid:'d1',name:'web',state:'ERROR',readyState:'ERROR',url:'web.example',untrustedCredential:'NEVER_RETURN'}]}:
-      {projects:[{id:'prj_123',name:'web',framework:'nextjs',untrustedCredential:'NEVER_RETURN'}]});
-  };
-  const projects=await invoke('atax_vercel_projects_list',{account:'WORK'},client,env,fetcher);
-  const deployments=await invoke('atax_vercel_deployments_list',{account:'WORK',project_id:'prj_123'},client,env,fetcher);
-  assert.equal(projects.projects[0].name,'web');
-  assert.equal(deployments.deployments[0].state,'ERROR');
-  assert.ok(requests.every(r=>r.opts.headers.authorization==='Bearer vercel-work-secret'));
-  assert.ok(requests.every(r=>r.url.includes('teamId=team_work')));
-  assert.ok(requests.some(r=>r.url.includes('projectId=prj_123')));
-  assert.ok(!JSON.stringify(projects).includes('NEVER_RETURN'));
-});
-
-test('expired permissions, missing bindings, provider errors and invalid responses fail closed',async()=>{
-  const noGrant={...env,MCP_PROVIDER_ACCOUNT_GRANTS:'{}'};
-  await assert.rejects(invoke('atax_vercel_projects_list',{account:'WORK'},client,noGrant),/not authorized/);
-  await assert.rejects(invoke('atax_vercel_projects_list',{account:'WORK'},owner,env,async()=>Response.json({}, {status:403})),/HTTP 403/);
-  await assert.rejects(invoke('atax_vercel_projects_list',{account:'WORK'},owner,env,async()=>new Response('garbage')),/invalid JSON/);
+test('bad configuration, API failures and empty credentials fail closed',async()=>{
+  assert.deepEqual(availableAccounts({...env,GH_KEY_BAD:''},owner,'github'),['PERSONAL','WORK']);
+  assert.deepEqual(availableAccounts({...env,MCP_ATAX_OWNER_JWT_SUBJECT:''},oauthOwner,'github'),[]);
+  await assert.rejects(invoke('atax_cloudflare_accounts_list',{account:'WORK'},owner,env,async()=>Response.json({}, {status:403})),/HTTP 403/);
+  await assert.rejects(invoke('atax_cloudflare_accounts_list',{account:'WORK'},owner,env,async()=>new Response('invalid')),/invalid JSON/);
   await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'PERSONAL'},owner,env),/account ID required/);
-  assert.deepEqual(availableAccounts({...env,GH_TOKEN_HIDDEN:''},owner,'github'),['PERSONAL','WORK']);
+  assert.throws(()=>availableAccounts(env,owner,'vercel'),/Unknown provider/);
 });

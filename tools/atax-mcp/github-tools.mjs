@@ -35,8 +35,8 @@ export const githubGuide = Object.freeze({
   auth:{
     read:'atax:github:read', permanentCreation:'atax:github:create',
     disposableExecution:'atax:fmrl:execute',
-    serverSecrets:['GH_TOKEN_<ALIAS>','GITHUB_REPOSITORY_TOKEN (legacy fallback)','GITHUB_FMRL_DISPATCH_TOKEN'],
-    serverBindings:['MCP_GITHUB_OWNER (FMRL legacy controller)','MCP_FMRL_ALLOWED_TARGETS','MCP_PROVIDER_ACCOUNT_GRANTS'],
+    serverSecrets:['GH_KEY_<ALIAS> (GH_TOKEN_<ALIAS> accepted for migration)'],
+    serverBindings:['MCP_GITHUB_OWNER (canonical owner for FMRL)','MCP_FMRL_ALLOWED_TARGETS'],
   },
   lifecycle:'The FMRL workflow owns provisioning, dispatch, log redaction, and unconditional delete + independent verify; the MCP Worker NEVER hosts source or schedules agents.',
 });
@@ -90,8 +90,8 @@ async function repositoryInfo(repo,ctx,token) {
 }
 async function createRepository(a,_db,p,ctx){
   const env=ctx.env;
-  const selected=resolveProviderAccount(env,p,'github',a.account,{legacyKey:'GITHUB_REPOSITORY_TOKEN'});
-  const owner=selected.legacy?assertOwner(env):requireOk(await githubRequest(ctx.fetcher,`${API}/user`,selected.token),'GitHub identity lookup').login;
+  const selected=resolveProviderAccount(env,p,'github',a.account);
+  const owner=requireOk(await githubRequest(ctx.fetcher,`${API}/user`,selected.token),'GitHub identity lookup').login;
   if(!owner||!/^[a-zA-Z0-9-]{1,39}$/.test(owner))throw new Error('Unable to verify token GitHub account');
   const name=ensureName(a.name,true);
   const token=selected.token;
@@ -105,8 +105,8 @@ async function createRepository(a,_db,p,ctx){
   return {operation:'create_permanent_repository',account:selected.alias,...verified,verified:true,disposable:false};
 }
 async function inspectRepository(a,_db,p,ctx){
-  const selected=resolveProviderAccount(ctx.env,p,'github',a.account,{legacyKey:'GITHUB_REPOSITORY_TOKEN'});
-  const repo=selected.legacy?parseRepo(a.repository,ctx.env):String(a.repository||'');
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
   if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
   return {operation:'inspect_repository',account:selected.alias,...await repositoryInfo(repo,ctx,selected.token)};
 }
@@ -118,23 +118,25 @@ function validateFmrlArgs(a,env){
   if(a.workflow!==undefined && !/^[A-Za-z0-9_.-]{1,100}\.ya?ml$/.test(a.workflow))throw new Error('Invalid target workflow file');
   return repo;
 }
-async function dispatchFmrl(a,_db,_p,ctx){
+async function dispatchFmrl(a,_db,principal,ctx){
   const owner=assertOwner(ctx.env);
   const repository=validateFmrlArgs(a,ctx.env);
-  const token=requireEnv(ctx.env,'GITHUB_FMRL_DISPATCH_TOKEN');
+  const selected=resolveProviderAccount(ctx.env,principal,'github',a.account);
+  const token=selected.token;
   const requestId=crypto.randomUUID();
   const inputs={repository,ref:a.ref,event:a.event||'push',workflow:a.workflow||'',request_id:requestId};
   const res=await githubRequest(ctx.fetcher,`${ACTIONS_URL}/dispatches`,token,{method:'POST',body:{ref:'main',inputs}});
   requireOk(res,'FMRL controller dispatch');
-  return {request_id:requestId,state:'dispatch_accepted_not_executed',controller:`${owner}/ATAX`,
+  return {request_id:requestId,account:selected.alias,state:'dispatch_accepted_not_executed',controller:`${owner}/ATAX`,
     controller_runs_url:`https://github.com/${CONTROLLER}/actions/workflows/${ACTIONS_WORKFLOW}`,
     next_tool:'atax_fmrl_get_status',
     important:'Poll until the controller job reaches terminal state, inspect CI conclusion and demand independent FMRL deletion/404. Failed cleanup blocks task completion. A dispatch ACK is not CI evidence.'};
 }
-async function getFmrlStatus(a,_db,_p,ctx) {
+async function getFmrlStatus(a,_db,principal,ctx) {
   assertOwner(ctx.env);
   if(!REQUEST_ID.test(a.request_id))throw new Error('Invalid FMRL correlation request_id');
-  const token=requireEnv(ctx.env,'GITHUB_FMRL_DISPATCH_TOKEN');
+  const selected=resolveProviderAccount(ctx.env,principal,'github',a.account);
+  const token=selected.token;
   let run;
   if(a.run_id!==undefined){
     const response=await githubRequest(ctx.fetcher,`${API}/repos/${CONTROLLER}/actions/runs/${a.run_id}`,token);
@@ -148,7 +150,7 @@ async function getFmrlStatus(a,_db,_p,ctx) {
   if(!run)return {request_id:a.request_id,state:'awaiting_github_run_discovery',cleanup_verified:false,
     next:'Retry after GitHub Actions dispatch propagation, or provide controller run_id. Do not assume success.'};
   const state=run.status||'unknown'; const terminal=state==='completed';
-  const result={request_id:a.request_id,run_id:run.id,attempt:run.run_attempt,
+  const result={request_id:a.request_id,account:selected.alias,run_id:run.id,attempt:run.run_attempt,
     state,conclusion:run.conclusion||null,run_url:run.html_url||`https://github.com/${CONTROLLER}/actions/runs/${run.id}`,
     cleanup_verified:false};
   if(!terminal){result.next='Poll this tool; controller is not terminal.';return result;}
@@ -176,14 +178,14 @@ export const githubTools=[
     'atax:read',one('GitHub operations guide',{}),()=>githubGuide),
   tool('atax_github_repository_inspect',
     'Inspect an owner-scoped permanent GitHub repository and verify visibility/default branch without exposing credentials.',
-    'atax:github:read',one('Repository lookup',{repository:s('GitHub owner/name repository',205),account:{type:'string',maxLength:48,description:'Named GH_TOKEN_<ALIAS> credential; omit when exactly one is available'}},['repository']),inspectRepository),
+    'atax:github:read',one('Repository lookup',{repository:s('GitHub owner/name repository',205),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential; omit when exactly one is available'}},['repository']),inspectRepository),
   tool('atax_github_repository_create',
     'CREATE A PERMANENT GitHub repository using the existing ATAX GitHub repository-lifecycle contract. Defaults PRIVATE, README initialised, verifies created owner/visibility. Never use for FMRL; separate scope atax:github:create.',
-    'atax:github:create',one('Permanent GitHub repository',{name:s('New repository name (NOT FMRL-* or ATAX)',100),account:{type:'string',maxLength:48,description:'Named GH_TOKEN_<ALIAS> credential; omit when exactly one is available'},description:{type:'string',maxLength:300,description:'Public description; must contain no credentials or private content'},visibility:{type:'string',enum:['private','public'],description:'Defaults to private'},initialize:{type:'boolean',description:'Initialize repository with README (default true)'}},['name']),createRepository),
+    'atax:github:create',one('Permanent GitHub repository',{name:s('New repository name (NOT FMRL-* or ATAX)',100),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential; omit when exactly one is available'},description:{type:'string',maxLength:300,description:'Public description; must contain no credentials or private content'},visibility:{type:'string',enum:['private','public'],description:'Defaults to private'},initialize:{type:'boolean',description:'Initialize repository with README (default true)'}},['name']),createRepository),
   tool('atax_fmrl_create_run_dispose',
     'DISPOSABLE PRIVATE-TARGET CI FALLBACK, NOT permanent repo creation. Container first; only if local execution unavailable/insufficient. Dispatch canonical ATAX private-repo-ci.yml controller which provisions a public FMRL-* bridge, checks out exact private SHA inside isolated runner, runs checks, ALWAYS deletes FMRL even after failure and independently verifies 404. Returns correlation request_id, NOT job success. Never execute target code in ATAX. Requires explicit allowlisted target and atax:fmrl:execute scope.',
-    'atax:fmrl:execute',one('Dispatch FMRL remote CI',{repository:s('Allowlisted private repository owner/name (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'}},['repository','ref']),dispatchFmrl),
+    'atax:fmrl:execute',one('Dispatch FMRL remote CI',{repository:s('Allowlisted private repository owner/name (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),account:{type:'string',maxLength:48,description:'Named GitHub account authorized for the ATAX controller'},event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'}},['repository','ref']),dispatchFmrl),
   tool('atax_fmrl_get_status',
     'POLL one FMRL controller dispatch by correlation request_id until terminal. Reports exact controller result, confirms provisioning+cleanup steps, independently reads the public bridge for HTTP 404, and BLOCKS acceptance without verified deletion. Never infer CI success from dispatch acceptance.',
-    'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
+    'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),account:{type:'string',maxLength:48,description:'Same GitHub account used for dispatch'},run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
 ];

@@ -21,43 +21,44 @@
 
 The server also advertises this guide as MCP resource `atax://guides/github-workflows` and an MCP prompt named `atax-github-workflow`. The `initialize` response tells incoming agents to read the guide before GitHub work. The MCP GitHub path is **optional**; GitHub-native ATAX scripts and direct Supabase operations do not require MCP uptime.
 
-### Required Worker configuration
+### Required Worker configuration — personal server
 
 | Binding | Classification | Purpose |
 | --- | --- | --- |
-| `MCP_GITHUB_OWNER=dinilmusick` | Plain variable | Fail closed if Worker is not configured for the authoritative ATAX repository owner. |
-| `MCP_FMRL_ALLOWED_TARGETS=dinilmusick/Skipo,dinilmusick/Kone` | Plain allowlist | **Mandatory** for FMRL dispatch; restrict to explicitly approved private target repositories. No wildcard fallback. |
-| `GITHUB_REPOSITORY_TOKEN` | Cloudflare Worker secret | GitHub token with permission to create permanent repositories for `dinilmusick`, plus repository metadata read; isolated from CI dispatch token. GitHub fine-grained token account-level repository creation permissions must actually allow POST `/user/repos` (an appropriately scoped classic token may be required). |
-| `GITHUB_FMRL_DISPATCH_TOKEN` | Cloudflare Worker secret | Actions read/write for the `dinilmusick/ATAX` **control-plane** repository only. Does not read private target or handle bridge secrets. |
+| `GH_KEY_PERSONAL`, `GH_KEY_WORK`, `GH_KEY_<ALIAS>` | Cloudflare **secrets** | Named GitHub accounts for repository creation, inspection and FMRL controller dispatch/status; require correct GitHub API permissions |
+| `MCP_GITHUB_OWNER=dinilmusick` | Plain variable | Canonical ATAX FMRL controller owner; not an arbitrary target workspace |
+| `MCP_FMRL_ALLOWED_TARGETS=dinilmusick/Skipo,dinilmusick/Kone` | Plain allowlist | Mandatory exact targets for FMRL; no wildcards |
+| `SUPABASE_SECRET_KEY` | Cloudflare **secret** | The one canonical ledger |
+| `MCP_ATAX_OWNER_JWT_SUBJECT` | Exact owner identity | Refuse all non-owner MCP callers even with nominal tool scopes |
 
-The Worker still requires the existing Supabase server-side credential and MCP caller authorization. Create distinct JWT-sub identities and issue `atax:github:create` and `atax:fmrl:execute` **only** to authorized operators. Keep the repo-creation and controller-dispatch tokens on the server; never return them via MCP or embed them into source, public FMRL commits, issues, workflow inputs, artifacts, or logs.
+The older `GH_TOKEN_<ALIAS>` naming is accepted for migration, but **do not configure two secret names with the same alias**. If only one GitHub credential exists, omit `account`; otherwise supply `account: "PERSONAL"` (or another named alias) in GitHub tools. FMRL `create_run_dispose` and `get_status` must use the same account, capable of dispatching and reading the controller workflow. Unlike the previous implementation, there is **no separate global `GITHUB_REPOSITORY_TOKEN` or `GITHUB_FMRL_DISPATCH_TOKEN` fallback**.
 
-The pre-existing ATAX controller keeps its own GitHub Actions secrets (`CODING_REPO_TOKEN`, `FMRL_SECRETS_TOKEN`, `PRIVATE_REPO_TOKEN`, and an appropriate dispatch token). The MCP Worker **never** receives these private-target secrets. The controller's established `disposable_workspace.py` and GitHub Actions cleanup remain responsible for provisioning and teardown.
+The controller retains its own established GitHub Actions secrets (`CODING_REPO_TOKEN`, `FMRL_SECRETS_TOKEN`, `PRIVATE_REPO_TOKEN`, etc.). These belong in the **GitHub repository secret store**, not in the MCP Worker. The Worker cannot read them and must not receive private-target source. The existing GitHub-native scripts and Supabase connector remain functional independently of the Worker. The same named `GH_KEY_<ALIAS>` convention may also be used in trusted repository workflow jobs, but workflows must explicitly reference `secrets.GH_KEY_<ALIAS>`; a direct GitHub connector cannot read their values.
 
-If any server binding is missing, the corresponding tool fails closed and returns a bounded error. Authentication and access scopes are independent from tool availability.
+The Worker requires MCP caller authentication in addition to server-side secrets. Only the exact verified owner may list accounts and invoke tools. Keep executor/verifier scopes and identities separate to enforce independent verification. See [OWNER_SETUP.md](OWNER_SETUP.md).
 
 ### Example permanent repository creation
 
 Call `tools/call` with:
 
 ```json
-{"name":"atax_github_repository_create","arguments":{"name":"ExampleProduct","description":"Persistent application repository","visibility":"private","initialize":true}}
+{"name":"atax_github_repository_create","arguments":{"name":"ExampleProduct","account":"PERSONAL","description":"Persistent application repository","visibility":"private","initialize":true}}
 ```
 
-The result is the verified permanent `dinilmusick/ExampleProduct` repository and visibility. It is **not** an FMRL repository and will **not** be deleted by ATAX.
+The result verifies the repository under the selected GitHub token's actual user identity and its visibility; the example assumes the `PERSONAL` credential belongs to `dinilmusick`. It is **not** an FMRL repository and will **not** be deleted by ATAX.
 
 ### Example FMRL dispatch + cleanup verification
 
 **Preflight:** verify that the target is in `MCP_FMRL_ALLOWED_TARGETS`, that a local container is unavailable/insufficient or independent remote CI is needed, that the exact target commit SHA has been resolved and that the ATAX task is properly claimed.
 
 ```json
-{"name":"atax_fmrl_create_run_dispose","arguments":{"repository":"dinilmusick/Skipo","ref":"<exact lowercase 40-character commit SHA>","event":"pull_request","workflow":"test.yml"}}
+{"name":"atax_fmrl_create_run_dispose","arguments":{"repository":"dinilmusick/Skipo","account":"PERSONAL","ref":"<exact lowercase 40-character commit SHA>","event":"pull_request","workflow":"test.yml"}}
 ```
 
 The returned `request_id` is the only correlation input needed to poll:
 
 ```json
-{"name":"atax_fmrl_get_status","arguments":{"request_id":"<returned UUID>"}}
+{"name":"atax_fmrl_get_status","arguments":{"request_id":"<returned UUID>","account":"PERSONAL"}}
 ```
 
 Keep polling while `state` is not `completed` or awaiting GitHub discovery. On completion, **require** both `conclusion: "success"` and `cleanup_verified: true`. The latter requires successful provision and cleanup job-step evidence plus an independent **anonymous HTTP 404** for the named disposable bridge repository. A 403/429 means no deletion proof; fail closed and persist a blocker. When `conclusion` is a failure, do not mark the task successful even if the repository was properly cleaned up. If `run_id` is known, supply it on a follow-up to avoid the 100-run listing window.
