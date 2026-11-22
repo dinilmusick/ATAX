@@ -1,0 +1,88 @@
+name: ATAX one-time closed PR branch cleanup
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/atax-pr-branch-cleanup-once.yml]
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  cleanup:
+    if: github.repository == 'dinilmusick/ATAX'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete only exact-head refs of already closed PRs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error, urllib.parse
+          repo=os.environ["GITHUB_REPOSITORY"]
+          token=os.environ["GITHUB_TOKEN"]
+          # Audited on 22 Nov 2026. Do not delete branches of active PRs.
+          pr_numbers=(1604,1603,1601,1581,1573,1567,1550,1534,
+                      1489,1465,1406,1347,1342,1339,1338,1682)
+          base=f"https://api.github.com/repos/{repo}"
+          headers={"Authorization":f"Bearer {token}",
+                   "Accept":"application/vnd.github+json",
+                   "X-GitHub-Api-Version":"2022-11-28"}
+          def api(method,path):
+              req=urllib.request.Request(base+path,headers=headers,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as res:
+                      data=res.read()
+                      return (res.status,json.loads(data) if data else None)
+              except urllib.error.HTTPError as error:
+                  if error.code==404:return (404,None)
+                  raise RuntimeError(f"GitHub API {method} returned HTTP {error.code}") from None
+
+          open_refs=set()
+          page=1
+          while True:
+              _, active=api("GET",f"/pulls?state=open&per_page=100&page={page}")
+              for pr in active:
+                  if pr.get("head",{}).get("repo",{}).get("full_name")==repo:
+                      open_refs.add(pr["head"]["ref"])
+              if len(active)<100:break
+              page+=1
+              if page>50:raise RuntimeError("Open PR pagination exceeded safe bound")
+
+          deleted=[]; skipped=[]; failures=[]
+          for number in pr_numbers:
+              try:
+                  _,pr=api("GET",f"/pulls/{number}")
+                  if not pr or pr.get("state")!="closed":
+                      skipped.append([number,"PR is not closed"]);continue
+                  head=pr.get("head") or {}
+                  origin=head.get("repo") or {}
+                  branch=head.get("ref") or ""
+                  sha=head.get("sha") or ""
+                  if (origin.get("full_name")!=repo or branch in ("main","master")
+                      or branch in open_refs or not branch or not sha):
+                      skipped.append([number,"unsafe/open/nonlocal branch"]);continue
+                  escaped=urllib.parse.quote(branch,safe="/")
+                  status,reference=api("GET",f"/git/ref/heads/{escaped}")
+                  if status==404:
+                      skipped.append([number,"already deleted"]);continue
+                  if reference.get("object",{}).get("sha")!=sha:
+                      skipped.append([number,"branch moved since PR head"]);continue
+                  _,details=api("GET",f"/branches/{urllib.parse.quote(branch,safe='')}")
+                  if not details or details.get("protected") or details.get("name")!=branch:
+                      skipped.append([number,"protected or unknown branch"]);continue
+                  api("DELETE",f"/git/refs/heads/{escaped}")
+                  status,_=api("GET",f"/git/ref/heads/{escaped}")
+                  if status!=404:raise RuntimeError("Branch still exists after DELETE")
+                  deleted.append(number)
+              except Exception as error:
+                  # Do not expose API response bodies or credentials.
+                  failures.append([number,type(error).__name__,str(error)[:100]])
+          print("Deleted exact-head closed PR branches:",deleted)
+          print("Skipped branches:",skipped)
+          print("Delete failures:",failures)
+          if failures:
+              raise SystemExit("Some branch deletions failed; inspect only listed PR refs")
+          PY
