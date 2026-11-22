@@ -109,6 +109,36 @@ test('forfeited lease appends a handoff note and permits discovering other free 
   assert.equal(next.payload.result.structuredContent.result.params.lease_seconds_in,120);
 });
 
+test('a fenced-out caller can leave a non-mutating handoff then discover another task',async()=>{
+  const listed=await(await post('tools/list')).json();
+  assert.ok(listed.result.tools.some(t=>t.name==='atax_task_handoff'));
+  const sampleTaskId=['f5c29f36','27ba','4d6e','a6b2','a3c6757668c9'].join('-');
+  const oldFence=['94a0197b','e59c','458a','99a8','d4027920f62d'].join('-');
+  const before=requests.length;
+  const out=await call('atax_task_handoff',{
+    task_id:sampleTaskId,claim_token:oldFence,
+    note:'Lost exclusive socket; implementation done but verification remains.',
+    context:{partial_result:'PR opened',evidence:['https://example.org/pr'],
+      next_action:'New owner should verify changes'}
+  });
+  assert.equal(out.status,200);
+  const result=out.payload.result.structuredContent.result;
+  assert.equal(result.rpc,'task_ledger_record_handoff');
+  assert.deepEqual(result.params,{
+    task_id_in:sampleTaskId,previous_agent_id_in:'test-external-agent',
+    previous_claim_token_in:oldFence,
+    handoff_note_in:'Lost exclusive socket; implementation done but verification remains.',
+    context_in:{partial_result:'PR opened',evidence:['https://example.org/pr'],
+      next_action:'New owner should verify changes'}
+  });
+  assert.equal(requests.length,before+1,'Handoff must not attempt release/submit/renew');
+  assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,note:'No old fence'})).payload.result.isError,true);
+  const next=await call('atax_task_claim_next',{capabilities:[]});
+  assert.equal(next.payload.result.structuredContent.result.rpc,'task_ledger_claim_next');
+  assert.equal(next.payload.result.structuredContent.result.params.agent_id_in,'test-external-agent');
+  const readOnly={...env,MCP_SHARED_SCOPES:'atax:read'};
+  assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,claim_token:oldFence,note:'x'},{env:readOnly})).payload.result.isError,true);
+});
 test('independent verification uses distinct scope and identity, never self-authorizes verification',async()=>{
   const readonly={...env,MCP_SHARED_SCOPES:'atax:read atax:write'};
   assert.equal((await call('atax_verification_claim',{}, {env:readonly})).payload.result.isError,true);
