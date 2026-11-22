@@ -31,7 +31,7 @@ jobs:
           ASKPASS
           chmod 700 "$helper"
           export GIT_ASKPASS="$helper" GIT_TERMINAL_PROMPT=0
-          for repository in Aiko Srkl-Engine; do
+          for repository in Aiko; do
             mkdir -p "/tmp/auth-${repository}"
             git -c credential.helper= clone --quiet --no-checkout               "https://github.com/dinilmusick/${repository}.git" "/tmp/auth-${repository}/repo" >/dev/null 2>&1
             if [ "$repository" = Aiko ]; then exact="d4989ed3fbae402b683abf2777ec6ac8e7c89bbd";
@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for repository in Aiko Srkl-Engine; do
+          for repository in Aiko; do
             cd "/tmp/auth-${repository}/repo"
             npm ci --ignore-scripts --no-audit --no-fund >/tmp/auth-${repository}/npm.log 2>&1
             if [ "$repository" = Aiko ]; then command=(npm run test:integration); 
@@ -66,7 +66,7 @@ jobs:
           test -n "$GH_TOKEN"
           python3 - <<'PY'
           import json,re,pathlib
-          for repo,pr in [('Aiko',105),('Srkl-Engine',60)]:
+          for repo,pr in [('Aiko',105)]:
             root=pathlib.Path('/tmp/auth-'+repo)
             content=(root/'test.log').read_text(errors='replace')
             status=int((root/'status').read_text().strip())
@@ -87,7 +87,7 @@ jobs:
                  '\nRaw private test logs and clone remain on the disposable runner only.')
             pathlib.Path('/tmp/auth-'+repo+'/body.json').write_text(json.dumps({'body':body}))
           PY
-          for repository in Aiko Srkl-Engine; do
+          for repository in Aiko; do
             if [ "$repository" = Aiko ]; then pr=105; else pr=60; fi
             gh api -X POST "repos/dinilmusick/${repository}/issues/${pr}/comments"               --input "/tmp/auth-${repository}/body.json" >/dev/null
             echo "PRIVATE_DIAGNOSTIC_COMMENT_POSTED=${repository}"
