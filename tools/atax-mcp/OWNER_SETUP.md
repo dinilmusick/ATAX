@@ -11,6 +11,22 @@ This document defines the owner-approved **single-user** ATAX MCP deployment. Do
 
 Do not make the direct connector path depend on MCP uptime, Worker credentials, Cloudflare deployment, or Worker code. Both paths preserve the same ATAX rules: substrate supplies state to externally created transient agents; ATAX never spawns or schedules agents; task claim, evidence, independent verification and FMRL deletion remain enforced. Tool-surface parity is an acceptance target, not a current fact: the Worker has bounded GitHub tools and Cloudflare *read-only* diagnostics, whereas direct connectors may offer additional operations.
 
+## Task sockets: substrate invariant
+
+ATAX is persistent state for externally created, transient agents. It does not classify, launch, spawn, schedule, or track the model/vendor/app doing work. A task is a **socket** with finite work and acceptance criteria. Incoming agents discover a socket, attempt an atomic claim, do the work externally, and persist evidence.
+
+The substrate's relevant state is the socket itself:
+
+- `queued` → available for atomic claim; competing claims cannot both succeed.
+- `running` → occupied by one **valid lease + fencing token**. Concurrent arrivals cannot claim that live socket.
+- `completed / pending verification` → executor has released its claim and submitted evidence; verification is separate from execution.
+- `verified / finalized` → acceptance recorded after independent verification.
+- If a lease expires or its heartbeat becomes stale, recovery may issue a **new** fencing token. Any holder of the old token must be refused further mutations. External side effects outside the substrate are not automatically cancellable: agents should use idempotency/reconciliation for those effects.
+
+This is **exclusive authorized occupancy**, not a claim that only one external AI process can exist. GitHub and direct Supabase agents and MCP agents must all use the same canonical atomic claim/lease/fencing RPCs; no transport may invent its own local lock.
+
+**Implementation boundary:** existing PostgreSQL task RPC signatures still accept an opaque `agent_id` for compatibility and audit/claim checking. That is an internal claim-holder reference, **not** a Gemini/Claude identity, agent registry, orchestrator, or reason to pick work. Never derive it from the AI application's vendor/name. Removing it from DB interfaces requires its own guarded migration; until then, the claim token and database row locks remain decisive for excluding concurrent claimers. Verification still requires a separate claim and independent evidence; using one operator account does not itself prove independence.
+
 ## Configure one canonical ledger
 
 | Cloudflare Worker binding | Type | Purpose |
