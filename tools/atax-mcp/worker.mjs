@@ -83,7 +83,7 @@ async function authenticate(request,env, fetcher){
   // OAuth access tokens are RFC 9068 at+jwt; reject Luth session JWTs
   // even if they are signed by the same authorization server.
   if(!isObj(head)||!isObj(claims)||head.typ!=='at+jwt'||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'||
-     typeof claims.azp!=='string'||claims.azp.length<3)return null;
+     typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp))return null;
   const now=Math.floor(Date.now()/1000);
   if(claims.iss!==env.MCP_AUTH_ISSUER||!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)||!Number.isFinite(claims.exp)||claims.exp<=now||
      (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now))||
@@ -120,7 +120,11 @@ async function authenticate(request,env, fetcher){
       if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|fmrl:execute)$/.test(scope))scopes.add(scope);
     }
   }
-  return {id:claims.sub,authMethod:'jwt',scopes};
+  // Separate externally created agents (one stable OAuth client ID per application)
+  // while authorizing them against the same single-owner subject.
+  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(claims.iss+'\u0000'+claims.sub+'\u0000'+claims.azp)));
+  const agentId='mcp-'+Array.from(digest.slice(0,16),b=>b.toString(16).padStart(2,'0')).join('');
+  return {id:agentId,ownerSubject:claims.sub,authMethod:'jwt',scopes};
 }
 function allowedOrigin(req, env){
   const origin=req.headers.get('origin'); if(!origin)return true;
