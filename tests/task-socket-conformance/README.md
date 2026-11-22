@@ -19,3 +19,9 @@ The additional attestation.test.mjs and adapter-adversarial.test.mjs cover untru
     ATAX_SOCKET_CONFORMANCE_ADAPTER=/absolute/path/disposable-shim.mjs node --test tests/task-socket-conformance/adapter-contract.test.mjs tests/task-socket-conformance/adapter-adversarial.test.mjs
 
 Tests using the reference fake do not certify live provider access, database, gateway or GitHub execution. See docs/task-socket-conformance.md section 7 for exact trust requirements, red release gates and evidence status.
+
+## Verified native suite and mutation negative gate (Agent K follow-up)
+
+Reproduced with Node 22.16.0 from blob-verified remote sources: `node --test tests/task-socket-conformance/*.test.mjs` => 47 passed, 0 failed. `mutation-sensitivity.test.mjs` verifies that an intentionally defective `fixtures/faulty-adapter.mjs` (meter reset and direct-target write bypass) fails both adapter test files with explicit failures. The synthetic and forged provider observation fixtures remain invalid as live evidence.
+
+`gpt-5.4-nano` was re-audited: it has published 400,000 context and 128,000 maximum output tokens but is deprecated with an announced 2027-04-01 shutdown; its OpenAI API Free tier is explicitly unsupported. This affects eligibility, not the mathematical capacity bound. The complete native mock suite is not a live production-integrated certificate; the independent final reconciler must still execute real disposable A-D, GitHub, database and provider gates.
