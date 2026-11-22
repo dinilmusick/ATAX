@@ -385,13 +385,13 @@ class FmrlTests(unittest.TestCase):
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)
-        self.assertIn('choices=("direct", "act", "repair"), default="direct"', source)
+        self.assertIn('choices=("direct", "act", "repair", "artifact"), default="direct"', source)
         self.assertIn('("FMRL_EXECUTION_MODE", args.mode)', source)
         self.assertIn('not full workflow parity', source)
         controller = (ROOT / '..' / '..' / '.github' / 'workflows' / 'private-repo-ci.yml').read_text()
         self.assertIn('--mode "$TARGET_MODE" --branch "$TARGET_BRANCH" > /tmp/fmrl.json', controller)
         self.assertIn('no raw source logs or artifacts', controller)
-        self.assertIn("assert mode in ('direct','repair')", controller)
+        self.assertIn("assert mode in ('direct','repair','artifact')", controller)
 
 
     def test_public_bridge_workflow_static_and_no_private_target_in_git(self):
