@@ -1,7 +1,8 @@
 -- ATAX task-socket fencing: additive, signature-preserving corrections.
 -- Each replacement must match exactly one existing function definition; the
 -- entire migration aborts atomically if production drift is detected.
--- Running task recovery requires BOTH stale heartbeat and expired claim lease.
+-- Recovery follows a strict 120-second heartbeat TTL: heartbeat every 30-60 sec;
+-- each claim/renewal expires in at most 120 seconds; both age and lease gates apply.
 -- All fenced executor mutations require a still-live claim token.
 DO $migration$
 DECLARE
@@ -11,9 +12,18 @@ DECLARE
   after_sql text;
 BEGIN
   FOR patch IN SELECT * FROM (VALUES
-    ('task_ledger_claim_next','5','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
-    ('task_ledger_claim_goal_next','6','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
-    ('goal_ledger_claim_task','7','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('task_ledger_claim_next','5','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('task_ledger_claim_goal_next','6','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('goal_ledger_claim_task','7','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''','coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()'),
+    ('task_ledger_claim_next','5','greatest(600,least(coalesce(lease_seconds_in,600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
+    ('task_ledger_claim_goal_next','6','greatest(600, least(coalesce(lease_seconds_in,600),86400))','greatest(30, least(coalesce(lease_seconds_in,120),120))'),
+    ('goal_ledger_claim_task','7','greatest(600,least(coalesce(lease_seconds_in,600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
+    ('task_ledger_heartbeat_claim','5','greatest(30,least(coalesce(lease_seconds_in,900),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
+    ('task_ledger_heartbeat_claim','6','greatest(600,least(coalesce(lease_seconds_in,600),86400))','greatest(30,least(coalesce(lease_seconds_in,120),120))'),
+    ('task_ledger_heartbeat_policy','0','''heartbeat_interval_seconds'', 120','''heartbeat_interval_seconds'', 60'),
+    ('task_ledger_heartbeat_policy','0','''ownership_check_interval_seconds'', 300','''ownership_check_interval_seconds'', 60'),
+    ('task_ledger_heartbeat_policy','0','''stale_heartbeat_timeout_seconds'', 300','''stale_heartbeat_timeout_seconds'', 120'),
+    ('task_ledger_heartbeat_policy','0','''recovery_threshold_minutes'', 5','''recovery_threshold_minutes'', 2'),
     ('task_ledger_check_claim','3','and claim_token=claim_token_in','and claim_token=claim_token_in and claim_expires_at>statement_timestamp()'),
     ('task_ledger_heartbeat_claim','5','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
     ('task_ledger_heartbeat_claim','6','status=''running''','status=''running'' and claim_expires_at>statement_timestamp()'),
