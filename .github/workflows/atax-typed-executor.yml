@@ -1,0 +1,43 @@
+name: ATAX Typed Execution Controller
+run-name: Typed execution ${{ inputs.correlation_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      execution_id:
+        description: Opaque typed execution UUID
+        required: true
+        type: string
+      correlation_id:
+        description: Opaque dispatch correlation UUID
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: atax-typed-${{ inputs.execution_id }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate correlation format and required configuration
+        env:
+          EXECUTION_ID: ${{ inputs.execution_id }}
+          CORRELATION_ID: ${{ inputs.correlation_id }}
+          SUPABASE_URL: ${{ secrets.ATAX_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATAX_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, uuid
+          for name in ("EXECUTION_ID", "CORRELATION_ID"):
+              uuid.UUID(os.environ[name])
+          for name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+              if not os.environ.get(name):
+                  raise SystemExit("Required execution configuration unavailable")
+          print("Typed execution controller input accepted")
+          PY
+      - name: Refuse unsafe execution until FMRL bridge is implemented
+        run: |
+          echo "::error::Fail closed: secure FMRL runner and receipt verification not yet integrated."
+          exit 1
