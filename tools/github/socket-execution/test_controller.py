@@ -48,8 +48,12 @@ class FakeDB:
         self.state='queued'
         self.calls=[]
         self.receipt=None
+        self.cleanup_journal=None
+        self.fail_finish_once=False
 
     def rows(self, table, filters):
+        if table == 'socket_dispatch_cleanup_journal':
+            return [copy.deepcopy(self.cleanup_journal)] if self.cleanup_journal else []
         if table == 'socket_dispatch_allowed_targets':
             return [{}] if self.allowed else []
         if table == 'socket_dispatch_requests':
@@ -70,7 +74,14 @@ class FakeDB:
         if name == 'socket_dispatch_delivery_result':
             self.state=args['p_state']
             return True
+        if name == 'socket_dispatch_prepare_cleanup':
+            self.cleanup_journal={'run_id':args['p_run_id'], 'conclusion':args['p_conclusion'],
+                                  'receipt':copy.deepcopy(args['p_receipt'])}
+            return True
         if name == 'socket_dispatch_finish_observed':
+            if self.fail_finish_once:
+                self.fail_finish_once=False
+                raise RemoteError('ledger_unavailable')
             self.state='succeeded' if args['p_conclusion']=='success' else 'failed'
             self.receipt=args['p_receipt']
             return True
@@ -200,6 +211,19 @@ class TestRelay(unittest.TestCase):
         gh.cleanup_error='fmrl_cleanup_not_verified'
         with self.assertRaises(RemoteError): c.reconcile()
         self.assertEqual(db.state,'accepted')
+
+    def test_crash_after_delete_recovers_from_durable_cleanup_journal(self):
+        fmrl='owner/atax-fmrl-'+CORR.replace('-','')[:20]
+        db,gh=FakeDB(sample(mode='fmrl',runner_repository=fmrl)),FakeGithub()
+        db.fail_finish_once=True
+        c=Controller(db,gh); c.dispatch(ID,CORR); gh.matches=[complete_run()]
+        with self.assertRaises(RemoteError): c.reconcile()
+        self.assertEqual(db.cleanup_journal['receipt']['cleanup'],'pending')
+        self.assertEqual(gh.cleanup_calls,1)
+        gh.matches=[] # target GitHub Actions run is now irretrievable
+        self.assertEqual(c.reconcile()['terminal'],1)
+        self.assertEqual(gh.cleanup_calls,2)
+        self.assertEqual(db.receipt['cleanup'],'independent_404')
 
     def test_missing_credentials_fails_closed(self):
         with self.assertRaises(RemoteError): Supabase('https://project.supabase.co','',Http())
