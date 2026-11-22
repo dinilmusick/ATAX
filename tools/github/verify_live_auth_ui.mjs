@@ -19,7 +19,7 @@ for (const [name, address] of APPS) {
     report.push(name + ': app document HTTP ' + String(gateResponse?.status() ?? 0));
     emailStage = 'login_choice';
     const emailChoice = page.getByRole('link', { name: /continue with email/i });
-    const googleChoice = page.getByRole('button', { name: /continue with google/i });
+    const googleChoice = page.getByRole('link', { name: /continue with google/i });
     await emailChoice.waitFor({ state: 'visible', timeout: 40000 });
     await googleChoice.waitFor({ state: 'visible', timeout: 15000 });
     const gateCopy = await page.locator('body').innerText();
@@ -71,7 +71,7 @@ for (const [name, address] of APPS) {
     const googleGate = await googlePage.goto(address, { waitUntil: 'domcontentloaded', timeout: 40000 });
     report.push(name + ': Google gate document HTTP ' + String(googleGate?.status() ?? 0));
     googleStage = 'google_button';
-    const googleChoice = googlePage.getByRole('button', { name: /continue with google/i });
+    const googleChoice = googlePage.getByRole('link', { name: /continue with google/i });
     await googleChoice.waitFor({ state: 'visible', timeout: 40000 });
     const chooser = googlePage.waitForURL(
       url => url.hostname === 'accounts.google.com',
