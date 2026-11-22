@@ -256,7 +256,7 @@ jobs:
                     } catch {}
                     console.log('FMRL Frnes verifier JSON: '+(parseable?'yes':'no'));
                     const matches=String(direct.stderr||'').match(
-                      /\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\b/g
+                      /\\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\\b/g
                     );
                     const fixedTypes=new Set(['FileNotFoundError','ValueError',
                       'KeyError','TypeError','ModuleNotFoundError','ImportError',
