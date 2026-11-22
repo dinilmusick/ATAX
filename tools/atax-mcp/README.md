@@ -63,11 +63,11 @@ See **[OWNER_SETUP.md](OWNER_SETUP.md)** for the complete, authoritative credent
 
 GitHub **repository secrets** and Cloudflare **Worker secrets** are independent stores. The same alias names can be configured in both, but GitHub Actions must explicitly map its own repository secrets into trusted workflow jobs; ordinary direct ChatGPT GitHub/Supabase connectors use their existing connector authentication. **Neither direct connector depends on this Worker.**
 
-## Canonical ATAX ledger owner admission
+## Canonical single-owner admission
 
-ATAX's Supabase RPCs currently use a privileged server-side key to read and mutate the **owner's canonical ledger**. A JWT's `atax:read`, `atax:write`, `atax:verify`, or `atax:admin` scope alone **must never authorize another subject to access that ledger**. The Worker admits those RPC tools, canonical resources and FMRL/GitHub owner-controller tools only after one of two owner checks: (1) the actually verified shared bootstrap bearer with matching `MCP_SHARED_SUBJECT`, or (2) a verified JWT with `sub` equal to the **single** explicitly configured `MCP_ATAX_OWNER_JWT_SUBJECT`. If that optional binding is absent, no JWT can access the canonical ledger.
+The Worker uses one Supabase server-side key for the same ledger accessed directly through the ChatGPT Supabase connector. It admits canonical ledger tools, provider tools, resources and prompts **only to the verified owner**, identified by (1) the actually verified bootstrap bearer and its exact shared subject, or (2) the verified OAuth JWT subject pinned in `MCP_ATAX_OWNER_JWT_SUBJECT`. The signed JWT's scope claims alone are never enough to gain owner access. Required per-tool scopes still apply after owner authentication.
 
-Other JWT principals may discover and call their separately granted `atax_provider_accounts_list`, `atax_cloudflare_*`, and `atax_vercel_*` provider read-only tools (subject to their actual scopes and `MCP_PROVIDER_ACCOUNT_GRANTS`). They cannot read canonical Supabase context, tasks, skills, resources, or use the owner's GitHub/FMRL controller. Prefer provider-native GitHub/Cloudflare/Vercel OAuth for each user's code and cloud operations. **This gating is defense-in-depth, not completed multi-tenant Supabase RLS or production certification.** Do not widen `MCP_ATAX_OWNER_JWT_SUBJECT` to many users as a substitute for durable tenant isolation.
+There is **no** provider-account delegation table, per-user vault, tenant enrollment, or separate ATAX database. Cloudflare provider tools are diagnostics only; the direct GitHub/Supabase connector path keeps operating independently. A separate verifier identity and properly scoped verification authority remain required by ATAX's task governance.
 
 ## MCP client configuration
 
