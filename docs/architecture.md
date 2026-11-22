@@ -1,55 +1,78 @@
-# Architecture
+# ATAX architecture
 
-## System of record
+## Substrate, not agent runtime
 
-Supabase PostgreSQL is the only persistent coordination layer. It stores goals, hierarchical tasks, claims, leases, loop iterations, parameters, dependencies, evidence, verification and guarded finalization. Database RPCs enforce atomic transitions and completion invariants.
+ATAX holds durable **state**; it does not create, schedule, identify by AI vendor, or run agents. External agents arrive, read applicable context and current skills, claim finite tasks where eligible, execute externally, persist outcomes and leave. Future agents reconstruct continuity from the same ledger. Chat history and GitHub Issues are not the source of truth.
 
-## Reasoning and orchestration
+The canonical persistent store is **Supabase PostgreSQL**, containing the universe/system hierarchy, goals, constraints, memories, skills, dependency graphs, finite tasks, task socket occupancy, leases, checkpoints, evidence, verification and finalization. Atomic PostgreSQL functions enforce safe transitions. No Cloudflare Worker, GitHub Action or chat can replace that authority.
 
-ChatGPT conversations are the agents. The user manually opens the orchestrator and worker conversations. Each chat loads the current goal/task state directly through connected Supabase tools, claims work using database RPCs, records iterations and submits evidence. A separate chat performs independent verification.
-
-## Finite compute
-
-GitHub Actions provides the only general-purpose execution environment. `.github/workflows/agent-compute.yml` checks out the requested repository revision on an ephemeral hosted runner, validates the request, executes the selected source file and uploads result artifacts.
-
-## Execution sequence
+## Exactly three supported connection modes
 
 ```text
-User
- |
- v
-ChatGPT orchestrator / worker conversations
- |                         |
- | direct PostgreSQL RPCs  | request finite computation
- v                         v
-Supabase PostgreSQL      GitHub Actions
- |                         |
- | goals, tasks, leases    +--> ephemeral Ubuntu runner
- | loops, evidence         +--> execute selected language
- | verification            +--> upload artifact
- |                         |
- +<---- result/evidence ---+
- |
- v
-Independent chat verification
- |
- v
-Database-guarded finalization
+       External transient agent (any application/model/provider)
+                                 |
+                 +---------------+----------------+
+                 |               |                |
+           GitHub only       GitHub + Supabase   ATAX remote MCP
+                 |               |                |
+        Repo-native tools     Direct GitHub      Cloudflare Worker
+        / trusted Actions     and Supabase       authenticated /mcp
+                 |               |                |
+          Authorized ledger     RPCs directly    Bounded MCP tools
+          client/bridge           |                |
+                 +---------------+----------------+
+                                 |
+                      Same Supabase ledger
+                     atomic task-socket RPCs
+                                 |
+                        Evidence and state
+                   independently verified result
 ```
 
-## Boundaries
+1. **GitHub connector only:** the agent connects to `dinilmusick/ATAX` and can read its instructions/skills/tools and use authorized repository operations. Live database work is **not automatic**: a trusted, credential-bearing repository tool/Actions bridge must call the canonical Supabase RPCs. GitHub Actions secrets are available only to trusted jobs that explicitly map them. Full live GitHub-only task-socket bridge parity is an outstanding acceptance gap, not a verified current feature.
+2. **GitHub plus Supabase connectors:** the existing direct ChatGPT/agent GitHub and Supabase workflow remains unchanged. Read canonical live state and transact through Supabase guarded RPCs, while GitHub handles repositories, workflows, Issues and PRs. The direct route never depends on MCP availability.
+3. **Remote ATAX MCP:** Claude, Gemini and other compatible external clients authenticate to the single-owner Cloudflare Worker `/mcp` endpoint. The Worker accesses the same Supabase ledger and bounded GitHub/Cloudflare tools through server-side secrets. It is not a tenant vault, a second ledger, a worker pool or an agent scheduler. Actual native-client interoperability remains subject to separate live checks.
 
-- Supabase is the system of record and atomic coordination provider.
-- ChatGPT is the reasoning, planning, implementation and verification layer.
-- GitHub Actions is a disposable compute provider only.
-- PostgreSQL RPCs are the sole goal/task mutation interface used by ChatGPT chats.
-- Supabase Edge Functions are not part of the architecture.
-- GitHub Actions does not create or run ChatGPT conversations and is not a persistent worker service.
+**The connection transport changes; the substrate contract does not.** Tool-surface parity is an objective, but current MCP Cloudflare operations are read-only and GitHub-only live-ledger bridge parity is not yet certified. See [connection modes](connection-modes.md).
 
-## Compute request entry points
+## Task socket model
 
-Agent Compute supports `workflow_dispatch` and an issue route restricted to repository owners, members and collaborators. Both routes resolve to the same validated request contract and runner. See [compute request contract](compute-request.md).
+```text
+ queued (available)
+    |
+    | atomic claim (row lock; exactly one successful claimant)
+    v
+ running (occupied by one valid lease + opaque fencing token)
+    |             |
+    | heartbeat   | abandoned/expired → recover with a new fencing token
+    |             |                     old token is permanently invalid
+    v             v
+ submitted / pending independent verification
+    |
+    v
+ verified / finalized
+```
 
-## Security boundary
+The substrate tracks socket occupancy, not the model/application that arrives. Existing SQL `agent_id` arguments are opaque claim-holder compatibility fields; they are not an AI-vendor registry, scheduler, or durable resident-agent identity. Claim and verification contracts currently use these fields, so removal requires an independent, nonbreaking database migration.
 
-The runner has read-only repository permissions, checkout credentials are not persisted, application secrets are not passed to executed code, and execution is time-bounded. It is ephemeral compute, not a hardened hostile multi-tenant sandbox. See [security](security.md).
+The canonical database must reject a competing claimant while the existing lease remains valid, even if its last heartbeat is stale. Reclamation after valid expiration rotates the fencing token; old holders must be barred from new canonical writes. Externally started work cannot be forcibly cancelled by the database: use idempotent operations and independent reconciliation for side effects.
+
+All transports must route through the same atomic claim, heartbeat, evidence submission, release, verifier claim and finalization invariants. A GitHub Issue, PR label, MCP session or in-memory mutex cannot substitute for the canonical task-socket lock.
+
+## Execution and verification
+
+- Compute normally occurs in the arriving agent's own container on the **target repository**. ATAX itself must never serve as the checkout or runner for target code.
+- If authorized local execution is insufficient, use an approved disposable **public FMRL-*** bridge; private target code exists only in its transient runner, then the FMRL repository is deleted and independently checked absent. The deprecated Agent-Workspace-1 and ATAX-native private-code execution paths are forbidden.
+- Every task has bounded actions, dependencies, outputs, verification criteria and finite loops; evidence is persisted before the agent leaves.
+- Submitted results are not verified results. An independent verifier reviews evidence under the canonical verification contract, and goals finalize only once acceptance criteria are satisfied.
+
+## Security and deployment boundaries
+
+- Supabase is the canonical ledger, not a general hosted execution platform.
+- Direct GitHub and Supabase connectors retain their independent account-specific authorizations.
+- GitHub repository secrets power specifically approved Actions jobs; Cloudflare Worker secrets power the MCP endpoint. They can use matching names but **are not synchronized secret stores**.
+- The personal MCP Worker uses one ledger and owner-managed `GH_KEY_<ALIAS>` and `CF_KEY_<ALIAS>` secrets. It does not store tenant credentials or automatically provide direct connectors to MCP clients.
+- No credentials, private source, privileged database keys, or raw private logs belong in public commits, prompts, MCP tool schemas/results, or public FMRL artifacts.
+- A public Worker health check, simulated test, or dispatch acknowledgement is not proof of authenticated end-to-end task execution.
+
+See [security](security.md), [task ledger](task-ledger-integration.md), [agent instructions](../AGENTS.md) and [MCP owner setup](../tools/atax-mcp/OWNER_SETUP.md).
