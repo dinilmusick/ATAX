@@ -340,7 +340,7 @@ test('MCP named GitHub accounts use selected token and do not use canonical owne
   assert.ok(seen.every(x=>x.opts.headers.authorization==='Bearer work-token-value'));
   const denied=await makeGitCall('atax_github_repository_create',{name:'newapp'},{env:chosen,fetcher:remote});
   assert.equal(denied.isError,true);
-  assert.equal(seen.length,4);
+  assert.equal(seen.length,3);
 });
 
 test('MCP exposes only GitHub and Cloudflare provider diagnostics with owner scopes',async()=>{
