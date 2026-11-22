@@ -8,10 +8,10 @@ Scope: database only. This branch adds the additive migration at supabase/migrat
 - A cumulative overrun stops the socket: parent status becomes waiting, the durable partial checkpoint is retained, a needs-atomization overflow report is inserted, and the claim/fence is released. Scope-based overflows do the same.
 - The complete split is a single SQL transaction: validate the live fence (or prior stopped overflow); make the parent non-executable; record provenance; create 2–16 bounded-v2 child tasks, each with 1–4 actions, exactly one independently verifiable outcome, explicit input/output contracts, a ready loop contract, and a budget; insert typed sibling dependencies. Any error rolls the entire split back, including the stop.
 - Child tasks are initially waiting, not in the legacy global task-claim pool. socket_claim_child requires a fresh registered invocation and assigns a fresh fencing token. A child can itself stop and atomise recursively.
-- The atomiser agent ID, invocation ID and session ID cannot claim any child it created, including attempts by a later invocation using the same agent identity.
+- The atomiser agent ID, invocation ID and session ID cannot claim any child it created, including attempts by a later invocation using the same agent identity. A stopped parent can be split only with its original overflow fence; a different worker cannot appropriate the split, and running leases are bound to the exact invocation session.
 - The independent verifier must differ from both atomiser and executor. Recursively atomised children require their own descendant verification and parent reconciliation before their ancestor may be completed.
 - Child verification retains pending status; an unclaimed review marker of verification_claim_expires_at = infinity keeps it out of the legacy global verifier selector. The socket verifier RPC replaces that marker with a finite verification lease.
-- Triggers reject legacy claim and verification bypasses and premature parent completion.
+- Triggers reject legacy claim and verification bypasses and premature parent completion. Negative verification decisions cannot be reused to authorize a successful verdict. Invocation/usage/overflow/provenance records carry explicit version fields.
 
 ## Authentication boundary
 
@@ -25,7 +25,7 @@ Use a dedicated disposable PostgreSQL test database that already has the current
 
     psql "$SOCKET_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/socket-ledger/socket_atomization_integration.sql
 
-This replays the migration twice and rolls back all fixtures and objects. It covers duplicate usage/splits, stale fences, scope/usage overflow, author-executor-verifier identity isolation, dependency checks, verified parent finalization, failed split rollback, recursive decomposition and verified recursive parent completion.
+This replays the migration twice and rolls back all fixtures and objects. It covers duplicate and contradictory usage replays, input/output/aggregate ceilings, stopped-parent and cross-session fences, scope/usage overflow, author-executor-verifier identity isolation, dependency checks, verified parent finalization, direct promotion after negative verdicts, failed split rollback, recursive decomposition and verified recursive parent completion.
 
 A real two-backend race additionally requires a disposable migrated test database and psql:
 
@@ -35,7 +35,7 @@ The race harness launches two independent PostgreSQL client sessions against one
 
 ## Evidence and remaining verification
 
-Executed: migration syntax and double replay on the canonical Supabase project vcaerawuwffziufvpbvw inside BEGIN/ROLLBACK. The integrated SQL regression returned the proof marker socket_v1_b_integration_passed_no_persistent_changes, including recursive verification. No live schema changes or fixtures were persisted.
+Executed: migration syntax and double replay on the canonical Supabase project vcaerawuwffziufvpbvw inside BEGIN/ROLLBACK. The latest extended SQL regression returned the proof marker full_context_ceiling_and_fenced_lifecycle_passed, including recursive verification, identity separation, replay defenses, and input/output/combined budget thresholds. No live schema changes or fixtures were persisted.
 
 Not executed here: the separate-process claim race, because this execution environment has neither psql nor a disposable PostgreSQL service. A separate independent reviewer must run that harness before certifying cross-connection concurrency.
 
