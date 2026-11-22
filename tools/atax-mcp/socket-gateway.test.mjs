@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
-import {createSocketGateway,SOCKET_TOOLS} from './socket-gateway.mjs';
+import {createSocketGateway,SOCKET_TOOLS,readBoundedText} from './socket-gateway.mjs';
 import {verifySocketJwt,createSocketWorker} from './socket-worker.mjs';
 
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
@@ -342,4 +342,70 @@ test('stateless MCP initialized notification is acknowledged without leaking tas
   }));
   assert.equal(response.status,202);
   assert.equal(await response.text(),'');
+});
+
+
+test('invalid workflow requests are metered even when locally denied',async()=>{
+  const {gateway,state}=makeFake({inputMax:1200});
+  let denied=0;
+  for(let i=0;i<15;i++){
+    const answer=await call(gateway,WORKFLOW,{...BASE,workflow_key:'unauthorised',inputs:{command:'denied'}});
+    if(reason(answer)==='BUDGET_EXHAUSTED')break;
+    assert.equal(reason(answer),'CAPABILITY_REVOKED');
+    denied++;
+  }
+  assert.ok(denied>=1);
+  assert.ok(state.input>1200,'repeated invalid requests cannot run without charging');
+  assert.equal(state.atomisation,true);
+  assert.equal(state.intents.length,0);
+});
+
+test('signed malformed JSON-RPC frames and oversized identifiers are metered',async()=>{
+  const {gateway,state}=makeFake();
+  const wires=[
+    '{not valid JSON',
+    '[]',
+    JSON.stringify({jsonrpc:'2.0',id:'x'.repeat(12000),method:'tools/list'}),
+    JSON.stringify({jsonrpc:'2.0',id:1,method:4}),
+    JSON.stringify({jsonrpc:'2.0',id:1,method:'x'.repeat(200)})
+  ];
+  for(const wire of wires){
+    const before=state.input;
+    const response=await gateway.fetch(new Request('https://restricted.example/mcp',{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer socket-valid'},
+      body:wire
+    }));
+    const body=await response.text();
+    assert.ok(body.length<1024,'invalid identifiers must never echo unlimited content');
+    assert.equal(JSON.parse(body).error.data.code,'INVALID_ARGUMENTS');
+    assert.ok(state.input>before,'every authenticated malformed message must consume budget');
+  }
+});
+
+test('bounded stream reader cancels large upstream bodies without buffering entire response',async()=>{
+  let cancelled=false;
+  const readable=new ReadableStream({
+    pull(controller){controller.enqueue(new Uint8Array(9000));},
+    cancel(){cancelled=true;}
+  });
+  const response=new Response(readable);
+  assert.equal(await readBoundedText(response,8192),null);
+  assert.equal(cancelled,true);
+});
+
+test('unauthenticated and oversized transport frames cannot invoke canonical operations',async()=>{
+  const {gateway,state}=makeFake();
+  const oversized=await gateway.fetch(new Request('https://restricted.example/mcp',{
+    method:'POST',
+    headers:{'content-type':'application/json',authorization:'Bearer socket-valid'},
+    body:'x'.repeat(32769)
+  }));
+  assert.equal(oversized.status,413);
+  const anonymous=await gateway.fetch(new Request('https://restricted.example/mcp',{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})
+  }));
+  assert.equal(anonymous.status,401);
+  assert.equal(state.input,0);
 });
