@@ -76,7 +76,7 @@ test('trust anchoring, freshness, trial identities and independent review are ma
     x => x.trials[1].responseId = x.trials[0].responseId,
     x => x.trials[0].evaluation.verifier = 'agent-author',
     x => x.trials[0].evaluation.outputSha256 = '',
-    x => x.trials[0].outputTokens = undefined,
+    x => x.trials[0].outputTokens = -1,
     x => x.provenance.responseIds.pop()
   ]) {
     const evidence = record(); mutation(evidence);
