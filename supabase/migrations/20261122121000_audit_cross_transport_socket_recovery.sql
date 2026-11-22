@@ -2,6 +2,35 @@
 -- claim token/holder for safe, non-mutating handoff, regardless of which
 -- GitHub, direct Supabase, or MCP claim entrypoint performed the takeover.
 -- No resident agent, scheduler, background poller, or model identity is used.
+-- Database-level invariant: even a new claim RPC must not take an already
+-- occupied, still-live task socket; no tenant/model/source can opt out.
+CREATE OR REPLACE FUNCTION public.enforce_active_task_socket_lease()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public','pg_temp'
+AS $guard$
+BEGIN
+  IF OLD.status='running' AND NEW.status='running' AND OLD.claim_token IS NOT NULL THEN
+    IF OLD.claim_expires_at>statement_timestamp()
+       AND (NEW.claim_token IS DISTINCT FROM OLD.claim_token
+         OR NEW.claimed_by_agent_id IS DISTINCT FROM OLD.claimed_by_agent_id) THEN
+      RAISE EXCEPTION 'Cannot replace an occupied task socket before its lease expires';
+    END IF;
+    IF NEW.claimed_by_agent_id IS DISTINCT FROM OLD.claimed_by_agent_id
+       AND NEW.claim_token IS NOT DISTINCT FROM OLD.claim_token THEN
+      RAISE EXCEPTION 'A new task holder requires a fresh fencing token';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$guard$;
+
+DROP TRIGGER IF EXISTS tasks_enforce_active_socket_lease ON public.tasks;
+CREATE TRIGGER tasks_enforce_active_socket_lease
+BEFORE UPDATE OF claimed_by_agent_id, claim_token, claim_expires_at ON public.tasks
+FOR EACH ROW
+EXECUTE FUNCTION public.enforce_active_task_socket_lease();
+
 CREATE OR REPLACE FUNCTION public.audit_task_socket_recovery_event()
 RETURNS trigger
 LANGUAGE plpgsql
