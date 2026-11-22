@@ -6,6 +6,7 @@ declare
   fixture_goal_id uuid;
   first_claim public.tasks;
   early_claim public.tasks;
+  still_owned_claim public.tasks;
   recovered public.tasks;
 begin
   insert into public.goals(name,created_by_agent_id,status)
@@ -42,6 +43,15 @@ begin
       claim_expires_at=now()+interval '15 minutes'
   where id=first_claim.id;
 
+  select * into still_owned_claim from public.task_ledger_claim_next(
+    'recovery-threshold-premature','Premature Worker','worker',array['recovery-threshold']::text[],900
+  );
+  if still_owned_claim.id is not null then
+    raise exception 'Stale heartbeat stole a still-valid lease';
+  end if;
+  update public.tasks set claim_expires_at=now()-interval '1 second'
+  where id=first_claim.id;
+
   select * into recovered from public.task_ledger_claim_next(
     'recovery-threshold-new','Recovery Worker','worker',array['recovery-threshold']::text[],900
   );
@@ -66,7 +76,7 @@ begin
     raise exception 'Recovery event did not preserve previous worker evidence';
   end if;
 
-  raise notice 'PASS: expired lease cannot bypass the 5-minute heartbeat threshold; stale task is atomically reassigned';
+  raise notice 'PASS: both stale heartbeat and expired lease required for atomic recovery';
 end;
 $test$;
 rollback;
