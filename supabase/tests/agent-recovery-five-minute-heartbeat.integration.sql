@@ -116,6 +116,7 @@ begin
       and e.event_type='lease_recovered'
       and e.payload->>'previous_agent_id'='heartbeat-hardening-old'
       and e.payload->>'recovery_reason'='heartbeat_timeout'
+      and e.payload->>'recovery_threshold_minutes'='2'
       and (e.payload->'previous_heartbeat_context'->>'activity')='writing recovery migration'
   ) then
     raise exception 'Recovery did not preserve the last heartbeat context';
