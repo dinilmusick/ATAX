@@ -81,7 +81,7 @@ async function authenticate(request,env, fetcher){
   const parts=token.split('.'); if(parts.length!==3)return null;
   let head,claims;
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  // OAuth access tokens are RFC 9068 at+jwt; reject Luth session JWTs
+  // OAuth access tokens are RFC 9068 at+jwt; reject unrelated session JWTs
   // even if they are signed by the same authorization server.
   if(!isObj(head)||!isObj(claims)||head.typ!=='at+jwt'||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'||
      typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp))return null;
@@ -111,8 +111,8 @@ async function authenticate(request,env, fetcher){
   }catch{return null;}
   const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
   // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
-  // Only a pinned Luth owner subject may receive capabilities defined by server policy.
-  // Never map all authenticated Luth accounts to the owner or verifier role.
+  // Only a pinned OAuth owner subject may receive capabilities defined by server policy.
+  // Never map all authenticated issuer accounts to the owner or verifier role.
   if(claims.sub===String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'') &&
      typeof env.MCP_ATAX_OWNER_JWT_SUBJECT==='string' &&
      env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
@@ -229,7 +229,7 @@ export function createHandler(fetcher=fetch){
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      // The authorization server (Luth) owns OAuth metadata and dynamic client registration.
+      // The independently configured authorization server owns OAuth metadata and dynamic client registration.
       // ATAX is a protected resource, never a second token issuer.
       return json({resource,authorization_servers:server?[server]:[],bearer_methods_supported:['header'],
         scopes_supported:['openid','profile','email','offline_access']});
