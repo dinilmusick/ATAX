@@ -52,7 +52,7 @@ for (const [name, app, mode] of apps) {
     stage = 'submit';
     await page.locator('form button[type="submit"]').click();
     stage = 'first_party_callback';
-    await page.waitForURL(url => url.origin === new URL(app).origin, { timeout: 65000 });
+    await page.waitForURL(url => url.origin === new URL(app).origin && !url.pathname.startsWith('/api/auth/'), { timeout: 65000 });
     stage = 'session';
     const session = await getAppSession(page);
     if (session.status !== 200 || !session.authenticated) throw new Error('APP_SESSION_ABSENT');
