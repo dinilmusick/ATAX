@@ -68,7 +68,7 @@ BEGIN
   WHERE e.task_id=task_id_in AND e.event_type='handoff'
     AND e.agent_id=previous_agent_id_in
     AND e.payload->>'previous_claim_token'=previous_claim_token_in::text
-  ORDER BY e.created_at DESC LIMIT 1;
+  ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1;
   IF FOUND THEN RETURN event_out; END IF;
 
   INSERT INTO public.task_events(task_id,event_type,agent_id,message,payload)
