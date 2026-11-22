@@ -94,6 +94,36 @@ BEGIN
        <>octet_length(result1->>'replyFrame')+8
   THEN RAISE EXCEPTION 'FAIL: status response not precharged: %',result1; END IF;
 
+  -- A task-bound output must be durable and metered, but cannot implicitly
+  -- bypass the independently evaluated bounded-v2 checkpoint and loop gates.
+  INSERT INTO public.socket_gateway_capabilities
+    (invocation_id,task_id,capability,enabled,expires_at)
+    VALUES(inv.id,t,'socket:output:submit',true,now()+interval '1 hour');
+  input:='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"atax_socket_output_submit"}}';
+  command:=jsonb_build_object('operation','output_submit',
+    'capability','socket:output:submit',
+    'principalId',principal,'sessionId',session_key,'taskId',t::text,
+    'claimToken',fence::text,'requestWire',input,'replyId',1,
+    'inboundTokens',octet_length(input)+8,
+    'payload',jsonb_build_object('partial',false,'output',
+       jsonb_build_object('summary','Unverified artifact','evidence',
+          jsonb_build_array('fixture output; not a verified checkpoint'))),
+    'budgetProfile',budget);
+  result1:=public.atax_socket_execute_v1(command);
+  IF result1->>'status'<>'ok'
+     OR (result1->'data'->>'accepted')::boolean IS DISTINCT FROM true
+     OR (result1->'data'->>'pending_evaluation')::boolean IS DISTINCT FROM true
+     OR (result1->'data'->>'completed')::boolean IS DISTINCT FROM false
+     OR NOT EXISTS (
+       SELECT 1 FROM public.socket_output_submissions s
+       WHERE s.id=(result1->'data'->>'submission_id')::uuid
+         AND s.task_id=t AND s.invocation_id=inv.id
+         AND s.claim_token=fence AND s.partial=false
+         AND s.payload->>'summary'='Unverified artifact')
+     OR (SELECT status FROM public.tasks WHERE id=t)<>'running'
+     OR (SELECT verification_status FROM public.tasks WHERE id=t)<>'not_started'
+  THEN RAISE EXCEPTION 'FAIL: unverified output must persist without task completion: %', result1; END IF;
+
   RAISE NOTICE 'PASS: canonical service-only socket RPC, exact wire, replay charging, fence, capability, notification, status';
 END $test$;
 ROLLBACK;

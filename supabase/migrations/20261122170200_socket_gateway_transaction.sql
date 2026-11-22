@@ -27,15 +27,33 @@ CREATE TABLE IF NOT EXISTS public.socket_gateway_workflows (
   FOREIGN KEY(target_repository,runner_repository,workflow_file,operation,mode)
     REFERENCES public.socket_dispatch_allowed_targets(target_repository,runner_repository,workflow_file,operation,mode)
 );
-DO $$
+-- Output from an untrusted task socket is an immutable, bounded submission,
+-- NOT a checkpoint verdict and NOT a completed task. A separate trusted
+-- evaluator executes the canonical loop/predicate gates before completion.
+CREATE TABLE IF NOT EXISTS public.socket_output_submissions (
+  id uuid PRIMARY KEY,
+  task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE RESTRICT,
+  invocation_id uuid NOT NULL REFERENCES public.socket_invocations(id) ON DELETE RESTRICT,
+  claim_token uuid NOT NULL,
+  partial boolean NOT NULL,
+  payload jsonb NOT NULL CHECK (
+    jsonb_typeof(payload)='object' AND octet_length(payload::text)<=12288),
+  submitted_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS socket_output_submission_task_idx
+  ON public.socket_output_submissions(task_id,submitted_at DESC);
+DO $
 DECLARE tab text;
 BEGIN
- FOR tab IN SELECT unnest(ARRAY['socket_gateway_capabilities','socket_gateway_workflows']) LOOP
+ FOR tab IN SELECT unnest(ARRAY['socket_gateway_capabilities','socket_gateway_workflows','socket_output_submissions']) LOOP
   EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',tab);
   EXECUTE format('REVOKE ALL ON TABLE public.%I FROM public,anon,authenticated',tab);
   EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.%I TO service_role',tab);
  END LOOP;
-END $$;
+END $;
+-- A task-bound role may append only. In particular it cannot silently rewrite
+-- a submitted artifact or erase evidence used by a separate verifier.
+REVOKE UPDATE,DELETE ON public.socket_output_submissions FROM service_role;
 
 CREATE OR REPLACE FUNCTION public.atax_socket_execute_v1(command_in jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER
@@ -53,6 +71,7 @@ DECLARE
   v_in bigint; v_out bigint;
   v_usage jsonb; v_data jsonb; v_submit jsonb;
   v_corr uuid; v_key text; v_dispatch uuid;
+  v_submission_id uuid:=gen_random_uuid();
   v_page integer; v_limit integer; v_idx text;
 BEGIN
   -- Only the secured worker's service-role REST call may invoke this function.
@@ -183,7 +202,8 @@ BEGIN
          OR octet_length((v_payload->'output')::text)>12288
       THEN RETURN jsonb_build_object('status','denied','code','OUTPUT_TOO_LARGE'); END IF;
       v_data:=jsonb_build_object('task_id',v_task_id,
-        'accepted',true,'partial',coalesce((v_payload->>'partial')::boolean,false));
+        'accepted',true,'partial',coalesce((v_payload->>'partial')::boolean,false),
+        'submission_id',v_submission_id,'pending_evaluation',true,'completed',false);
     ELSIF v_operation='atomisation_request' THEN
       IF length(coalesce(v_payload->>'reason','')) NOT BETWEEN 1 AND 512
       THEN RETURN jsonb_build_object('status','denied','code','INVALID_ARGUMENTS'); END IF;
@@ -222,16 +242,21 @@ BEGIN
       jsonb_build_object('reason',v_payload->>'reason',
         'partial_progress',left(coalesce(v_payload->>'partial_progress',''),3000)));
   ELSIF v_operation='output_submit' THEN
-    IF coalesce((v_payload->>'partial')::boolean,false) THEN
-      UPDATE public.tasks SET heartbeat_context=jsonb_build_object(
-        'activity','socket_partial_output','summary',
-        left(coalesce(v_payload->'output'->>'summary',''),3000)),
-        heartbeat_at=now(),updated_at=now() WHERE id=v_task_id;
-    ELSE
-      PERFORM public.task_ledger_submit_result(v_task_id,v_inv.agent_id,v_claim,
-        v_payload->'output',left(coalesce(v_payload->'output'->>'summary',''),500),
-        '[]'::jsonb,coalesce(v_payload->'output'->'evidence','[]'::jsonb),'completed');
-    END IF;
+    -- Atomically persist the reserved output, but NEVER promote untrusted
+    -- task-socket text to a completed/verified bounded-v2 task. Completing
+    -- it requires the existing trusted task loop and predicate execution
+    -- APIs to pass and a later independent verifier.
+    INSERT INTO public.socket_output_submissions
+      (id,task_id,invocation_id,claim_token,partial,payload)
+    VALUES(v_submission_id,v_task_id,v_inv.id,v_claim,
+      coalesce((v_payload->>'partial')::boolean,false),v_payload->'output');
+    UPDATE public.tasks SET heartbeat_context=jsonb_build_object(
+      'activity','socket_output_pending_evaluation',
+      'submission_id',v_submission_id,
+      'partial',coalesce((v_payload->>'partial')::boolean,false),
+      'summary',left(coalesce(v_payload->'output'->>'summary',''),3000),
+      'next_action','Separate trusted evaluator must record passing loop and predicate evidence'),
+      heartbeat_at=now(),updated_at=now() WHERE id=v_task_id;
   ELSIF v_operation='workflow_request' THEN
     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
