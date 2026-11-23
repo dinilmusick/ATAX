@@ -1,6 +1,7 @@
 import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
+import {createConfiguredSocketWorker} from './socket-worker.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
@@ -48,6 +49,12 @@ const TOOLS = [
   tool('atax_verification_claim', 'Claim the next task pending independent verification', 'atax:verify', one('verification claim',{lease_seconds:S.int('Lease length',60,900)}), (a,db,p)=>db.rpc('task_ledger_claim_verification',{verifier_agent_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
   tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
+  tool('atax_verification_claim_for_task', 'Claim a specific task pending independent verification by task UUID', 'atax:verify', one('claim verification for task',{task_id:S.text('Task UUID',36),lease_seconds:S.int('Lease length',60,900)},['task_id']), (a,db,p)=>db.rpc('task_ledger_claim_verification_for_task',{task_id_in:a.task_id,verifier_agent_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
+  tool('atax_socket_context_pull', 'Retrieve one bounded canonical context page for the claimed task', 'atax:write', one('context pull',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),cursor:S.text('Cursor',256),limit:S.int('Limit',1,16)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'context_pull',capability:'socket:context:read',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{cursor:a.cursor,limit:a.limit??16},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
+  tool('atax_socket_output_submit', 'Persist bounded task output only; cannot edit a repository or any external resource', 'atax:write', one('output submit',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),output:{type:'object'},partial:S.bool('Partial output')},['task_id','claim_token','output']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'output_submit',capability:'socket:output:submit',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{output:a.output,partial:a.partial??false},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
+  tool('atax_socket_atomisation_request', 'Request stop and fenced atomisation with a bounded partial-progress note', 'atax:write', one('atomisation request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),reason:S.text('Reason',512),partial_progress:S.text('Partial progress',3000)},['task_id','claim_token','reason']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'atomisation_request',capability:'socket:atomise:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{reason:a.reason,partial_progress:a.partial_progress??''},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
+  tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
+  tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
 ];
 TOOLS.push(...githubTools,...providerTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
@@ -216,6 +223,12 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
       return json({resource,authorization_servers:server?[server]:[],bearer_methods_supported:['header'],
         scopes_supported:['openid','profile','email','offline_access']});
     }
+    if(url.pathname==='/socket'){
+      if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, OPTIONS'}});
+      if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
+      const socketWorker=createConfiguredSocketWorker(env,fetcher);
+      return socketWorker.fetch(req);
+    }
     if(url.pathname!=='/mcp')return json({error:'Not found'},404);
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, OPTIONS'}});
@@ -237,10 +250,10 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
   return async (req,bootstrapEnv={})=>{
     const path=new URL(req.url).pathname;
     let env={};
-    if(path==='/mcp'||path==='/.well-known/oauth-protected-resource'||
+    if(path==='/mcp'||path==='/socket'||path==='/.well-known/oauth-protected-resource'||
        path==='/.well-known/oauth-protected-resource/mcp'){
       try{env=await configLoader(bootstrapEnv);}
-      catch{return json({error:'ATAX MCP not configured'},503);}
+      catch(err){console.error('[worker:configLoader]', err);return json({error:'ATAX MCP not configured'},503);}
     }
     const response=await dispatch(req,env);
     const origin=req.headers.get('origin');
@@ -254,4 +267,5 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
     return new Response(response.body,{status:response.status,headers});
   };
 }
+export { routeRpc, authenticate, TOOLS, byName };
 export default {fetch:createHandler()};

@@ -61,7 +61,7 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
   }catch{return null;}
 }
 
-function createConfiguredSocketWorker(env,fetcher=fetch){
+export function createConfiguredSocketWorker(env,fetcher=fetch){
   // Model-specific conservative budget is mandatory. Unknown models use Agent A's
   // 8192-token fallback, never an unbounded or self-declared capacity.
   const budgetProfile=resolveBudget(String(env.SOCKET_MODEL_ID||'unknown'));
