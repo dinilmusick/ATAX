@@ -59,6 +59,7 @@ async function startStdio() {
     terminal: false
   });
 
+  let lastConfigLoad = Date.now();
   rl.on('line', async (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -69,6 +70,17 @@ async function startStdio() {
       const errReply = { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } };
       process.stdout.write(JSON.stringify(errReply) + '\n');
       return;
+    }
+
+    if (Date.now() - lastConfigLoad > 5000) {
+      try {
+        runtimeConfig = await loadMcpRuntimeConfig(process.env);
+        lastConfigLoad = Date.now();
+        const curSubject = String(runtimeConfig.MCP_OWNER_SUBJECT || runtimeConfig.MCP_SHARED_SUBJECT || 'atax-operator');
+        principal.id = curSubject;
+      } catch {
+        // preserve current on transient error
+      }
     }
 
     try {

@@ -257,7 +257,7 @@ export function createVaultService(
           ? { ...cfg.settings }
           : {};
 
-      if (!existingSettings.MCP_OWNER_SUBJECT) {
+      if (!existingSettings.MCP_OWNER_SUBJECT || existingSettings.MCP_OWNER_SUBJECT !== ownerSubject) {
         existingSettings.MCP_OWNER_SUBJECT = ownerSubject;
         await sql.unsafe('SELECT public.atax_mcp_set_settings_v1($1::jsonb, $2)', [
           JSON.stringify(existingSettings),

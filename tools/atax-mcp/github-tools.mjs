@@ -172,6 +172,101 @@ async function getFmrlStatus(a,_db,principal,ctx) {
     'Cleanup is NOT independently verified. Treat as blocker and investigate controller cleanup; never use ATAX as fallback.';
   return result;
 }
+async function dispatchWorkflow(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const workflow=String(a.workflow||'');
+  if(!/^[A-Za-z0-9_.-]{1,100}\.ya?ml$/.test(workflow)&&!/^\d+$/.test(workflow))
+    throw new Error('Invalid workflow filename or ID');
+  const ref=a.ref||'main';
+  const body={ref,inputs:a.inputs||{}};
+  const url=`${API}/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`;
+  const res=await githubRequest(ctx.fetcher,url,selected.token,{method:'POST',body});
+  requireOk(res,'GitHub Actions workflow dispatch');
+  return {operation:'workflow_dispatch',account:selected.alias,repository:repo,workflow,ref,status:'dispatched',note:'Workflow dispatched successfully to GitHub Actions.'};
+}
+async function listWorkflowRuns(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  if(a.run_id!==undefined){
+    const url=`${API}/repos/${repo}/actions/runs/${a.run_id}`;
+    const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'Workflow run lookup');
+    const jobsUrl=`${API}/repos/${repo}/actions/runs/${a.run_id}/jobs?per_page=50`;
+    let jobs=[];
+    try{
+      const jobsData=requireOk(await githubRequest(ctx.fetcher,jobsUrl,selected.token),'Workflow jobs lookup');
+      jobs=(jobsData.jobs||[]).map(j=>({id:j.id,name:j.name,status:j.status,conclusion:j.conclusion,steps:(j.steps||[]).map(s=>({name:s.name,status:s.status,conclusion:s.conclusion}))}));
+    }catch{}
+    return {operation:'workflow_run_detail',account:selected.alias,repository:repo,run_id:data.id,name:data.name,status:data.status,conclusion:data.conclusion,html_url:data.html_url,jobs};
+  }
+  let url=`${API}/repos/${repo}/actions/runs?per_page=15`;
+  if(a.workflow)url=`${API}/repos/${repo}/actions/workflows/${encodeURIComponent(a.workflow)}/runs?per_page=15`;
+  if(a.status)url+=`&status=${encodeURIComponent(a.status)}`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'Workflow runs list');
+  const runs=(data.workflow_runs||[]).map(r=>({id:r.id,name:r.name,event:r.event,status:r.status,conclusion:r.conclusion,head_sha:r.head_sha,head_branch:r.head_branch,html_url:r.html_url,created_at:r.created_at}));
+  return {operation:'workflow_runs_list',account:selected.alias,repository:repo,runs};
+}
+async function getCheckRuns(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const ref=encodeURIComponent(String(a.ref||''));
+  if(!ref)throw new Error('Git commit ref or branch name is required');
+  const url=`${API}/repos/${repo}/commits/${ref}/check-runs?per_page=30`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'Check runs lookup');
+  const check_runs=(data.check_runs||[]).map(cr=>({id:cr.id,name:cr.name,status:cr.status,conclusion:cr.conclusion,started_at:cr.started_at,completed_at:cr.completed_at,html_url:cr.html_url,output_title:cr.output?.title||null,output_summary:cr.output?.summary?String(cr.output.summary).slice(0,1000):null}));
+  return {operation:'check_runs',account:selected.alias,repository:repo,ref:a.ref,total_count:data.total_count??check_runs.length,check_runs};
+}
+async function getFile(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const path=String(a.path||'').replace(/^\/+/,'');
+  if(!path)throw new Error('File path required');
+  let url=`${API}/repos/${repo}/contents/${encodeURI(path)}`;
+  if(a.ref)url+=`?ref=${encodeURIComponent(a.ref)}`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'GitHub file get');
+  if(Array.isArray(data)){
+    return {operation:'directory_listing',account:selected.alias,repository:repo,path,entries:data.map(item=>({name:item.name,path:item.path,type:item.type,size:item.size}))};
+  }
+  if(data.type!=='file')throw new Error('Target path is not a regular file');
+  let content='';
+  if(data.content&&data.encoding==='base64'){
+    content=Buffer.from(data.content,'base64').toString('utf8');
+  }
+  return {operation:'file_get',account:selected.alias,repository:repo,path:data.path,sha:data.sha,size:data.size,content};
+}
+async function putFile(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const path=String(a.path||'').replace(/^\/+/,'');
+  if(!path)throw new Error('File path required');
+  const message=String(a.message||'').trim();
+  if(!message)throw new Error('Commit message is required');
+  const content=String(a.content??'');
+  const base64Content=Buffer.from(content,'utf8').toString('base64');
+  const body={message,content:base64Content,...(a.branch?{branch:a.branch}:{}),...(a.sha?{sha:a.sha}:{})};
+  const url=`${API}/repos/${repo}/contents/${encodeURI(path)}`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body}),'GitHub file put');
+  return {operation:'file_put',account:selected.alias,repository:repo,path,commit_sha:data.commit?.sha,commit_url:data.commit?.html_url,content_sha:data.content?.sha};
+}
+async function createPullRequest(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const title=String(a.title||'').trim();
+  if(!title)throw new Error('Pull request title required');
+  const head=String(a.head||'').trim();
+  if(!head)throw new Error('Head branch required');
+  const base=String(a.base||'main').trim();
+  const body={title,head,base,body:a.body||''};
+  const url=`${API}/repos/${repo}/pulls`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'POST',body}),'GitHub pull request creation');
+  return {operation:'pull_request_create',account:selected.alias,repository:repo,number:data.number,title:data.title,url:data.html_url,state:data.state};
+}
 export const githubTools=[
   tool('atax_github_workflows_guide',
     'READ FIRST for GitHub work: choose permanent repository vs disposable FMRL; container-first workflow, security rules, mandatory cleanup and evidence. No credentials are exposed.',
@@ -188,4 +283,22 @@ export const githubTools=[
   tool('atax_fmrl_get_status',
     'POLL one FMRL controller dispatch by correlation request_id until terminal. Reports exact controller result, confirms provisioning+cleanup steps, independently reads the public bridge for HTTP 404, and BLOCKS acceptance without verified deletion. Never infer CI success from dispatch acceptance.',
     'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),account:{type:'string',maxLength:48,description:'Same GitHub account used for dispatch'},run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
+  tool('atax_github_workflow_dispatch',
+    'Dispatch a GitHub Actions workflow (e.g. lint.yml, build.yml, test.yml) on any accessible repository using the authenticated GitHub token.',
+    'atax:github:create',one('Workflow dispatch',{repository:s('GitHub owner/name repository',205),workflow:s('Workflow filename (e.g. lint.yml, build.yml) or ID',100),ref:s('Git branch or commit SHA (default main)',120),inputs:{type:'object',description:'Optional workflow inputs object'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','workflow']),dispatchWorkflow),
+  tool('atax_github_workflow_runs',
+    'List or inspect GitHub Actions workflow runs for a repository, reporting execution status, conclusion (success, failure), jobs, steps, and URL.',
+    'atax:github:read',one('Workflow runs lookup',{repository:s('GitHub owner/name repository',205),workflow:s('Optional workflow filename filter (e.g. ci.yml, lint.yml)',100),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional exact run ID to inspect in detail'},status:s('Optional status filter (e.g. completed, in_progress, queued)',50),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository']),listWorkflowRuns),
+  tool('atax_github_check_runs',
+    'Inspect GitHub check runs (automated linting, type-checking, test outcomes, build status) and failure annotations for an exact commit SHA or ref.',
+    'atax:github:read',one('Check runs lookup',{repository:s('GitHub owner/name repository',205),ref:s('Git commit SHA or branch name',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','ref']),getCheckRuns),
+  tool('atax_github_file_get',
+    'Fetch the text contents of a file from a GitHub repository at a specific branch or commit ref without cloning target code locally.',
+    'atax:github:read',one('Get file from GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository (e.g. src/index.ts)',1000),ref:s('Optional commit ref or branch name',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path']),getFile),
+  tool('atax_github_file_put',
+    'Create or update a file directly on a GitHub branch via the Contents API with a commit message. Enables remote coding via GitHub without local dirty state.',
+    'atax:github:create',one('Put file on GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to create or update',1000),content:{type:'string',description:'File UTF-8 text content'},message:s('Git commit message',1000),branch:s('Optional target branch name (defaults to default branch)',120),sha:s('Blob SHA of the file being replaced (required when updating an existing file)',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','content','message']),putFile),
+  tool('atax_github_pull_request_create',
+    'Open a Pull Request on GitHub for a feature branch to merge into base, recording title, description, and task reference.',
+    'atax:github:create',one('Create pull request on GitHub',{repository:s('GitHub owner/name repository',205),title:s('Pull request title',300),head:s('The branch where your changes are implemented',120),base:s('The branch you want changes pulled into (default main)',120),body:s('Pull request body/description',4000),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','title','head']),createPullRequest),
 ];
