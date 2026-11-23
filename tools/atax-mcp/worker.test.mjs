@@ -21,7 +21,7 @@ const upstream=async (url, options={})=>{
   if(url.includes('/skills?'))return Response.json([{id:17,slug:'coding-router',name:'Coding Router',status:'active',current_version_id:'version-test'}]);
   throw Error('Unexpected upstream '+url);
 };
-const handler=createHandler(upstream);
+const handler=createHandler(upstream,async env=>env);
 function post(method,params={},config={}){
   const body=JSON.stringify(config.body||{jsonrpc:'2.0',id:config.id??1,method,params});
   return handler(new Request('https://atax.example/mcp', {method:'POST',headers:{'Content-Type':'application/json',...(config.auth===false?{}:{Authorization:'Bearer '+token}),...(config.headers||{})},body}),config.env||env);
@@ -166,7 +166,7 @@ test('JWKS bearer validation verifies RSA signature, issuer, audience, expiry an
   async function sign(override={}){const payload=b64(JSON.stringify({...claims,...override}));const signature=await webcrypto.subtle.sign('RSASSA-PKCS1-v1_5',keys.privateKey,new TextEncoder().encode(header+'.'+payload));return header+'.'+payload+'.'+b64(signature);}
   const jwksEnv={...env,MCP_SHARED_TOKEN_SHA256:'',MCP_AUTH_JWKS_URL:'https://auth.example/jwks',MCP_AUTH_ISSUER:'https://auth.example',MCP_AUTH_AUDIENCE:'atax'};
   const remote=async(url,opts)=>url==='https://auth.example/jwks'?Response.json({keys:[pub]}):upstream(url,opts);
-  const h=createHandler(remote);
+  const h=createHandler(remote,async env=>env);
   async function invoke(jwt){return h(new Request('https://atax.example/mcp',{method:'POST',headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})}),jwksEnv);}
   assert.equal((await invoke(await sign())).status,200);
   // A trusted-scope JWT is not automatically the owner of the service-role ATAX ledger.
@@ -277,7 +277,7 @@ const fakeGitHub=(records=[])=>async(url,options={})=>{
 const makeGitCall=async(name,args={},config={})=>{
   const req=new Request('https://atax.example/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body:JSON.stringify({jsonrpc:'2.0',id:19,method:'tools/call',params:{name,arguments:args}})});
-  const res=await createHandler(config.fetcher||fakeGitHub())(req,config.env||gitEnv);
+  const res=await createHandler(config.fetcher||fakeGitHub(),async env=>env)(req,config.env||gitEnv);
   const payload=await res.json();return payload.result;
 };
 

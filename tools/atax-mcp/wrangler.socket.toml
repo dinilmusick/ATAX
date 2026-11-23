@@ -3,8 +3,7 @@ main = "socket-worker.mjs"
 compatibility_date = "2026-11-01"
 workers_dev = true
 
-[vars]
-SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
-# Bind all SOCKET_AUTH_* identity settings and SOCKET_WORKFLOW_CATALOG_JSON
-# at deployment, and the SUPABASE_SECRET_KEY as a Worker secret.
-# Never inject unrestricted GitHub, Cloudflare or maintainer credentials.
+# SINGLE SERVER-SECRET BINDING: SUPABASE_URL (same canonical ledger).
+# Format: https://<project>.supabase.co/#key=<privileged-server-key>
+# All socket auth / model / workflow policy is hydrated from canonical Supabase.
+# Restricted socket release stays disabled until live host and DB certification.

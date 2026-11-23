@@ -3,15 +3,8 @@ main = "worker.mjs"
 compatibility_date = "2026-11-20"
 workers_dev = true
 
-# Supabase remains canonical; this Worker only handles incoming MCP HTTP requests.
-# Define every credential with `wrangler secret put`, NEVER in this file.
-[vars]
-SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
-MCP_GITHUB_OWNER = "dinilmusick"
-
-# Single-owner secret bootstrap is the default, without any Luth or ULTRST dependency.
-# Set MCP_SHARED_TOKEN_SHA256 (secret) and MCP_SHARED_SUBJECT / MCP_SHARED_SCOPES
-# (appropriate owner-only variables) in the deployed Worker settings.
-# OAuth is optional: supply your own issuer/JWKS/audience/authorization-server
-# settings explicitly if a particular client requires OAuth discovery.
-# Do not hard-code a separate ULTRST/Luth service as an ATAX dependency.
+# SINGLE SERVER-SECRET BINDING: SUPABASE_URL.
+# Format: https://<project>.supabase.co/#key=<privileged-server-key>
+# Set via wrangler secret put SUPABASE_URL, NEVER in [vars].
+# All owner identity policy, GitHub/Cloudflare/Vercel accounts, and Socket
+# policy are read from Supabase at request time. See docs/MCP_LEDGER_CONFIG_UI_HANDOFF.md.

@@ -1,3 +1,4 @@
+import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
@@ -222,10 +223,15 @@ async function routeRpc(msg,principal,env,fetcher){
   }
   return err(id,-32601,'Method not found');
 }
-export function createHandler(fetcher=fetch){
-  async function dispatch(req,env={}){
+export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
+  async function dispatch(req,bootstrapEnv={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL});
+    if(url.pathname!=='/mcp' && url.pathname!=='/.well-known/oauth-protected-resource' &&
+       url.pathname!=='/.well-known/oauth-protected-resource/mcp')return json({error:'Not found'},404);
+    let env;
+    try{env=await configLoader(bootstrapEnv,fetcher);}
+    catch{return json({error:'ATAX MCP not configured'},503);}
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();

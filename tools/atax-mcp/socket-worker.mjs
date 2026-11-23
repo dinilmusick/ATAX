@@ -1,3 +1,4 @@
+import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {createSocketGateway,readBoundedText} from './socket-gateway.mjs';
 import {resolveBudget,estimateTextTokens} from '../socket-budget/index.mjs';
 
@@ -60,7 +61,7 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
   }catch{return null;}
 }
 
-export function createSocketWorker(env,fetcher=fetch){
+function createConfiguredSocketWorker(env,fetcher=fetch){
   // Model-specific conservative budget is mandatory. Unknown models use Agent A's
   // 8192-token fallback, never an unbounded or self-declared capacity.
   const budgetProfile=resolveBudget(String(env.SOCKET_MODEL_ID||'unknown'));
@@ -112,6 +113,16 @@ export function createSocketWorker(env,fetcher=fetch){
   });
 }
 
+export function createSocketWorker(bootstrapEnv,fetcher=fetch,configLoader=loadMcpRuntimeConfig) {
+  return {async fetch(request){
+    let env;
+    try{env=await configLoader(bootstrapEnv,fetcher);}
+    catch{return Response.json({error:'ATAX task socket not configured'},{
+      status:503,headers:{'cache-control':'no-store'}
+    });}
+    return createConfiguredSocketWorker(env,fetcher).fetch(request);
+  }};
+}
 export default {
   fetch(request,env){return createSocketWorker(env).fetch(request);}
 };
