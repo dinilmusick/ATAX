@@ -10,21 +10,19 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
-  type Edge,
   type Node,
   type NodeProps,
 } from '@xyflow/react';
 import {
   AlertTriangle,
-  ChevronDown,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
+  Compass,
   Flag,
-  GitBranch,
+  Info,
   Loader2,
   Maximize2,
-  Pin,
   RotateCcw,
   Target,
   Terminal,
@@ -36,22 +34,21 @@ import type {
   GoalGraphNodeData,
   TaskGraphNodeData,
   TaskOccupancyInfo,
-  VisionGoalTaskEdge,
   VisionGraphNodeData,
   VisionsGoalsSubstrateResponse,
 } from '../types/substrate';
-import { buildVisionsGoalsGraph, formatContextUsage } from '../utils/graphData';
+import {
+  buildVisionsGoalsGraph,
+  formatContextUsage,
+  type VisionsGoalsScope,
+} from '../utils/graphData';
 import { useFloatyForceLayout } from '../hooks/useFloatyForceLayout';
 import { IconButton } from './IconButton';
-import { NodeDetailProvider, useNodeDetail } from '../context/NodeDetailContext';
 
 interface VisionsGoalsGraphViewProps {
   refreshTick?: number;
   onLoadingChange?: (loading: boolean) => void;
 }
-
-type VisionNodeData = VisionGraphNodeData & { expanded?: boolean };
-type GoalNodeData = GoalGraphNodeData & { expanded?: boolean };
 
 type SelectedGraphItem =
   | { kind: 'vision'; data: VisionGraphNodeData }
@@ -61,13 +58,13 @@ type SelectedGraphItem =
 function leaseBadgeClass(state: TaskOccupancyInfo['leaseState']): string {
   switch (state) {
     case 'lease_valid':
-      return 'text-[#6CC48E] border-[#3E7A56] bg-[#13241A]';
+      return 'text-[#6EE7B7] border-[#22C58B]/60 bg-[#0A231A]';
     case 'lease_expired':
-      return 'text-[#E04819] border-[#8C3B28] bg-[#261410]';
+      return 'text-[#FCA5A5] border-[#EF4444]/60 bg-[#2A1010]';
     case 'unknown':
-      return 'text-[#E09F3E] border-[#8C5B23] bg-[#23190E]';
+      return 'text-[#FCD34D] border-[#F59E0B]/60 bg-[#261705]';
     default:
-      return 'text-[#B9AA9D] border-[#3F2E27] bg-[#1A110E]';
+      return 'text-[#94A3B8] border-[#334155] bg-[#0F172A]';
   }
 }
 
@@ -84,571 +81,230 @@ function leaseLabel(state: TaskOccupancyInfo['leaseState']): string {
   }
 }
 
+/**
+ * VISION NODE — Tall Domed Portal / Archway (Emerald & Mint Ivory)
+ * Single click -> Details Panel; Double click -> Enter Vision to view its Goals.
+ */
 function VisionNode({ data, selected }: NodeProps) {
-  const vision = data as unknown as VisionNodeData;
-  const isContainerExpanded = Boolean(vision.expanded);
-  const { isExpanded, isPinned, toggleExpand, togglePin } = useNodeDetail(vision.id);
-
-  if (isContainerExpanded) {
-    return (
-      <div
-        data-node-id={vision.id}
-        className={`w-full h-full rounded-md border-2 transition-colors duration-150 flex flex-col shadow-xl ${
-          selected
-            ? 'bg-[#E5EAE0] border-[#2C4A35] ring-2 ring-[#2C4A35]'
-            : 'bg-[#DFE4D8] border-[#5A7356] hover:border-[#2C4A35]'
-        }`}
-      >
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#E5EAE0] !rounded-full"
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#E5EAE0] !rounded-full"
-        />
-
-        <div className="bg-[#2C4A35] text-[#F2EBE1] px-4 py-3 border-b border-[#43634E] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#1E3324] text-[#8FE3AB] font-bold">
-              VISION
-            </span>
-            <Target className="w-4 h-4 text-[#8FE3AB] shrink-0" />
-            <h3 className="font-display text-sm font-bold text-[#F2EBE1] truncate">
-              {vision.title}
-            </h3>
-          </div>
-          <div className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#8FE3AB] shrink-0">
-            <ChevronDown className="w-3.5 h-3.5" />
-            <span>{vision.goalsCount} goals</span>
-          </div>
-        </div>
-
-        <div className="flex-1" />
-      </div>
-    );
-  }
+  const vision = data as unknown as VisionGraphNodeData;
 
   return (
     <div
       data-node-id={vision.id}
-      data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-md border-2 transition-all duration-150 relative shadow-lg ${
-        isExpanded
-          ? 'bg-[#EAEFE3] text-[#18120F] border-[#2C4A35] ring-2 ring-[#2C4A35] z-40'
-          : selected
-          ? 'bg-[#E5EAE0] text-[#18120F] border-[#2C4A35] ring-2 ring-[#2C4A35]'
-          : 'bg-[#DFE4D8] text-[#18120F] border-[#6E7E62] hover:border-[#2C4A35]'
+      className={`group relative w-full h-full rounded-t-[44px] rounded-b-lg border-2 transition-all duration-150 cursor-pointer select-none shadow-xl flex flex-col justify-between px-5 pt-3.5 pb-3 ${
+        selected
+          ? 'bg-[#0F3225] border-[#6EE7B7] ring-2 ring-[#34D399]/60 shadow-[0_0_24px_rgba(52,211,153,0.22)]'
+          : 'bg-[#092018] border-[#22C58B]/80 hover:border-[#6EE7B7] hover:bg-[#0D2B20]'
       }`}
     >
+      {/* Inner double-arch architectural hairline */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-[5px] rounded-t-[39px] rounded-b-[6px] border border-[#34D399]/25"
+      />
+
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#DFE4D8] !rounded-full"
+        className="!w-3 !h-3 !bg-[#34D399] !border-2 !border-[#092018] !rounded-full"
       />
 
-      <div className="flex items-center justify-between gap-2.5 px-3.5 h-full">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#2C4A35] text-[#8FE3AB] font-bold shrink-0">
-            VISION
-          </span>
-          <Target className="w-4 h-4 text-[#2C4A35] shrink-0" />
-          <span className="font-display text-sm font-bold leading-tight text-[#18120F] truncate">
-            {vision.title}
-          </span>
-        </div>
-        <button
-          type="button"
-          aria-label={`Expand details for ${vision.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleExpand();
-          }}
-          className="nodrag nopan p-1 rounded-xs text-[#4A5D45] hover:text-[#18120F] hover:bg-[#C5CBBF] transition-colors shrink-0 cursor-pointer"
-        >
-          <ChevronDown className="w-3.5 h-3.5 pointer-events-none" />
-        </button>
+      {/* Crown Kicker */}
+      <div className="relative z-10 flex items-center justify-between gap-2 text-[10px] font-mono text-[#6EE7B7]">
+        <span className="inline-flex items-center gap-1.5 font-semibold tracking-wider uppercase">
+          <Compass className="w-3.5 h-3.5 text-[#34D399] shrink-0" />
+          <span>Vision · {vision.readableKey}</span>
+        </span>
+        <span className="uppercase text-[#A7F3D0]/85">{vision.status.replace('_', ' ')}</span>
       </div>
 
-      {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-md border-2 border-[#2C4A35] bg-[#DFE4D8] text-[#18120F] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3.5 py-3 bg-[#2C4A35] text-[#F2EBE1] border-b border-[#43634E]">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#1E3324] text-[#8FE3AB] font-bold">
-                VISION
-              </span>
-              <Target className="w-4 h-4 text-[#8FE3AB] shrink-0 pointer-events-none" />
-              <span className="font-display text-sm font-bold truncate text-[#F2EBE1]">
-                {vision.title}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                aria-label={
-                  isPinned
-                    ? `Unpin ${vision.title} (auto-minimises on outside click)`
-                    : `Pin ${vision.title} (stays open on outside click)`
-                }
-                aria-pressed={isPinned}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePin();
-                }}
-                className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
-                  isPinned
-                    ? 'bg-[#8FE3AB] text-[#18120F] border border-[#2C4A35]'
-                    : 'text-[#C5CBBF] hover:text-[#F2EBE1] hover:bg-[#395D47] border border-transparent'
-                }`}
-              >
-                <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
-              </button>
-              <button
-                type="button"
-                aria-label={`Minimise ${vision.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleExpand();
-                }}
-                className="nodrag nopan p-1 rounded-xs text-[#C5CBBF] hover:text-[#F2EBE1] hover:bg-[#395D47] transition-colors cursor-pointer"
-              >
-                <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
-              </button>
-            </div>
-          </div>
+      {/* Main Title & Target */}
+      <div className="relative z-10 my-auto py-1">
+        <h3 className="font-display text-sm font-bold leading-snug text-[#ECFDF5] line-clamp-2">
+          {vision.title}
+        </h3>
+        {vision.description && (
+          <p className="text-[11px] text-[#A7F3D0]/75 truncate mt-0.5">{vision.description}</p>
+        )}
+      </div>
 
-          <div className="p-4 space-y-2.5 text-xs">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#4A5D45]">
-              <span>KEY: {vision.readableKey}</span>
-              <span className="uppercase font-semibold text-[#2C4A35]">
-                {vision.status.replace('_', ' ')}
-              </span>
-            </div>
-
-            <p className="text-xs text-[#2C3829] leading-relaxed">
-              {vision.description || 'No description recorded.'}
-            </p>
-
-            <div className="pt-2 border-t border-[#C4CABD] flex items-center justify-between text-[11px] font-mono text-[#4A5D45]">
-              <span className="truncate">
-                {vision.targetLabel ? `${vision.targetType}: ${vision.targetLabel}` : vision.targetType}
-              </span>
-              <span className="inline-flex items-center gap-1 font-semibold text-[#18120F] shrink-0">
-                <ChevronRight className="w-3 h-3 text-[#2C4A35]" />
-                {vision.goalsCount} goals
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Footer Horizon Meta */}
+      <div className="relative z-10 pt-1.5 border-t border-[#34D399]/20 flex items-center justify-between gap-2 text-[11px] font-mono">
+        <span className="text-[#A7F3D0]/80 truncate">
+          {vision.targetLabel ? `${vision.targetType}: ${vision.targetLabel}` : vision.targetType}
+        </span>
+        <span className="inline-flex items-center gap-1 font-semibold text-[#6EE7B7] shrink-0 tabular-nums">
+          <span>{vision.goalsCount} goals</span>
+          <ArrowRight className="w-3 h-3 opacity-70 group-hover:translate-x-0.5 transition-transform" />
+        </span>
+      </div>
 
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#DFE4D8] !rounded-full"
+        className="!w-3 !h-3 !bg-[#34D399] !border-2 !border-[#092018] !rounded-full"
       />
     </div>
   );
 }
 
+/**
+ * GOAL NODE — Faceted Pointed Hexagon (Burnished Amber & Solar Gold)
+ * Single click -> Details Panel; Double click -> Enter Goal to view its Tasks.
+ */
 function GoalNode({ data, selected }: NodeProps) {
-  const goal = data as unknown as GoalNodeData;
-  const isContainerExpanded = Boolean(goal.expanded);
-  const { isExpanded, isPinned, toggleExpand, togglePin } = useNodeDetail(goal.id);
-
-  if (isContainerExpanded) {
-    return (
-      <div
-        data-node-id={goal.id}
-        className={`w-full h-full rounded-md border-2 transition-colors duration-150 flex flex-col shadow-xl ${
-          selected
-            ? 'bg-[#3A1E17] border-[#E04819] ring-2 ring-[#E04819]'
-            : 'bg-[#28130E] border-[#8C3B28] hover:border-[#E04819]'
-        }`}
-      >
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
-        />
-
-        <div className="bg-[#C83214] text-[#F7F3EC] px-4 py-3 border-b border-[#8C220E] flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#52170B] text-[#FFB399] font-bold">
-              GOAL
-            </span>
-            <Flag className="w-4 h-4 text-[#FFB399] shrink-0" />
-            <h3 className="font-display text-sm font-bold text-[#F7F3EC] truncate">
-              {goal.title}
-            </h3>
-          </div>
-          <div className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#FFB399] shrink-0">
-            <ChevronDown className="w-3.5 h-3.5" />
-            <span>{goal.tasksCount} tasks</span>
-          </div>
-        </div>
-
-        <div className="flex-1" />
-      </div>
-    );
-  }
+  const goal = data as unknown as GoalGraphNodeData;
+  const isDone = goal.status === 'verified' || goal.status === 'completed';
 
   return (
     <div
       data-node-id={goal.id}
-      data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-md border-2 transition-all duration-150 relative shadow-lg ${
-        isExpanded
-          ? 'bg-[#3A1E17] text-[#F7F3EC] border-[#E04819] ring-2 ring-[#E04819] z-40'
-          : selected
-          ? 'bg-[#321A13] text-[#F7F3EC] border-[#E04819] ring-2 ring-[#E04819]'
-          : 'bg-[#28130E] text-[#F7F3EC] border-[#8C3B28] hover:border-[#E04819]'
-      }`}
+      className="group relative w-full h-full cursor-pointer select-none"
     >
+      {/* Sharp SVG Pointed Hexagon Body (304 x 118) */}
+      <svg
+        viewBox="0 0 304 118"
+        className="absolute inset-0 w-full h-full pointer-events-none overflow-visible drop-shadow-[0_10px_18px_rgba(0,0,0,0.45)]"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <polygon
+          points="24,2 280,2 302,59 280,116 24,116 2,59"
+          fill={selected ? '#321D06' : '#241505'}
+          stroke={selected ? '#FCD34D' : '#F59E0B'}
+          strokeWidth={selected ? 2.5 : 1.75}
+          strokeLinejoin="miter"
+          className="transition-colors duration-150 group-hover:fill-[#2D1A06] group-hover:stroke-[#FBBF24]"
+        />
+        <polygon
+          points="27,7 277,7 296,59 277,111 27,111 8,59"
+          fill="none"
+          stroke="#F59E0B"
+          strokeOpacity={0.22}
+          strokeWidth={1}
+        />
+      </svg>
+
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
+        className="!w-3 !h-3 !bg-[#F59E0B] !border-2 !border-[#241505] !rounded-full"
       />
 
-      <div className="flex items-center justify-between gap-2.5 px-3.5 h-full">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#C83214] text-[#F7F3EC] font-bold shrink-0">
-            GOAL
+      <div className="relative z-10 w-full h-full flex flex-col justify-between px-8 py-3">
+        <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-[#FCD34D]">
+          <span className="inline-flex items-center gap-1.5 font-semibold tracking-wider uppercase truncate">
+            <Flag className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
+            <span>Goal · {goal.readableKey}</span>
           </span>
-          <Flag className="w-4 h-4 text-[#E04819] shrink-0" />
-          <span className="font-display text-sm font-bold leading-tight text-[#F7F3EC] truncate">
-            {goal.title}
-          </span>
+          <span className="uppercase text-[#FDE68A]/85 shrink-0">{goal.status}</span>
         </div>
-        <button
-          type="button"
-          aria-label={`Expand details for ${goal.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleExpand();
-          }}
-          className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#522E25] transition-colors shrink-0 cursor-pointer"
-        >
-          <ChevronDown className="w-3.5 h-3.5 pointer-events-none" />
-        </button>
+
+        <h3 className="font-display text-sm font-bold leading-snug text-[#FEF3C7] line-clamp-2 my-auto">
+          {goal.title}
+        </h3>
+
+        <div className="space-y-1">
+          <div className="w-full h-1.5 bg-[#160C02] rounded-full overflow-hidden border border-[#F59E0B]/30">
+            <div
+              className={`h-full transition-all ${isDone ? 'bg-[#34D399]' : 'bg-[#F59E0B]'}`}
+              style={{ width: `${goal.progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[10px] font-mono text-[#FDE68A]/80 tabular-nums">
+            <span>
+              {goal.maxIterations > 0
+                ? `Loop ${goal.currentIteration}/${goal.maxIterations} · ${goal.progress}%`
+                : `Iter ${goal.currentIteration} · ${goal.progress}%`}
+            </span>
+            <span className="inline-flex items-center gap-1 font-semibold text-[#FCD34D]">
+              <span>{goal.tasksCount} tasks</span>
+              <ArrowRight className="w-3 h-3 opacity-70 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          </div>
+        </div>
       </div>
-
-      {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-md border-2 border-[#E04819] bg-[#22100C] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3.5 py-3 bg-[#C83214] text-[#F7F3EC] border-b border-[#8C220E]">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#52170B] text-[#FFB399] font-bold">
-                GOAL
-              </span>
-              <Flag className="w-4 h-4 text-[#FFB399] shrink-0 pointer-events-none" />
-              <span className="font-display text-sm font-bold truncate text-[#F7F3EC]">
-                {goal.title}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                aria-label={
-                  isPinned
-                    ? `Unpin ${goal.title} (auto-minimises on outside click)`
-                    : `Pin ${goal.title} (stays open on outside click)`
-                }
-                aria-pressed={isPinned}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePin();
-                }}
-                className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
-                  isPinned
-                    ? 'bg-[#FFB399] text-[#22100C] border border-[#C83214]'
-                    : 'text-[#E6DDD1] hover:text-[#F7F3EC] hover:bg-[#A82A11] border border-transparent'
-                }`}
-              >
-                <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
-              </button>
-              <button
-                type="button"
-                aria-label={`Minimise ${goal.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleExpand();
-                }}
-                className="nodrag nopan p-1 rounded-xs text-[#E6DDD1] hover:text-[#F7F3EC] hover:bg-[#A82A11] transition-colors cursor-pointer"
-              >
-                <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
-              </button>
-            </div>
-          </div>
-
-          <div className="p-4 space-y-3 text-xs">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#B9AA9D]">
-              <span className="text-[#FFB399]">KEY: {goal.readableKey}</span>
-              <span className="uppercase font-semibold text-[#E6DDD1]">
-                {goal.status}
-              </span>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px] font-mono text-[#B9AA9D]">
-                <span>
-                  {goal.maxIterations > 0
-                    ? `Loop ${goal.currentIteration}/${goal.maxIterations}`
-                    : `Iteration ${goal.currentIteration}`}
-                </span>
-                <span>{goal.progress}%</span>
-              </div>
-              <div className="w-full h-2 bg-[#1A0E0B] rounded-full overflow-hidden border border-[#522E25]">
-                <div
-                  className={`h-full ${
-                    goal.status === 'verified' || goal.status === 'completed'
-                      ? 'bg-[#6CC48E]'
-                      : 'bg-[#C83214]'
-                  }`}
-                  style={{ width: `${goal.progress}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-[#522E25] flex items-center justify-between text-[11px] font-mono text-[#A89688]">
-              <span>
-                Priority {goal.priority.toFixed(2)} · Notoriety {goal.blockerNotoriety}
-              </span>
-              <span className="inline-flex items-center gap-1 text-[#FF7A50] font-semibold">
-                <ChevronRight className="w-3 h-3" />
-                {goal.tasksCount} tasks
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
+        className="!w-3 !h-3 !bg-[#F59E0B] !border-2 !border-[#241505] !rounded-full"
       />
     </div>
   );
 }
 
+/**
+ * TASK NODE — Dog-Ear Notched Engineering Ticket (Deep Cobalt & Sky Cyan)
+ * Single click -> Details Panel.
+ */
 function TaskNode({ data, selected }: NodeProps) {
   const task = data as unknown as TaskGraphNodeData;
   const ctx = task.contextLimit ? formatContextUsage(task.contextLimit) : null;
-  const { isExpanded, isPinned, toggleExpand, togglePin } = useNodeDetail(task.id);
 
   return (
     <div
       data-node-id={task.id}
-      data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-sm border-2 transition-all duration-150 relative overflow-hidden shadow-md ${
-        isExpanded
-          ? 'bg-[#18100E] text-[#F7F3EC] border-[#DF6B3B] ring-2 ring-[#DF6B3B] z-40'
-          : selected
-          ? 'bg-[#160E0C] text-[#F7F3EC] border-[#DF6B3B] ring-2 ring-[#DF6B3B]'
-          : 'bg-[#120B09] text-[#F7F3EC] border-[#3B261E] hover:border-[#DF6B3B]'
-      }`}
+      className="group relative w-full h-full cursor-pointer select-none"
     >
+      {/* Dog-ear Notched Ticket SVG Body (276 x 98) */}
+      <svg
+        viewBox="0 0 276 98"
+        className="absolute inset-0 w-full h-full pointer-events-none overflow-visible drop-shadow-[0_8px_14px_rgba(0,0,0,0.45)]"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <polygon
+          points="2,2 254,2 274,22 274,96 2,96"
+          fill={selected ? '#132642' : '#0B1626'}
+          stroke={selected ? '#7DD3FC' : '#38BDF8'}
+          strokeWidth={selected ? 2.5 : 1.75}
+          strokeLinejoin="miter"
+          className="transition-colors duration-150 group-hover:fill-[#102038] group-hover:stroke-[#7DD3FC]"
+        />
+        {/* Dog-ear fold crease */}
+        <polygon
+          points="254,2 254,22 274,22"
+          fill="#172B47"
+          stroke={selected ? '#7DD3FC' : '#38BDF8'}
+          strokeWidth={1.25}
+          strokeLinejoin="miter"
+        />
+      </svg>
+
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#120B09] !rounded-full"
+        className="!w-2.5 !h-2.5 !bg-[#38BDF8] !border-2 !border-[#0B1626] !rounded-none"
       />
 
-      <div className="flex items-center justify-between gap-2 px-3 h-full">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#2B1D18] text-[#F0946E] font-bold shrink-0">
-            TASK
+      <div className="relative z-10 w-full h-full flex flex-col justify-between px-4 py-2.5 pr-6">
+        <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-[#7DD3FC]">
+          <span className="inline-flex items-center gap-1.5 font-semibold tracking-wider uppercase truncate">
+            <Terminal className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
+            <span>Task · {task.readableKey}</span>
           </span>
-          <Terminal className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />
-          <span className="font-display text-xs font-semibold leading-tight text-[#F7F3EC] truncate">
-            {task.title}
-          </span>
+          <span className="uppercase text-[#BAE6FD]/80 shrink-0">{task.status}</span>
         </div>
-        <button
-          type="button"
-          aria-label={`Expand task details for ${task.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleExpand();
-          }}
-          className="nodrag nopan p-1 rounded-xs text-[#9C8A7C] hover:text-[#F7F3EC] hover:bg-[#2C1D18] transition-colors shrink-0 cursor-pointer"
-        >
-          <ChevronDown className="w-3 h-3 pointer-events-none" />
-        </button>
+
+        <h3 className="font-display text-xs font-semibold leading-snug text-[#F0F9FF] line-clamp-2 my-auto">
+          {task.title}
+        </h3>
+
+        <div className="pt-1 border-t border-[#38BDF8]/20 flex items-center justify-between gap-2 text-[10px] font-mono text-[#BAE6FD]/75 tabular-nums">
+          <span className="truncate">{leaseLabel(task.occupancy.leaseState)}</span>
+          {ctx ? (
+            <span className="text-[#7DD3FC] shrink-0">{ctx.percent}% ctx</span>
+          ) : (
+            <span className="text-[#7DD3FC]/70 truncate shrink-0">{task.taskType}</span>
+          )}
+        </div>
       </div>
-
-      {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border-2 border-[#DF6B3B] bg-[#140D0B] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-[#2B1D18] text-[#F7F3EC] border-b border-[#432C24]">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#42261C] text-[#F0946E] font-bold">
-                TASK
-              </span>
-              <Terminal className="w-3.5 h-3.5 text-[#F0946E] shrink-0 pointer-events-none" />
-              <span className="font-display text-sm font-semibold truncate text-[#F7F3EC]">
-                {task.title}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                type="button"
-                aria-label={
-                  isPinned
-                    ? `Unpin ${task.title} (auto-minimises on outside click)`
-                    : `Pin ${task.title} (stays open on outside click)`
-                }
-                aria-pressed={isPinned}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePin();
-                }}
-                className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
-                  isPinned
-                    ? 'bg-[#DF6B3B] text-[#120B09] border border-[#DF6B3B]'
-                    : 'text-[#A89688] hover:text-[#F7F3EC] hover:bg-[#2C1D18] border border-transparent'
-                }`}
-              >
-                <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
-              </button>
-              <button
-                type="button"
-                aria-label={`Minimise ${task.title}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleExpand();
-                }}
-                className="nodrag nopan p-1 rounded-xs text-[#A89688] hover:text-[#F7F3EC] hover:bg-[#2C1D18] transition-colors cursor-pointer"
-              >
-                <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
-              </button>
-            </div>
-          </div>
-
-          <div className="p-3.5 space-y-2.5 text-xs max-h-[360px] overflow-y-auto">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono">
-              <span className="text-[#F0946E] font-semibold truncate">
-                KEY: {task.readableKey}
-              </span>
-              <span className="text-[#B9AA9D] uppercase shrink-0 px-2 py-0.5 bg-[#241712] rounded-xs">
-                {task.status}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
-              <span className={`px-2 py-0.5 border rounded-xs ${leaseBadgeClass(task.occupancy.leaseState)}`}>
-                {leaseLabel(task.occupancy.leaseState)}
-              </span>
-              <span className="text-[#A89688] truncate">
-                Verif: {task.verificationStatus}
-              </span>
-            </div>
-
-            {task.occupancy.agentDisplayLabel && (
-              <div className="text-[10px] font-mono text-[#DFE4D8] truncate">
-                Holder: {task.occupancy.agentDisplayLabel}
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-[#9C8A7C]">
-                Eval Script
-              </div>
-              <pre className="bg-[#0A0605] border border-[#2B1D18] px-2.5 py-1.5 text-[10px] font-mono text-[#F0946E] whitespace-pre-wrap break-all leading-relaxed">
-                {task.evalScript || 'No evaluation script recorded.'}
-              </pre>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-[#0F0907] border border-[#2B1D18] p-2">
-              <div className="min-w-0">
-                <div className="uppercase tracking-wider text-[#9C8A7C] mb-1">Inputs</div>
-                {task.inputs.length === 0 ? (
-                  <span className="text-[#7C695D]">None</span>
-                ) : (
-                  <ul className="space-y-0.5 text-[#D8CFC2]">
-                    {task.inputs.map((inp) => (
-                      <li key={inp} className="truncate">
-                        {inp}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div className="min-w-0 border-l border-[#2B1D18] pl-2">
-                <div className="uppercase tracking-wider text-[#9C8A7C] mb-1">Outputs</div>
-                {task.outputs.length === 0 ? (
-                  <span className="text-[#7C695D]">None</span>
-                ) : (
-                  <ul className="space-y-0.5 text-[#DFE4D8]">
-                    {task.outputs.map((out) => (
-                      <li key={out} className="truncate">
-                        {out}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-[#9C8A7C]">
-                Tools Available
-              </div>
-              {task.toolsAvailable.length === 0 ? (
-                <div className="font-mono text-[10px] text-[#7C695D]">None specified</div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[#E6DDD1]">
-                  {task.toolsAvailable.map((tool, idx) => (
-                    <React.Fragment key={tool}>
-                      <span className="bg-[#241712] border border-[#3B261E] px-1.5 py-0.5 rounded-xs text-[#F0946E]">
-                        {tool}
-                      </span>
-                      {idx < task.toolsAvailable.length - 1 && (
-                        <span className="text-[#6B5A4E]" aria-hidden="true">
-                          ·
-                        </span>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-2 border-t border-[#2B1D18] space-y-1">
-              <div className="flex items-center justify-between text-[10px] font-mono">
-                <span className="uppercase tracking-wider text-[#9C8A7C]">Context Budget</span>
-                {ctx ? (
-                  <span className="text-[#E6DDD1]">
-                    {ctx.usedLabel} / {ctx.maxLabel} ({ctx.percent}%)
-                  </span>
-                ) : (
-                  <span className="text-[#7C695D]">Not configured</span>
-                )}
-              </div>
-              {ctx && (
-                <div className="w-full h-2 bg-[#0A0605] rounded-full overflow-hidden border border-[#2B1D18]">
-                  <div
-                    className={`h-full ${ctx.percent >= 75 ? 'bg-[#E04819]' : 'bg-[#DF6B3B]'}`}
-                    style={{ width: `${ctx.percent}%` }}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#120B09] !rounded-full"
+        className="!w-2.5 !h-2.5 !bg-[#38BDF8] !border-2 !border-[#0B1626] !rounded-none"
       />
     </div>
   );
@@ -665,10 +321,8 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
   const [error, setError] = useState<string | null>(null);
   const [substrateData, setSubstrateData] = useState<VisionsGoalsSubstrateResponse | null>(null);
 
-  const [expandedVisionIds, setExpandedVisionIds] = useState<string[]>([]);
-  const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([]);
+  const [navScope, setNavScope] = useState<VisionsGoalsScope>({ level: 'root' });
   const [selectedItem, setSelectedItem] = useState<SelectedGraphItem | null>(null);
-  const [isBreadcrumbPinned, setIsBreadcrumbPinned] = useState(false);
 
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
@@ -683,11 +337,6 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
       }
       const json: VisionsGoalsSubstrateResponse = await res.json();
       setSubstrateData(json);
-
-      const initialVisions = json.visions.map((v) => v.id);
-      const initialGoals = json.goals.map((g) => g.id);
-      setExpandedVisionIds(initialVisions);
-      setExpandedGoalIds(initialGoals);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -707,18 +356,12 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
       goals: substrateData.goals,
       tasks: substrateData.tasks,
       edges: substrateData.edges,
-      expandedVisionIds: new Set(expandedVisionIds),
-      expandedGoalIds: new Set(expandedGoalIds),
+      scope: navScope,
     });
-  }, [substrateData, expandedVisionIds, expandedGoalIds]);
+  }, [substrateData, navScope]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
-
-  useEffect(() => {
-    setNodes(initialGraph.nodes);
-    setEdges(initialGraph.edges);
-  }, [initialGraph, setNodes, setEdges]);
 
   const {
     onNodeDragStart,
@@ -726,6 +369,7 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
     onNodeDragStop,
     onNodeMouseEnter,
     onNodeMouseLeave,
+    resetBodies,
   } = useFloatyForceLayout({
     baseNodes: initialGraph.nodes,
     edges,
@@ -734,65 +378,92 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
     amplitude: 4.2,
   });
 
+  useEffect(() => {
+    setNodes(initialGraph.nodes);
+    setEdges(initialGraph.edges);
+    resetBodies(initialGraph.nodes, true);
+    const timer = window.setTimeout(() => {
+      fitView({ padding: 0.22, duration: 220, maxZoom: 1.15 });
+    }, 90);
+    return () => window.clearTimeout(timer);
+  }, [initialGraph, setNodes, setEdges, resetBodies, fitView]);
+
   const clickTimerRef = useRef<number | null>(null);
 
-  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    if (clickTimerRef.current !== null) {
-      window.clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    clickTimerRef.current = window.setTimeout(() => {
-      if (!substrateData) return;
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    };
+  }, []);
+
+  const enterVision = useCallback((visionId: string) => {
+    setSelectedItem(null);
+    setNavScope({ level: 'vision', visionId });
+  }, []);
+
+  const enterGoal = useCallback((goalId: string) => {
+    setSelectedItem(null);
+    setNavScope({ level: 'goal', goalId });
+  }, []);
+
+  const handleNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      clickTimerRef.current = window.setTimeout(() => {
+        clickTimerRef.current = null;
+        if (!substrateData) return;
+        if (node.type === 'visionNode') {
+          const found = substrateData.visions.find((v) => v.id === node.id);
+          if (found) setSelectedItem({ kind: 'vision', data: found });
+        } else if (node.type === 'goalNode') {
+          const found = substrateData.goals.find((g) => g.id === node.id);
+          if (found) setSelectedItem({ kind: 'goal', data: found });
+        } else if (node.type === 'taskNode') {
+          const found = substrateData.tasks.find((t) => t.id === node.id);
+          if (found) setSelectedItem({ kind: 'task', data: found });
+        }
+      }, 200);
+    },
+    [substrateData]
+  );
+
+  const handleNodeDoubleClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
       if (node.type === 'visionNode') {
-        const found = substrateData.visions.find((v) => v.id === node.id);
-        if (found) setSelectedItem({ kind: 'vision', data: found });
+        enterVision(node.id);
       } else if (node.type === 'goalNode') {
-        const found = substrateData.goals.find((g) => g.id === node.id);
-        if (found) setSelectedItem({ kind: 'goal', data: found });
-      } else if (node.type === 'taskNode') {
+        enterGoal(node.id);
+      } else if (node.type === 'taskNode' && substrateData) {
         const found = substrateData.tasks.find((t) => t.id === node.id);
         if (found) setSelectedItem({ kind: 'task', data: found });
       }
-    }, 210);
-  }, [substrateData]);
+    },
+    [enterVision, enterGoal, substrateData]
+  );
 
-  const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
-    if (clickTimerRef.current !== null) {
-      window.clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    if (node.type === 'visionNode') {
-      setExpandedVisionIds((prev) =>
-        prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
-      );
-    } else if (node.type === 'goalNode') {
-      setExpandedGoalIds((prev) =>
-        prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
-      );
-    }
-  }, []);
+  // Derive active hierarchy strictly from current nested navigation scope
+  const scopedGoal = useMemo(() => {
+    if (navScope.level !== 'goal' || !substrateData) return null;
+    return substrateData.goals.find((g) => g.id === navScope.goalId) || null;
+  }, [navScope, substrateData]);
 
-  // Derive active items for breadcrumb navigation
-  const activeVision = useMemo(() => {
-    if (selectedItem?.kind === 'vision') return selectedItem.data;
-    if (selectedItem?.kind === 'goal' && substrateData) {
-      return substrateData.visions.find((v) => v.id === selectedItem.data.visionId) || null;
+  const scopedVision = useMemo(() => {
+    if (!substrateData) return null;
+    if (navScope.level === 'vision') {
+      return substrateData.visions.find((v) => v.id === navScope.visionId) || null;
+    }
+    if (navScope.level === 'goal' && scopedGoal?.visionId) {
+      return substrateData.visions.find((v) => v.id === scopedGoal.visionId) || null;
     }
     return null;
-  }, [selectedItem, substrateData]);
-
-  const activeGoal = useMemo(() => {
-    if (selectedItem?.kind === 'goal') return selectedItem.data;
-    if (selectedItem?.kind === 'task' && substrateData) {
-      return substrateData.goals.find((g) => g.id === selectedItem.data.goalId) || null;
-    }
-    return null;
-  }, [selectedItem, substrateData]);
-
-  const activeTask = useMemo(() => {
-    if (selectedItem?.kind === 'task') return selectedItem.data;
-    return null;
-  }, [selectedItem]);
+  }, [navScope, scopedGoal, substrateData]);
 
   const breadcrumbs = useMemo(() => {
     const crumbs: Array<{
@@ -800,70 +471,69 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
       label: string;
       icon?: React.ComponentType<{ className?: string }>;
       onClick?: () => void;
-      isLeaf: boolean;
     }> = [
       {
         id: 'root',
         label: 'Visions & Goals',
         icon: Target,
-        isLeaf: !activeVision,
         onClick: () => {
           setSelectedItem(null);
-          fitView({ padding: 0.18, duration: 220 });
+          setNavScope({ level: 'root' });
         },
       },
     ];
 
-    if (activeVision) {
+    if (scopedVision) {
       crumbs.push({
-        id: activeVision.id,
-        label: activeVision.title,
-        isLeaf: !activeGoal,
+        id: scopedVision.id,
+        label: scopedVision.title,
+        icon: Compass,
         onClick: () => {
-          setSelectedItem({ kind: 'vision', data: activeVision });
-          fitView({ nodes: [{ id: activeVision.id }], duration: 220, maxZoom: 1.1 });
+          setSelectedItem(null);
+          setNavScope({ level: 'vision', visionId: scopedVision.id });
         },
       });
     }
 
-    if (activeGoal) {
+    if (scopedGoal) {
       crumbs.push({
-        id: activeGoal.id,
-        label: activeGoal.title,
-        isLeaf: !activeTask,
-        onClick: () => {
-          setSelectedItem({ kind: 'goal', data: activeGoal });
-          fitView({ nodes: [{ id: activeGoal.id }], duration: 220, maxZoom: 1.2 });
-        },
-      });
-    }
-
-    if (activeTask) {
-      crumbs.push({
-        id: activeTask.id,
-        label: activeTask.title,
-        isLeaf: true,
-        onClick: () => {
-          setSelectedItem({ kind: 'task', data: activeTask });
-        },
+        id: scopedGoal.id,
+        label: scopedGoal.title,
+        icon: Flag,
       });
     }
 
     return crumbs;
-  }, [activeVision, activeGoal, activeTask, fitView]);
+  }, [scopedVision, scopedGoal]);
 
   const handleBack = useCallback(() => {
-    if (activeTask && activeGoal) {
-      setSelectedItem({ kind: 'goal', data: activeGoal });
-      fitView({ nodes: [{ id: activeGoal.id }], duration: 220, maxZoom: 1.2 });
-    } else if (activeGoal && activeVision) {
-      setSelectedItem({ kind: 'vision', data: activeVision });
-      fitView({ nodes: [{ id: activeVision.id }], duration: 220, maxZoom: 1.1 });
-    } else if (activeVision) {
-      setSelectedItem(null);
-      fitView({ padding: 0.18, duration: 220 });
+    setSelectedItem(null);
+    if (navScope.level === 'goal') {
+      if (scopedVision) {
+        setNavScope({ level: 'vision', visionId: scopedVision.id });
+      } else {
+        setNavScope({ level: 'root' });
+      }
+    } else if (navScope.level === 'vision') {
+      setNavScope({ level: 'root' });
     }
-  }, [activeTask, activeGoal, activeVision, fitView]);
+  }, [navScope.level, scopedVision]);
+
+  const handleInspectCurrentScope = useCallback(() => {
+    if (navScope.level === 'goal' && scopedGoal) {
+      setSelectedItem({ kind: 'goal', data: scopedGoal });
+    } else if (navScope.level === 'vision' && scopedVision) {
+      setSelectedItem({ kind: 'vision', data: scopedVision });
+    }
+  }, [navScope.level, scopedGoal, scopedVision]);
+
+  const handleReset = useCallback(() => {
+    setSelectedItem(null);
+    resetBodies(initialGraph.nodes, true);
+    setNodes(initialGraph.nodes);
+    setEdges(initialGraph.edges);
+    window.setTimeout(() => fitView({ padding: 0.22, duration: 220, maxZoom: 1.15 }), 60);
+  }, [initialGraph, resetBodies, setNodes, setEdges, fitView]);
 
   if (loading && !substrateData) {
     return (
@@ -893,21 +563,22 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
 
   return (
     <div className="flex flex-col w-full h-[calc(100vh-112px)] min-h-[680px] border border-[#3B2A23] bg-[#140D0B] overflow-hidden">
-      {/* Dedicated Top Canvas Control Bar: Breadcrumbs on Left, Zoom/Controls on Right */}
+      {/* Top Canvas Bar: Nested Breadcrumbs on Left, Clean Controls on Right */}
       <div className="h-14 shrink-0 px-4 border-b border-[#382821] bg-[#18100D] flex items-center justify-between gap-4 z-20">
         <nav
           aria-label="Visions nesting hierarchy"
-          className="flex items-center gap-1.5 min-w-0 max-w-[70%] overflow-x-auto py-1"
+          className="flex items-center gap-1.5 min-w-0 max-w-[68%] overflow-x-auto py-1"
         >
-          {breadcrumbs.length > 1 && (
+          {navScope.level !== 'root' && (
             <button
               type="button"
               onClick={handleBack}
               aria-label="Go back one nesting level"
-              title="Go back"
-              className="p-1.5 rounded-xs border border-[#3F2E27] bg-[#1F1512] text-[#D8CFC2] hover:text-[#F7F3EC] hover:border-[#DF6B3B] transition-colors cursor-pointer mr-0.5 shrink-0"
+              title="Back"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-xs border border-[#3F2E27] bg-[#1F1512] text-[#D8CFC2] hover:text-[#F7F3EC] hover:border-[#DF6B3B] transition-colors cursor-pointer mr-1 shrink-0 font-mono text-xs"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Back</span>
             </button>
           )}
 
@@ -923,7 +594,7 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
                   {isLast ? (
                     <span
                       aria-current="location"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-[#241814] text-[#F7F3EC] border border-[#594238] font-semibold truncate max-w-[240px]"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-[#241814] text-[#F7F3EC] border border-[#594238] font-semibold truncate max-w-[260px]"
                     >
                       {Icon && <Icon className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />}
                       <span className="truncate">{crumb.label}</span>
@@ -943,59 +614,40 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
             })}
           </ol>
 
-          {breadcrumbs.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setIsBreadcrumbPinned((p) => !p)}
-              aria-label={isBreadcrumbPinned ? 'Unpin breadcrumb view' : 'Pin breadcrumb view'}
-              title={
-                isBreadcrumbPinned
-                  ? 'Unpin path (auto-clears on background click)'
-                  : 'Pin path (stays focused)'
+          {navScope.level !== 'root' && (
+            <IconButton
+              label={
+                navScope.level === 'goal'
+                  ? 'View current Goal details'
+                  : 'View current Vision details'
               }
-              aria-pressed={isBreadcrumbPinned}
-              className={`p-1.5 rounded-xs border transition-colors cursor-pointer ml-1 shrink-0 ${
-                isBreadcrumbPinned
-                  ? 'bg-[#DF6B3B] text-[#F7F3EC] border-[#E04819]'
-                  : 'border-transparent text-[#8C7263] hover:text-[#F7F3EC] hover:bg-[#2C1E19]'
-              }`}
+              onClick={handleInspectCurrentScope}
+              className="ml-1 shrink-0"
             >
-              <Pin className={`w-3.5 h-3.5 ${isBreadcrumbPinned ? 'fill-current' : ''}`} />
-            </button>
+              <Info className="w-3.5 h-3.5" />
+            </IconButton>
           )}
         </nav>
 
-        {/* Right: Zoom and Other Controls */}
+        {/* Right: Interaction Legend + Viewport Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <span className="hidden lg:inline-block font-mono text-[11px] text-[#8C7263] mr-2 whitespace-nowrap">
+            Click: details · Double-click: open inside
+          </span>
           <IconButton label="Zoom In" onClick={() => zoomIn({ duration: 150 })}>
             <ZoomIn className="w-4 h-4" />
           </IconButton>
           <IconButton label="Zoom Out" onClick={() => zoomOut({ duration: 150 })}>
             <ZoomOut className="w-4 h-4" />
           </IconButton>
-          <IconButton label="Fit Visions & Goals" onClick={() => fitView({ padding: 0.18, duration: 220 })}>
+          <IconButton
+            label="Fit View"
+            onClick={() => fitView({ padding: 0.22, duration: 220, maxZoom: 1.15 })}
+          >
             <Maximize2 className="w-4 h-4" />
           </IconButton>
           <div className="w-px h-6 bg-[#3D2B24] mx-1" />
-          <IconButton
-            label="Expand All Visions & Goals"
-            onClick={() => {
-              if (!substrateData) return;
-              setExpandedVisionIds(substrateData.visions.map((v) => v.id));
-              setExpandedGoalIds(substrateData.goals.map((g) => g.id));
-            }}
-          >
-            <ChevronDown className="w-4 h-4" />
-          </IconButton>
-          <IconButton
-            label="Reset & Collapse All"
-            onClick={() => {
-              setExpandedVisionIds([]);
-              setExpandedGoalIds([]);
-              setSelectedItem(null);
-              fitView({ padding: 0.18, duration: 220 });
-            }}
-          >
+          <IconButton label="Reset Node Positions" onClick={handleReset}>
             <RotateCcw className="w-4 h-4" />
           </IconButton>
         </div>
@@ -1018,13 +670,9 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
             onNodeMouseEnter={onNodeMouseEnter}
             onNodeMouseLeave={onNodeMouseLeave}
             onNodeClick={handleNodeClick}
-            onPaneClick={() => {
-              if (!isBreadcrumbPinned) {
-                setSelectedItem(null);
-              }
-            }}
+            onPaneClick={() => setSelectedItem(null)}
             fitView
-            fitViewOptions={{ padding: 0.18 }}
+            fitViewOptions={{ padding: 0.22 }}
             minZoom={0.16}
             maxZoom={1.6}
           >
@@ -1038,17 +686,57 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
               style={{ width: 136, height: 84 }}
               nodeColor={(n) =>
                 n.type === 'visionNode'
-                  ? '#2C4A35'
+                  ? '#10B981'
                   : n.type === 'goalNode'
-                  ? '#C83214'
-                  : '#DF6B3B'
+                  ? '#F59E0B'
+                  : '#38BDF8'
               }
               maskColor="rgba(20, 13, 11, 0.72)"
             />
           </ReactFlow>
         </div>
 
-        {/* Sidebar Detail Panel */}
+        {/* Empty Nested Level State */}
+        {!loading && nodes.length === 0 && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="pointer-events-auto border border-[#433129] bg-[#1D1411] px-6 py-5 rounded-sm text-center space-y-3 max-w-md shadow-2xl">
+              <div className="font-display text-base font-semibold text-[#F7F3EC]">
+                {navScope.level === 'vision'
+                  ? 'No Goals Inside This Vision'
+                  : navScope.level === 'goal'
+                  ? 'No Tasks Inside This Goal'
+                  : 'No Visions, Goals, or Tasks Recorded'}
+              </div>
+              <p className="text-xs text-[#B9AA9D]">
+                {navScope.level === 'vision'
+                  ? 'This vision does not have any attached goals in the substrate yet.'
+                  : navScope.level === 'goal'
+                  ? 'This goal does not have any child tasks in the substrate yet.'
+                  : 'The connected Supabase ledger returned zero active visions, goals, or tasks.'}
+              </p>
+              {navScope.level !== 'root' && (
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleBack}
+                    className="px-3 py-1.5 bg-[#2A1D18] hover:bg-[#3A2821] border border-[#594238] text-[#F7F3EC] font-mono text-xs rounded-xs cursor-pointer"
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleInspectCurrentScope}
+                    className="px-3 py-1.5 bg-[#C83214] hover:bg-[#E04819] text-[#F7F3EC] font-mono text-xs rounded-xs cursor-pointer"
+                  >
+                    View Details
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sidebar Detail Panel (Single Click) */}
         {selectedItem && (
           <aside
             aria-label="Vision, Goal or Task details"
@@ -1056,7 +744,7 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
           >
             <div className="px-5 py-4 border-b border-[#C5CBBF] flex items-start justify-between gap-3 bg-[#E5EAE0]">
               <div className="min-w-0">
-                <div className="font-mono text-[11px] text-[#6B5A4E] truncate uppercase tracking-wider">
+                <div className="font-mono text-[11px] text-[#5D5046] truncate uppercase tracking-wider">
                   {selectedItem.kind === 'vision'
                     ? `Vision · ${selectedItem.data.readableKey}`
                     : selectedItem.kind === 'goal'
@@ -1079,8 +767,10 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
 
             {selectedItem.kind === 'vision' && (
               <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
-                  <span>Status: <strong className="uppercase text-[#2C4A35]">{selectedItem.data.status}</strong></span>
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between tabular-nums">
+                  <span>
+                    Status: <strong className="uppercase text-[#0F5132]">{selectedItem.data.status.replace('_', ' ')}</strong>
+                  </span>
                   <span>{selectedItem.data.goalsCount} Goals</span>
                 </div>
                 <div>
@@ -1096,19 +786,35 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
                     Target Alignment
                   </h3>
                   <div className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs font-mono text-xs text-[#18120F]">
-                    <div>Type: <strong className="text-[#2C4A35]">{selectedItem.data.targetType}</strong></div>
+                    <div>
+                      Type: <strong className="text-[#0F5132]">{selectedItem.data.targetType}</strong>
+                    </div>
                     {selectedItem.data.targetLabel && (
                       <div className="mt-1">Label: {selectedItem.data.targetLabel}</div>
                     )}
                   </div>
                 </div>
+                {!(navScope.level === 'vision' && navScope.visionId === selectedItem.data.id) && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => enterVision(selectedItem.data.id)}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F5132] hover:bg-[#146C43] text-[#ECFDF5] font-mono text-xs font-semibold rounded-xs transition-colors cursor-pointer"
+                    >
+                      <span>Open Goals Inside Vision</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {selectedItem.kind === 'goal' && (
               <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
-                  <span>Status: <strong className="uppercase text-[#C83214]">{selectedItem.data.status}</strong></span>
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between tabular-nums">
+                  <span>
+                    Status: <strong className="uppercase text-[#B45309]">{selectedItem.data.status}</strong>
+                  </span>
                   <span>Progress: {selectedItem.data.progress}%</span>
                 </div>
                 <div>
@@ -1116,44 +822,210 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
                     Goal Directive
                   </h3>
                   <p className="text-sm text-[#2C221D] leading-relaxed">
-                    {selectedItem.data.title}
+                    {selectedItem.data.description || selectedItem.data.title}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 font-mono text-xs bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs">
-                  <div>
-                    <span className="text-[#6B5A4E]">Priority:</span> <strong className="text-[#18120F]">{selectedItem.data.priority.toFixed(2)}</strong>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between font-mono text-[11px] text-[#5D5046] tabular-nums">
+                    <span>
+                      {selectedItem.data.maxIterations > 0
+                        ? `Loop ${selectedItem.data.currentIteration} / ${selectedItem.data.maxIterations}`
+                        : `Iteration ${selectedItem.data.currentIteration}`}
+                    </span>
+                    <span>{selectedItem.data.tasksCount} Tasks</span>
                   </div>
-                  <div>
-                    <span className="text-[#6B5A4E]">Notoriety:</span> <strong className="text-[#18120F]">{selectedItem.data.blockerNotoriety}</strong>
+                  <div className="w-full h-2 bg-[#C5CBBF] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#B45309]"
+                      style={{ width: `${selectedItem.data.progress}%` }}
+                    />
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-2 font-mono text-xs bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs tabular-nums">
+                  <div>
+                    <span className="text-[#6B5A4E]">Priority:</span>{' '}
+                    <strong className="text-[#18120F]">{selectedItem.data.priority.toFixed(2)}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[#6B5A4E]">Notoriety:</span>{' '}
+                    <strong className="text-[#18120F]">{selectedItem.data.blockerNotoriety}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[#6B5A4E]">Type:</span>{' '}
+                    <strong className="text-[#18120F]">{selectedItem.data.goalType}</strong>
+                  </div>
+                  {selectedItem.data.systemKey && (
+                    <div className="truncate">
+                      <span className="text-[#6B5A4E]">System:</span>{' '}
+                      <strong className="text-[#18120F]">{selectedItem.data.systemKey}</strong>
+                    </div>
+                  )}
+                </div>
+                {!(navScope.level === 'goal' && navScope.goalId === selectedItem.data.id) && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => enterGoal(selectedItem.data.id)}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#B45309] hover:bg-[#92400E] text-[#FEF3C7] font-mono text-xs font-semibold rounded-xs transition-colors cursor-pointer"
+                    >
+                      <span>Open Tasks Inside Goal</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {selectedItem.kind === 'task' && (
               <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
-                  <span>Status: <strong className="uppercase text-[#DF6B3B]">{selectedItem.data.status}</strong></span>
-                  <span className={`px-2 py-0.5 border rounded-xs font-mono text-[10px] ${leaseBadgeClass(selectedItem.data.occupancy.leaseState)}`}>
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between gap-2">
+                  <span>
+                    Status: <strong className="uppercase text-[#0369A1]">{selectedItem.data.status}</strong>
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 border rounded-xs font-mono text-[10px] ${leaseBadgeClass(
+                      selectedItem.data.occupancy.leaseState
+                    )}`}
+                  >
                     {leaseLabel(selectedItem.data.occupancy.leaseState)}
                   </span>
                 </div>
+
+                <div className="flex items-center justify-between font-mono text-[11px] text-[#5D5046]">
+                  <span>Type: <strong className="text-[#18120F]">{selectedItem.data.taskType}</strong></span>
+                  <span>Verification: <strong className="text-[#18120F]">{selectedItem.data.verificationStatus}</strong></span>
+                </div>
+
+                {selectedItem.data.occupancy.agentDisplayLabel && (
+                  <div className="bg-[#D2D8CA] border border-[#B6BEAE] px-3 py-2 rounded-xs font-mono text-[11px] text-[#18120F] truncate">
+                    Holder: {selectedItem.data.occupancy.agentDisplayLabel}
+                  </div>
+                )}
+
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
                     Task Specification
                   </h3>
                   <p className="text-sm text-[#2C221D] leading-relaxed">
-                    {selectedItem.data.title}
+                    {selectedItem.data.description || selectedItem.data.title}
                   </p>
                 </div>
+
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
                     Evaluation Script
                   </h3>
-                  <pre className="bg-[#18120F] text-[#F2EBE1] p-3 font-mono text-[11px] rounded-xs whitespace-pre-wrap break-all">
+                  <pre className="bg-[#18120F] text-[#7DD3FC] p-3 font-mono text-[11px] rounded-xs whitespace-pre-wrap break-all">
                     {selectedItem.data.evalScript || 'No evaluation script recorded.'}
                   </pre>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs">
+                  <div className="min-w-0">
+                    <div className="uppercase tracking-wider text-[#6B5A4E] text-[10px] mb-1">
+                      Inputs
+                    </div>
+                    {selectedItem.data.inputs.length === 0 ? (
+                      <span className="text-[#6B5A4E]">None</span>
+                    ) : (
+                      <ul className="space-y-0.5 text-[#18120F]">
+                        {selectedItem.data.inputs.map((inp) => (
+                          <li key={inp} className="truncate">
+                            {inp}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="min-w-0 border-l border-[#B6BEAE] pl-2">
+                    <div className="uppercase tracking-wider text-[#6B5A4E] text-[10px] mb-1">
+                      Outputs
+                    </div>
+                    {selectedItem.data.outputs.length === 0 ? (
+                      <span className="text-[#6B5A4E]">None</span>
+                    ) : (
+                      <ul className="space-y-0.5 text-[#18120F]">
+                        {selectedItem.data.outputs.map((out) => (
+                          <li key={out} className="truncate">
+                            {out}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Tools Available
+                  </h3>
+                  {selectedItem.data.toolsAvailable.length === 0 ? (
+                    <p className="font-mono text-[11px] text-[#6B5A4E]">None specified</p>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-[#18120F]">
+                      {selectedItem.data.toolsAvailable.map((tool, idx) => (
+                        <React.Fragment key={tool}>
+                          <span>{tool}</span>
+                          {idx < selectedItem.data.toolsAvailable.length - 1 && (
+                            <span className="text-[#6B5A4E]" aria-hidden="true">
+                              ·
+                            </span>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {selectedItem.data.contextLimit && (
+                  <div className="pt-2 border-t border-[#C5CBBF] space-y-1.5">
+                    {(() => {
+                      const ctx = formatContextUsage(selectedItem.data.contextLimit);
+                      return (
+                        <>
+                          <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                            <span className="uppercase tracking-wider text-[#6B5A4E]">
+                              Context Budget
+                            </span>
+                            <span className="text-[#18120F] font-semibold">
+                              {ctx.usedLabel} / {ctx.maxLabel} ({ctx.percent}%)
+                            </span>
+                          </div>
+                          <div className="w-full h-2 bg-[#C5CBBF] rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                ctx.percent >= 75 ? 'bg-[#C83214]' : 'bg-[#0369A1]'
+                              }`}
+                              style={{ width: `${ctx.percent}%` }}
+                            />
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {selectedItem.data.checkpoints.length > 0 && (
+                  <div className="pt-2 border-t border-[#C5CBBF] space-y-2">
+                    <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E]">
+                      Checkpoints ({selectedItem.data.checkpoints.length})
+                    </h3>
+                    <div className="space-y-1.5">
+                      {selectedItem.data.checkpoints.map((cp) => (
+                        <div
+                          key={cp.parameterId}
+                          className="bg-[#D2D8CA] border border-[#B6BEAE] p-2 rounded-xs font-mono text-[11px]"
+                        >
+                          <div className="flex items-center justify-between text-[10px] text-[#5D5046]">
+                            <span>{cp.predicateKey || cp.parameterId}</span>
+                            <span className="uppercase font-semibold">{cp.status}</span>
+                          </div>
+                          <div className="text-[#18120F] mt-0.5">{cp.objective}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </aside>
@@ -1166,9 +1038,7 @@ function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGo
 export function VisionsGoalsGraphView(props: VisionsGoalsGraphViewProps) {
   return (
     <ReactFlowProvider>
-      <NodeDetailProvider>
-        <VisionsGoalsGraphCanvas {...props} />
-      </NodeDetailProvider>
+      <VisionsGoalsGraphCanvas {...props} />
     </ReactFlowProvider>
   );
 }

@@ -267,101 +267,93 @@ const FIXTURE_SKILLS: SkillRecord[] = [
   },
 ];
 
-test('buildSystemsGraph handles empty, collapsed, wormhole-filtered, and expanded states', () => {
+test('buildSystemsGraph handles empty, root, wormhole-filtered, and nested focused system views', () => {
   const empty = buildSystemsGraph({
     systems: [],
     edges: [],
     showWormholes: true,
-    expandedSystemIds: [],
+    focusedSystemId: null,
   });
   assert.equal(empty.nodes.length, 0);
   assert.equal(empty.edges.length, 0);
 
-  const collapsed = buildSystemsGraph({
+  const root = buildSystemsGraph({
     systems: FIXTURE_SYSTEMS,
     edges: FIXTURE_SYSTEM_EDGES,
     showWormholes: true,
-    expandedSystemIds: [],
+    focusedSystemId: null,
   });
-  assert.equal(collapsed.nodes.length, 2);
-  assert.ok(collapsed.nodes.every((n) => n.type === 'systemNode'));
-  assert.equal(collapsed.edges.length, 2);
+  assert.equal(root.nodes.length, 2);
+  assert.ok(root.nodes.every((n) => n.type === 'systemNode'));
+  assert.equal(root.edges.length, 2);
 
   const withoutWormholes = buildSystemsGraph({
     systems: FIXTURE_SYSTEMS,
     edges: FIXTURE_SYSTEM_EDGES,
     showWormholes: false,
-    expandedSystemIds: [],
+    focusedSystemId: null,
   });
   assert.equal(withoutWormholes.edges.length, 1);
 
-  const expanded = buildSystemsGraph({
+  const insideSys1 = buildSystemsGraph({
     systems: FIXTURE_SYSTEMS,
     edges: FIXTURE_SYSTEM_EDGES,
     showWormholes: true,
-    expandedSystemIds: ['sys-1', 'sys-2'],
+    focusedSystemId: 'sys-1',
   });
-  const subNodes = expanded.nodes.filter((n) => n.type === 'subsystemNode');
-  assert.equal(subNodes.length, 3);
-  assert.ok(subNodes.every((n) => n.parentId === 'sys-1' || n.parentId === 'sys-2'));
-
-  const sys1Idx = expanded.nodes.findIndex((n) => n.id === 'sys-1');
-  const firstChildIdx = expanded.nodes.findIndex((n) => n.parentId === 'sys-1');
-  assert.ok(sys1Idx >= 0 && firstChildIdx > sys1Idx);
+  assert.equal(insideSys1.nodes.length, 2);
+  assert.ok(insideSys1.nodes.every((n) => n.type === 'subsystemNode'));
+  assert.equal(insideSys1.edges.length, 0);
 });
 
-test('buildVisionsGoalsGraph renders standalone goals immediately and nests linked goals/tasks on expansion', () => {
+test('buildVisionsGoalsGraph handles root, vision drill-down, and goal drill-down nested views', () => {
   const root = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
     goals: FIXTURE_GOALS,
     tasks: FIXTURE_TASKS,
     edges: FIXTURE_VG_EDGES,
-    expandedVisionIds: [],
-    expandedGoalIds: [],
+    scope: { level: 'root' },
   });
-  // Two collapsed visions + one standalone goal
+  // Two visions + one standalone goal at root
   assert.equal(root.nodes.filter((n) => n.type === 'visionNode').length, 2);
   assert.equal(root.nodes.filter((n) => n.type === 'goalNode').length, 1);
   assert.equal(root.nodes.filter((n) => n.type === 'taskNode').length, 0);
 
-  const withVision1 = buildVisionsGoalsGraph({
+  const insideVision1 = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
     goals: FIXTURE_GOALS,
     tasks: FIXTURE_TASKS,
     edges: FIXTURE_VG_EDGES,
-    expandedVisionIds: ['vision-1'],
-    expandedGoalIds: [],
+    scope: { level: 'vision', visionId: 'vision-1' },
   });
-  assert.equal(withVision1.nodes.filter((n) => n.type === 'goalNode').length, 2);
-  assert.equal(withVision1.edges.some((e) => e.id === 'gd-1'), true);
+  assert.equal(insideVision1.nodes.length, 1);
+  assert.equal(insideVision1.nodes[0].id, 'goal-1');
+  assert.equal(insideVision1.nodes[0].type, 'goalNode');
 
-  const v1 = withVision1.nodes.find((n) => n.id === 'vision-1')!;
-  const v2 = withVision1.nodes.find((n) => n.id === 'vision-2')!;
-  const v1Width = Number(v1.style?.width ?? 0);
-  assert.ok(v2.position.x > v1.position.x + v1Width);
-
-  const withGoal1 = buildVisionsGoalsGraph({
+  const insideGoal1 = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
     goals: FIXTURE_GOALS,
     tasks: FIXTURE_TASKS,
     edges: FIXTURE_VG_EDGES,
-    expandedVisionIds: ['vision-1'],
-    expandedGoalIds: ['goal-1'],
+    scope: { level: 'goal', goalId: 'goal-1' },
   });
-  const taskNodes = withGoal1.nodes.filter((n) => n.type === 'taskNode');
+  const taskNodes = insideGoal1.nodes.filter((n) => n.type === 'taskNode');
   assert.equal(taskNodes.length, 2);
-  assert.ok(taskNodes.every((n) => n.parentId === 'goal-1' && n.extent === 'parent'));
-  assert.equal(withGoal1.edges.some((e) => e.id === 'td-1'), true);
+  assert.equal(insideGoal1.edges.some((e) => e.id === 'td-1'), true);
+
+  // Task 1 -> Task 2 layered left-to-right
+  const t1 = taskNodes.find((n) => n.id === 'task-1')!;
+  const t2 = taskNodes.find((n) => n.id === 'task-2')!;
+  assert.ok(t2.position.x > t1.position.x);
 });
 
-test('stepForceSimulation produces bounded floaty drift and clamps nested child nodes', () => {
+test('stepForceSimulation produces bounded floaty drift for graph nodes', () => {
   const graph = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
     goals: FIXTURE_GOALS,
     tasks: FIXTURE_TASKS,
     edges: FIXTURE_VG_EDGES,
-    expandedVisionIds: ['vision-1'],
-    expandedGoalIds: ['goal-1'],
+    scope: { level: 'root' },
   });
   const bodies = createForceBodies(graph.nodes);
 
@@ -376,12 +368,6 @@ test('stepForceSimulation produces bounded floaty drift and clamps nested child 
   const v1Orig = graph.nodes.find((n) => n.id === 'vision-1')!.position;
   const dist = Math.hypot(v1Pos.x - v1Orig.x, v1Pos.y - v1Orig.y);
   assert.ok(dist > 0 && dist < 20);
-
-  const g1 = graph.nodes.find((n) => n.id === 'goal-1')!;
-  const t1 = graph.nodes.find((n) => n.id === 'task-1')!;
-  const t1Pos = next.get('task-1')!;
-  assert.ok(t1Pos.x >= 16);
-  assert.ok(t1Pos.x + Number(t1.style?.width) <= Number(g1.style?.width) - 10);
 });
 
 test('formatContextUsage calculates clamped percentage and labels', () => {
@@ -406,7 +392,7 @@ test('setForceBodyAnchor and applyUserAnchorsToNodes preserve moved node coordin
     systems: FIXTURE_SYSTEMS,
     edges: FIXTURE_SYSTEM_EDGES,
     showWormholes: true,
-    expandedSystemIds: [],
+    focusedSystemId: null,
   });
   const bodies = createForceBodies(graph.nodes);
   const placed = setForceBodyAnchor(bodies, 'sys-1', 640, 360);
@@ -419,8 +405,8 @@ test('setForceBodyAnchor and applyUserAnchorsToNodes preserve moved node coordin
       {
         x: 710,
         y: 440,
-        width: Number(sys1.style?.width ?? 310),
-        height: Number(sys1.style?.height ?? 56),
+        width: Number(sys1.style?.width ?? 300),
+        height: Number(sys1.style?.height ?? 124),
         parentId: sys1.parentId,
       },
     ],

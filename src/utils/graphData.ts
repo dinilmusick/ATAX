@@ -22,15 +22,18 @@ export function formatContextUsage(limit: TaskContextLimit): {
   return { percent, usedLabel, maxLabel };
 }
 
+export const SYSTEM_NODE_SIZE = { width: 300, height: 124 };
+export const SUBSYSTEM_NODE_SIZE = { width: 268, height: 90 };
+export const VISION_NODE_SIZE = { width: 310, height: 140 };
+export const GOAL_NODE_SIZE = { width: 304, height: 118 };
+export const TASK_NODE_SIZE = { width: 276, height: 98 };
+
 export interface SystemsGraphBuildOptions {
   systems: SubstrateSystem[];
   edges: SubstrateSystemEdge[];
   showWormholes: boolean;
-  expandedSystemIds?: string[] | Set<string>;
+  focusedSystemId?: string | null;
 }
-
-const SYSTEM_COLLAPSED_SIZE = { width: 310, height: 56 };
-const SUBSYSTEM_SIZE = { width: 280, height: 50 };
 
 export function buildSystemsGraph(
   options: SystemsGraphBuildOptions
@@ -38,83 +41,48 @@ export function buildSystemsGraph(
   nodes: Node[];
   edges: Edge[];
 } {
-  const { systems, edges: rawEdges, showWormholes } = options;
-  const expandedSet = new Set<string>(options.expandedSystemIds ?? []);
+  const { systems, edges: rawEdges, showWormholes, focusedSystemId = null } = options;
 
   if (systems.length === 0) {
     return { nodes: [], edges: [] };
   }
 
+  // Nested view: inside a single System -> show its Subsystems cleanly
+  if (focusedSystemId) {
+    const focused = systems.find((s) => s.id === focusedSystemId);
+    if (!focused || focused.subsystems.length === 0) {
+      return { nodes: [], edges: [] };
+    }
+
+    const subs = focused.subsystems;
+    const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(subs.length * 1.25))));
+    const colGap = 80;
+    const rowGap = 60;
+
+    const nodes: Node[] = subs.map((sub, idx) => {
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      return {
+        id: sub.id,
+        type: 'subsystemNode',
+        position: {
+          x: 24 + c * (SUBSYSTEM_NODE_SIZE.width + colGap),
+          y: 24 + r * (SUBSYSTEM_NODE_SIZE.height + rowGap),
+        },
+        width: SUBSYSTEM_NODE_SIZE.width,
+        height: SUBSYSTEM_NODE_SIZE.height,
+        style: { width: SUBSYSTEM_NODE_SIZE.width, height: SUBSYSTEM_NODE_SIZE.height },
+        data: { ...sub, systemName: focused.name },
+      };
+    });
+
+    return { nodes, edges: [] };
+  }
+
+  // Root view: Systems topology
   const cols = Math.min(3, Math.max(1, systems.length));
-  const rowsCount = Math.ceil(systems.length / cols);
-
-  const sysDims = new Map<
-    string,
-    { width: number; height: number; expanded: boolean; subCols: number }
-  >();
-  const subPadSide = 20;
-  const subPadTop = 66;
-  const subPadBottom = 16;
-  const subGapX = 16;
-  const subGapY = 12;
-
-  for (const sys of systems) {
-    const expanded = expandedSet.has(sys.id) && sys.subsystems.length > 0;
-    if (!expanded) {
-      sysDims.set(sys.id, { ...SYSTEM_COLLAPSED_SIZE, expanded: false, subCols: 1 });
-    } else {
-      const subCols = sys.subsystems.length > 12 ? 3 : sys.subsystems.length > 4 ? 2 : 1;
-      const subRows = Math.ceil(sys.subsystems.length / subCols);
-      const width = Math.max(
-        328,
-        subPadSide * 2 + subCols * SUBSYSTEM_SIZE.width + Math.max(0, subCols - 1) * subGapX
-      );
-      const height =
-        subPadTop +
-        subRows * SUBSYSTEM_SIZE.height +
-        Math.max(0, subRows - 1) * subGapY +
-        subPadBottom;
-      sysDims.set(sys.id, { width, height, expanded: true, subCols });
-    }
-  }
-
-  const colWidths = Array.from({ length: cols }, (_, c) => {
-    let maxW = SYSTEM_COLLAPSED_SIZE.width;
-    for (let r = 0; r < rowsCount; r++) {
-      const sys = systems[r * cols + c];
-      if (sys) {
-        maxW = Math.max(maxW, sysDims.get(sys.id)?.width ?? SYSTEM_COLLAPSED_SIZE.width);
-      }
-    }
-    return maxW;
-  });
-
-  const rowHeights = Array.from({ length: rowsCount }, (_, r) => {
-    let maxH = SYSTEM_COLLAPSED_SIZE.height;
-    for (let c = 0; c < cols; c++) {
-      const sys = systems[r * cols + c];
-      if (sys) {
-        maxH = Math.max(maxH, sysDims.get(sys.id)?.height ?? SYSTEM_COLLAPSED_SIZE.height);
-      }
-    }
-    return maxH;
-  });
-
   const colGap = 136;
-  const rowGap = 108;
-  const colX: number[] = [];
-  let cursorX = 20;
-  for (let c = 0; c < cols; c++) {
-    colX.push(cursorX);
-    cursorX += colWidths[c] + colGap;
-  }
-
-  const rowY: number[] = [];
-  let cursorY = 20;
-  for (let r = 0; r < rowsCount; r++) {
-    rowY.push(cursorY);
-    cursorY += rowHeights[r] + rowGap;
-  }
+  const rowGap = 104;
 
   const nodes: Node[] = [];
   const gridCoord = new Map<string, { r: number; c: number }>();
@@ -122,39 +90,20 @@ export function buildSystemsGraph(
   systems.forEach((sys, index) => {
     const r = Math.floor(index / cols);
     const c = index % cols;
-    const dims = sysDims.get(sys.id) ?? { ...SYSTEM_COLLAPSED_SIZE, expanded: false, subCols: 1 };
     gridCoord.set(sys.id, { r, c });
 
     nodes.push({
       id: sys.id,
       type: 'systemNode',
-      position: { x: colX[c], y: rowY[r] },
-      width: dims.width,
-      height: dims.height,
-      style: { width: dims.width, height: dims.height },
-      data: { ...sys, expanded: dims.expanded },
+      position: {
+        x: 24 + c * (SYSTEM_NODE_SIZE.width + colGap),
+        y: 24 + r * (SYSTEM_NODE_SIZE.height + rowGap),
+      },
+      width: SYSTEM_NODE_SIZE.width,
+      height: SYSTEM_NODE_SIZE.height,
+      style: { width: SYSTEM_NODE_SIZE.width, height: SYSTEM_NODE_SIZE.height },
+      data: { ...sys },
     });
-
-    if (dims.expanded) {
-      sys.subsystems.forEach((sub, idx) => {
-        const subCol = idx % dims.subCols;
-        const subRow = Math.floor(idx / dims.subCols);
-        nodes.push({
-          id: sub.id,
-          type: 'subsystemNode',
-          parentId: sys.id,
-          extent: 'parent',
-          position: {
-            x: subPadSide + subCol * (SUBSYSTEM_SIZE.width + subGapX),
-            y: subPadTop + subRow * (SUBSYSTEM_SIZE.height + subGapY),
-          },
-          width: SUBSYSTEM_SIZE.width,
-          height: SUBSYSTEM_SIZE.height,
-          style: { width: SUBSYSTEM_SIZE.width, height: SUBSYSTEM_SIZE.height },
-          data: { ...sub, systemName: sys.name },
-        });
-      });
-    }
   });
 
   const visibleIds = new Set(nodes.map((n) => n.id));
@@ -218,285 +167,148 @@ export function buildSystemsGraph(
   return { nodes, edges };
 }
 
+export type VisionsGoalsScope =
+  | { level: 'root' }
+  | { level: 'vision'; visionId: string }
+  | { level: 'goal'; goalId: string };
+
 export interface VisionsGoalsBuildOptions {
   visions: VisionGraphNodeData[];
   goals: GoalGraphNodeData[];
   tasks: TaskGraphNodeData[];
   edges: VisionGoalTaskEdge[];
-  expandedVisionIds?: string[] | Set<string>;
-  expandedGoalIds?: string[] | Set<string>;
+  scope?: VisionsGoalsScope;
 }
 
-const VISION_COLLAPSED_SIZE = { width: 350, height: 58 };
-const GOAL_COLLAPSED_SIZE = { width: 316, height: 54 };
-const TASK_CARD_SIZE = { width: 332, height: 54 };
-
-function computeGoalSpec(
-  goal: GoalGraphNodeData,
-  childTasks: TaskGraphNodeData[],
-  isGoalExpanded: boolean
-): {
-  goal: GoalGraphNodeData;
-  expanded: boolean;
-  width: number;
-  height: number;
-  tasks: Array<{ task: TaskGraphNodeData; x: number; y: number }>;
-} {
-  if (!isGoalExpanded || childTasks.length === 0) {
-    return {
-      goal,
-      expanded: false,
-      width: GOAL_COLLAPSED_SIZE.width,
-      height: GOAL_COLLAPSED_SIZE.height,
-      tasks: [],
-    };
+function layoutGridPositions<T extends { id: string }>(
+  items: T[],
+  size: { width: number; height: number },
+  startX: number,
+  startY: number,
+  colGap: number,
+  rowGap: number,
+  maxCols: number
+): { positions: Map<string, { x: number; y: number }>; maxBottom: number } {
+  const positions = new Map<string, { x: number; y: number }>();
+  if (items.length === 0) {
+    return { positions, maxBottom: startY };
   }
 
-  const taskPadSide = 20;
-  const taskPadTop = 72;
-  const taskPadBottom = 18;
-  const taskGapX = 40;
-  const taskGapY = 20;
-  const tasksPerRow = Math.min(2, childTasks.length);
-  const rows = Math.ceil(childTasks.length / tasksPerRow);
+  const cols = Math.min(maxCols, Math.max(1, items.length));
+  let maxBottom = startY;
 
-  const width = Math.max(
-    GOAL_COLLAPSED_SIZE.width,
-    taskPadSide * 2 +
-      tasksPerRow * TASK_CARD_SIZE.width +
-      Math.max(0, tasksPerRow - 1) * taskGapX
-  );
-  const height =
-    taskPadTop +
-    rows * TASK_CARD_SIZE.height +
-    Math.max(0, rows - 1) * taskGapY +
-    taskPadBottom;
-
-  const tasks = childTasks.map((task, ti) => {
-    const col = ti % tasksPerRow;
-    const row = Math.floor(ti / tasksPerRow);
-    return {
-      task,
-      x: taskPadSide + col * (TASK_CARD_SIZE.width + taskGapX),
-      y: taskPadTop + row * (TASK_CARD_SIZE.height + taskGapY),
-    };
+  items.forEach((item, idx) => {
+    const c = idx % cols;
+    const r = Math.floor(idx / cols);
+    const x = startX + c * (size.width + colGap);
+    const y = startY + r * (size.height + rowGap);
+    positions.set(item.id, { x, y });
+    maxBottom = Math.max(maxBottom, y + size.height);
   });
 
-  return {
-    goal,
-    expanded: true,
-    width,
-    height,
-    tasks,
-  };
+  return { positions, maxBottom };
 }
 
-export function buildVisionsGoalsGraph(
-  options: VisionsGoalsBuildOptions
-): {
-  nodes: Node[];
-  edges: Edge[];
-} {
-  const { visions, goals, tasks, edges: rawEdges } = options;
-  const expandedVisions = new Set<string>(options.expandedVisionIds ?? []);
-  const expandedGoals = new Set<string>(options.expandedGoalIds ?? []);
+function layoutLayeredOrGrid<T extends { id: string }>(
+  items: T[],
+  edges: VisionGoalTaskEdge[],
+  size: { width: number; height: number },
+  colGap: number,
+  rowGap: number,
+  maxGridCols: number
+): Map<string, { x: number; y: number }> {
+  const itemIds = new Set(items.map((i) => i.id));
+  const internalEdges = edges.filter((e) => itemIds.has(e.source) && itemIds.has(e.target));
 
-  const nodes: Node[] = [];
-  const visionIds = new Set(visions.map((v) => v.id));
-  const goalIds = new Set(goals.map((g) => g.id));
-
-  let cursorX = 20;
-  let maxRowBottom = 20;
-  const visionGap = 110;
-
-  for (const vision of visions) {
-    const isVisionExpanded = expandedVisions.has(vision.id);
-    const childGoals = goals.filter((g) => g.visionId === vision.id);
-
-    if (!isVisionExpanded) {
-      nodes.push({
-        id: vision.id,
-        type: 'visionNode',
-        position: { x: cursorX, y: 20 },
-        width: VISION_COLLAPSED_SIZE.width,
-        height: VISION_COLLAPSED_SIZE.height,
-        style: { width: VISION_COLLAPSED_SIZE.width, height: VISION_COLLAPSED_SIZE.height },
-        data: { ...vision, expanded: false },
-      });
-      cursorX += VISION_COLLAPSED_SIZE.width + visionGap;
-      maxRowBottom = Math.max(maxRowBottom, 20 + VISION_COLLAPSED_SIZE.height);
-      continue;
-    }
-
-    const goalPadSide = 26;
-    const goalPadTop = 76;
-    const goalPadBottom = 22;
-    const goalGapX = 44;
-    const goalGapY = 28;
-
-    const goalSpecs = childGoals.map((goal) => {
-      const childTasks = tasks.filter((t) => t.goalId === goal.id);
-      return computeGoalSpec(goal, childTasks, expandedGoals.has(goal.id));
-    });
-
-    const goalsPerRow = Math.min(3, Math.max(1, goalSpecs.length));
-    const goalRowsCount = Math.ceil(goalSpecs.length / goalsPerRow);
-
-    const positionedGoals: Array<ReturnType<typeof computeGoalSpec> & { x: number; y: number }> = [];
-    let currentY = goalPadTop;
-    let maxRowWidth = VISION_COLLAPSED_SIZE.width;
-
-    for (let r = 0; r < goalRowsCount; r++) {
-      const rowSpecs = goalSpecs.slice(r * goalsPerRow, (r + 1) * goalsPerRow);
-      let goalCursorX = goalPadSide;
-      let rowMaxH = 0;
-      for (const spec of rowSpecs) {
-        positionedGoals.push({ ...spec, x: goalCursorX, y: currentY });
-        goalCursorX += spec.width + goalGapX;
-        rowMaxH = Math.max(rowMaxH, spec.height);
-      }
-      if (rowSpecs.length > 0) {
-        maxRowWidth = Math.max(maxRowWidth, goalCursorX - goalGapX + goalPadSide);
-        currentY += rowMaxH + goalGapY;
-      }
-    }
-
-    const visionWidth = Math.max(VISION_COLLAPSED_SIZE.width, maxRowWidth);
-    const visionHeight =
-      positionedGoals.length > 0
-        ? currentY - goalGapY + goalPadBottom
-        : VISION_COLLAPSED_SIZE.height;
-
-    nodes.push({
-      id: vision.id,
-      type: 'visionNode',
-      position: { x: cursorX, y: 20 },
-      width: visionWidth,
-      height: visionHeight,
-      style: { width: visionWidth, height: visionHeight },
-      data: { ...vision, expanded: true },
-    });
-
-    for (const gSpec of positionedGoals) {
-      nodes.push({
-        id: gSpec.goal.id,
-        type: 'goalNode',
-        parentId: vision.id,
-        extent: 'parent',
-        position: { x: gSpec.x, y: gSpec.y },
-        width: gSpec.width,
-        height: gSpec.height,
-        style: { width: gSpec.width, height: gSpec.height },
-        data: { ...gSpec.goal, expanded: gSpec.expanded },
-      });
-
-      if (gSpec.expanded) {
-        for (const tSpec of gSpec.tasks) {
-          nodes.push({
-            id: tSpec.task.id,
-            type: 'taskNode',
-            parentId: gSpec.goal.id,
-            extent: 'parent',
-            position: { x: tSpec.x, y: tSpec.y },
-            width: TASK_CARD_SIZE.width,
-            height: TASK_CARD_SIZE.height,
-            style: { width: TASK_CARD_SIZE.width, height: TASK_CARD_SIZE.height },
-            data: { ...tSpec.task },
-          });
-        }
-      }
-    }
-
-    cursorX += visionWidth + visionGap;
-    maxRowBottom = Math.max(maxRowBottom, 20 + visionHeight);
+  if (internalEdges.length === 0) {
+    const idealCols = Math.min(maxGridCols, Math.max(1, Math.ceil(Math.sqrt(items.length * 1.25))));
+    return layoutGridPositions(items, size, 24, 24, colGap, rowGap, idealCols).positions;
   }
 
-  // Render any real goals from Supabase not attached to a Vision directly as top-level Goal nodes
-  const standaloneGoals = goals.filter((g) => !g.visionId || !visionIds.has(g.visionId));
-  if (standaloneGoals.length > 0) {
-    const startY = visions.length > 0 ? maxRowBottom + 88 : 20;
-    const cols =
-      standaloneGoals.length <= 3
-        ? standaloneGoals.length
-        : Math.min(7, Math.max(3, Math.ceil(Math.sqrt(standaloneGoals.length * 0.55))));
-    const colGap = 40;
-    const rowGap = 36;
-    let rowY = startY;
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  const layerMap = new Map<string, number>();
 
-    for (let i = 0; i < standaloneGoals.length; i += cols) {
-      const rowGoals = standaloneGoals.slice(i, i + cols);
-      let colX = 20;
-      let rowMaxH = 0;
+  for (const item of items) {
+    inDegree.set(item.id, 0);
+    adj.set(item.id, []);
+    layerMap.set(item.id, 0);
+  }
 
-      for (const goal of rowGoals) {
-        const childTasks = tasks.filter((t) => t.goalId === goal.id);
-        const gSpec = computeGoalSpec(goal, childTasks, expandedGoals.has(goal.id));
+  for (const edge of internalEdges) {
+    if (edge.source === edge.target) continue;
+    adj.get(edge.source)?.push(edge.target);
+    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+  }
 
-        nodes.push({
-          id: gSpec.goal.id,
-          type: 'goalNode',
-          position: { x: colX, y: rowY },
-          width: gSpec.width,
-          height: gSpec.height,
-          style: { width: gSpec.width, height: gSpec.height },
-          data: { ...gSpec.goal, expanded: gSpec.expanded },
-        });
-
-        if (gSpec.expanded) {
-          for (const tSpec of gSpec.tasks) {
-            nodes.push({
-              id: tSpec.task.id,
-              type: 'taskNode',
-              parentId: gSpec.goal.id,
-              extent: 'parent',
-              position: { x: tSpec.x, y: tSpec.y },
-              width: TASK_CARD_SIZE.width,
-              height: TASK_CARD_SIZE.height,
-              style: { width: TASK_CARD_SIZE.width, height: TASK_CARD_SIZE.height },
-              data: { ...tSpec.task },
-            });
-          }
-        }
-
-        colX += gSpec.width + colGap;
-        rowMaxH = Math.max(rowMaxH, gSpec.height);
-      }
-      rowY += rowMaxH + rowGap;
-      maxRowBottom = Math.max(maxRowBottom, rowY - rowGap);
+  const queue: string[] = [];
+  for (const item of items) {
+    if ((inDegree.get(item.id) ?? 0) === 0) {
+      queue.push(item.id);
     }
   }
 
-  // Render any standalone tasks not linked to a Goal directly as top-level Task nodes
-  const standaloneTasks = tasks.filter((t) => !t.goalId || !goalIds.has(t.goalId));
-  if (standaloneTasks.length > 0) {
-    const startY = nodes.length > 0 ? maxRowBottom + 72 : 20;
-    const cols =
-      standaloneTasks.length <= 3
-        ? standaloneTasks.length
-        : Math.min(7, Math.max(3, Math.ceil(Math.sqrt(standaloneTasks.length * 0.55))));
-    const colGap = 40;
-    const rowGap = 32;
-    standaloneTasks.forEach((task, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      nodes.push({
-        id: task.id,
-        type: 'taskNode',
-        position: {
-          x: 20 + col * (TASK_CARD_SIZE.width + colGap),
-          y: startY + row * (TASK_CARD_SIZE.height + rowGap),
-        },
-        width: TASK_CARD_SIZE.width,
-        height: TASK_CARD_SIZE.height,
-        style: { width: TASK_CARD_SIZE.width, height: TASK_CARD_SIZE.height },
-        data: { ...task },
-      });
-    });
+  const visited = new Set<string>();
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    visited.add(cur);
+    const curLayer = layerMap.get(cur) ?? 0;
+    for (const nxt of adj.get(cur) ?? []) {
+      layerMap.set(nxt, Math.max(layerMap.get(nxt) ?? 0, curLayer + 1));
+      const nextDeg = (inDegree.get(nxt) ?? 0) - 1;
+      inDegree.set(nxt, nextDeg);
+      if (nextDeg === 0) {
+        queue.push(nxt);
+      }
+    }
   }
 
-  const visibleIds = new Set(nodes.map((n) => n.id));
+  let maxLayer = 0;
+  for (const l of layerMap.values()) {
+    maxLayer = Math.max(maxLayer, l);
+  }
+  for (const item of items) {
+    if (!visited.has(item.id)) {
+      layerMap.set(item.id, maxLayer + 1);
+    }
+  }
 
-  const edges: Edge[] = rawEdges
+  const columns = new Map<number, T[]>();
+  for (const item of items) {
+    const l = layerMap.get(item.id) ?? 0;
+    const list = columns.get(l) ?? [];
+    list.push(item);
+    columns.set(l, list);
+  }
+
+  const sortedLayers = Array.from(columns.keys()).sort((a, b) => a - b);
+  let maxColHeight = 0;
+  for (const l of sortedLayers) {
+    const count = columns.get(l)?.length ?? 0;
+    const h = count * size.height + Math.max(0, count - 1) * rowGap;
+    maxColHeight = Math.max(maxColHeight, h);
+  }
+
+  const positions = new Map<string, { x: number; y: number }>();
+  sortedLayers.forEach((l, colIdx) => {
+    const colItems = columns.get(l) ?? [];
+    const colHeight = colItems.length * size.height + Math.max(0, colItems.length - 1) * rowGap;
+    const offsetY = 24 + Math.max(0, (maxColHeight - colHeight) / 2);
+    const x = 24 + colIdx * (size.width + colGap);
+    colItems.forEach((item, rowIdx) => {
+      positions.set(item.id, {
+        x,
+        y: offsetY + rowIdx * (size.height + rowGap),
+      });
+    });
+  });
+
+  return positions;
+}
+
+function buildStyledEdges(rawEdges: VisionGoalTaskEdge[], visibleIds: Set<string>): Edge[] {
+  return rawEdges
     .filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target))
     .map((e) => {
       const isTaskFlow = e.edgeKind === 'task_dependency' || e.edgeKind === 'artifact_flow';
@@ -510,7 +322,7 @@ export function buildVisionsGoalsGraph(
         animated: true,
         zIndex: 25,
         style: {
-          stroke: isTaskFlow ? '#DF6B3B' : isGate ? '#C83214' : '#8C7263',
+          stroke: isTaskFlow ? '#38BDF8' : isGate ? '#F59E0B' : '#8C7263',
           strokeWidth: isGate ? 2.2 : 1.8,
           strokeDasharray:
             e.edgeKind === 'goal_dependency' || e.dependencyType === 'advisory' ? '5 4' : undefined,
@@ -527,8 +339,151 @@ export function buildVisionsGoalsGraph(
         labelBgPadding: [6, 3] as [number, number],
       };
     });
+}
 
-  return { nodes, edges };
+export function buildVisionsGoalsGraph(
+  options: VisionsGoalsBuildOptions
+): {
+  nodes: Node[];
+  edges: Edge[];
+} {
+  const { visions, goals, tasks, edges: rawEdges, scope = { level: 'root' } } = options;
+  const visionIds = new Set(visions.map((v) => v.id));
+  const goalIds = new Set(goals.map((g) => g.id));
+
+  // Level 2: Inside a Vision -> show its Goals cleanly
+  if (scope.level === 'vision') {
+    const childGoals = goals.filter((g) => g.visionId === scope.visionId);
+    if (childGoals.length === 0) {
+      return { nodes: [], edges: [] };
+    }
+    const positions = layoutLayeredOrGrid(
+      childGoals,
+      rawEdges,
+      GOAL_NODE_SIZE,
+      96,
+      68,
+      3
+    );
+    const nodes: Node[] = childGoals.map((goal) => ({
+      id: goal.id,
+      type: 'goalNode',
+      position: positions.get(goal.id) ?? { x: 24, y: 24 },
+      width: GOAL_NODE_SIZE.width,
+      height: GOAL_NODE_SIZE.height,
+      style: { width: GOAL_NODE_SIZE.width, height: GOAL_NODE_SIZE.height },
+      data: { ...goal },
+    }));
+    const visibleIds = new Set(nodes.map((n) => n.id));
+    return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
+  }
+
+  // Level 3: Inside a Goal -> show its Tasks cleanly
+  if (scope.level === 'goal') {
+    const childTasks = tasks.filter((t) => t.goalId === scope.goalId);
+    if (childTasks.length === 0) {
+      return { nodes: [], edges: [] };
+    }
+    const positions = layoutLayeredOrGrid(
+      childTasks,
+      rawEdges,
+      TASK_NODE_SIZE,
+      88,
+      54,
+      3
+    );
+    const nodes: Node[] = childTasks.map((task) => ({
+      id: task.id,
+      type: 'taskNode',
+      position: positions.get(task.id) ?? { x: 24, y: 24 },
+      width: TASK_NODE_SIZE.width,
+      height: TASK_NODE_SIZE.height,
+      style: { width: TASK_NODE_SIZE.width, height: TASK_NODE_SIZE.height },
+      data: { ...task },
+    }));
+    const visibleIds = new Set(nodes.map((n) => n.id));
+    return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
+  }
+
+  // Level 1 (Root): show Visions, plus any standalone Goals, plus any standalone Tasks
+  const nodes: Node[] = [];
+  let nextStartY = 24;
+
+  if (visions.length > 0) {
+    const vLayout = layoutGridPositions(
+      visions,
+      VISION_NODE_SIZE,
+      24,
+      nextStartY,
+      96,
+      72,
+      3
+    );
+    for (const vision of visions) {
+      nodes.push({
+        id: vision.id,
+        type: 'visionNode',
+        position: vLayout.positions.get(vision.id) ?? { x: 24, y: 24 },
+        width: VISION_NODE_SIZE.width,
+        height: VISION_NODE_SIZE.height,
+        style: { width: VISION_NODE_SIZE.width, height: VISION_NODE_SIZE.height },
+        data: { ...vision },
+      });
+    }
+    nextStartY = vLayout.maxBottom + 84;
+  }
+
+  const standaloneGoals = goals.filter((g) => !g.visionId || !visionIds.has(g.visionId));
+  if (standaloneGoals.length > 0) {
+    const gLayout = layoutGridPositions(
+      standaloneGoals,
+      GOAL_NODE_SIZE,
+      24,
+      nextStartY,
+      84,
+      64,
+      Math.min(4, Math.max(1, Math.ceil(Math.sqrt(standaloneGoals.length * 1.1))))
+    );
+    for (const goal of standaloneGoals) {
+      nodes.push({
+        id: goal.id,
+        type: 'goalNode',
+        position: gLayout.positions.get(goal.id) ?? { x: 24, y: nextStartY },
+        width: GOAL_NODE_SIZE.width,
+        height: GOAL_NODE_SIZE.height,
+        style: { width: GOAL_NODE_SIZE.width, height: GOAL_NODE_SIZE.height },
+        data: { ...goal },
+      });
+    }
+    nextStartY = gLayout.maxBottom + 76;
+  }
+
+  const standaloneTasks = tasks.filter((t) => !t.goalId || !goalIds.has(t.goalId));
+  if (standaloneTasks.length > 0) {
+    const tLayout = layoutGridPositions(
+      standaloneTasks,
+      TASK_NODE_SIZE,
+      24,
+      nextStartY,
+      72,
+      54,
+      Math.min(4, Math.max(1, Math.ceil(Math.sqrt(standaloneTasks.length * 1.1))))
+    );
+    for (const task of standaloneTasks) {
+      nodes.push({
+        id: task.id,
+        type: 'taskNode',
+        position: tLayout.positions.get(task.id) ?? { x: 24, y: nextStartY },
+        width: TASK_NODE_SIZE.width,
+        height: TASK_NODE_SIZE.height,
+        style: { width: TASK_NODE_SIZE.width, height: TASK_NODE_SIZE.height },
+        data: { ...task },
+      });
+    }
+  }
+
+  const visibleIds = new Set(nodes.map((n) => n.id));
+  return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
 }
 
 export function filterSkills(
