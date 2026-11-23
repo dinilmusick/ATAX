@@ -8,6 +8,7 @@ results/*
 playwright-report/
 test-results/
 coverage/
+dist/
 .env
 .env.*
 !.env.example
