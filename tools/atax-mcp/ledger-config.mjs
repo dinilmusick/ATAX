@@ -3,7 +3,7 @@ import {openLedger} from './pg-ledger.mjs';
 /** Database-held server policy and Vault secrets, never deployment env vars. */
 const ALIAS=/^[A-Z][A-Z0-9_]{0,47}$/;
 const SETTINGS=new Set([
-  'MCP_GITHUB_OWNER','MCP_FMRL_ALLOWED_TARGETS',
+  'MCP_OWNER_SUBJECT','MCP_GITHUB_OWNER','MCP_FMRL_ALLOWED_TARGETS',
   'MCP_SHARED_TOKEN_SHA256','MCP_SHARED_SUBJECT','MCP_SHARED_SCOPES',
   'MCP_ATAX_OWNER_JWT_SUBJECT','MCP_AUTH_OWNER_SCOPES',
   'MCP_AUTH_AUTHORIZATION_SERVER','MCP_AUTH_ISSUER','MCP_AUTH_JWKS_URL',

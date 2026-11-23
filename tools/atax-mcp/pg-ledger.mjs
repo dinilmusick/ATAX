@@ -75,29 +75,14 @@ export function createLedgerDb(sql) {
     return rows[0]?.value??(meta.isSet?[]:null);
   }
   async function skills(term){
-    const safe=String(term).replace(/[%_\\]/g,' ').slice(0,120);
-    return sql.unsafe(
-      "SELECT id,name,slug,description,status,current_version_id "+
-      "FROM public.skills WHERE status='active' "+
-      "AND (slug ILIKE $1 OR name ILIKE $1) LIMIT 30",
-      ['%'+safe+'%']);
+    return rpc('atax_mcp_skills_search_v1',{term_in:String(term).slice(0,120)});
   }
   async function skill(slug){
-    const rows=await sql.unsafe(
-      "SELECT s.id,s.name,s.slug,s.status,s.current_version_id,"+
-      "v.version,v.instructions FROM public.skills s "+
-      "JOIN public.skill_versions v ON v.id=s.current_version_id "+
-      "WHERE s.slug=$1 AND v.is_published=true LIMIT 1",
-      [slug]);
-    if(!rows.length)throw Error('Canonical skill unavailable');
-    return rows[0];
+    return rpc('atax_mcp_skill_get_v1',{slug_in:String(slug).slice(0,120)});
   }
   async function request(path){
-    // Only the one legacy MCP skills resource is supported, never arbitrary SQL.
     if(!path.startsWith('skills?select='))throw Error('Unsupported canonical resource');
-    return sql.unsafe(
-      "SELECT id,slug,name,description,status,current_version_id "+
-      "FROM public.skills WHERE status='active' LIMIT 200",[]);
+    return rpc('atax_mcp_skills_catalog_v1',{});
   }
   return {rpc,skills,skill,request};
 }

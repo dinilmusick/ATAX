@@ -242,3 +242,76 @@ GRANT EXECUTE ON FUNCTION public.atax_mcp_provider_summary_v1(text) TO atax_mcp_
 -- owner after exact live-function audit; do not grant unrestricted SQL/table
 -- access. The restricted socket execution RPC is intentionally NOT granted
 -- before independently verified Socket V1 release and production migration.
+
+
+-- Expose only published skill projections to the maintainer PostgreSQL role;
+-- no blanket SELECT on private skill/version tables.
+CREATE OR REPLACE FUNCTION public.atax_mcp_skills_search_v1(term_in text)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public
+AS $$
+  SELECT coalesce(jsonb_agg(to_jsonb(s)),'[]'::jsonb) FROM (
+    SELECT id,name,slug,description,status,current_version_id
+    FROM public.skills WHERE status='active' AND
+      (slug ILIKE '%'||left(replace(term_in,'%',' '),120)||'%' OR
+       name ILIKE '%'||left(replace(term_in,'%',' '),120)||'%')
+    LIMIT 30
+  ) s;
+$$;
+CREATE OR REPLACE FUNCTION public.atax_mcp_skill_get_v1(slug_in text)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public
+AS $$
+  SELECT to_jsonb(s) FROM (
+    SELECT k.id,k.name,k.slug,k.status,k.current_version_id,
+           v.version,v.instructions
+    FROM public.skills k
+    JOIN public.skill_versions v ON v.id=k.current_version_id
+    WHERE k.slug=slug_in AND k.status='active' AND v.is_published=true
+    LIMIT 1
+  ) s;
+$$;
+CREATE OR REPLACE FUNCTION public.atax_mcp_skills_catalog_v1()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,public
+AS $$
+  SELECT coalesce(jsonb_agg(to_jsonb(s)),'[]'::jsonb) FROM (
+    SELECT id,slug,name,description,status,current_version_id
+    FROM public.skills WHERE status='active' LIMIT 200
+  ) s;
+$$;
+REVOKE ALL ON FUNCTION public.atax_mcp_skills_search_v1(text) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.atax_mcp_skill_get_v1(text) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.atax_mcp_skills_catalog_v1() FROM PUBLIC,anon,authenticated;
+GRANT USAGE ON SCHEMA public TO atax_mcp_maintainer,atax_socket_restricted,atax_mcp_config_admin;
+GRANT EXECUTE ON FUNCTION public.atax_mcp_skills_search_v1(text) TO atax_mcp_maintainer;
+GRANT EXECUTE ON FUNCTION public.atax_mcp_skill_get_v1(text) TO atax_mcp_maintainer;
+GRANT EXECUTE ON FUNCTION public.atax_mcp_skills_catalog_v1() TO atax_mcp_maintainer;
+
+-- Grant only RPCs currently used by the known maintainer MCP tool registry.
+-- Any missing function is ignored here; runtime fails closed if it is absent.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT p.oid::regprocedure::text signature
+    FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname = ANY(ARRAY[
+      'agent_context_overview','atax_context_snapshot','atax_goal_claim_safe',
+      'atax_goal_create_system_bounded','atax_goal_create_system_omni',
+      'goal_ledger_add_dependency','goal_ledger_blocker_overview',
+      'goal_ledger_finalize_by_key','goal_ledger_get_by_key',
+      'goal_ledger_overview','goal_ledger_resume_by_key','goal_ledger_set_priority',
+      'system_improvement_context','task_ledger_add_dependency',
+      'task_ledger_check_claim','task_ledger_claim_next',
+      'task_ledger_claim_verification','task_ledger_finalize_loop_script',
+      'task_ledger_heartbeat_claim','task_ledger_pending_verification',
+      'task_ledger_record_handoff','task_ledger_record_loop_iteration',
+      'task_ledger_release_claim','task_ledger_submit_result',
+      'task_ledger_verify_result_claimed','vision_ledger_add_target',
+      'vision_ledger_attach_tldraw','vision_ledger_create'
+    ])
+  LOOP
+    EXECUTE 'GRANT EXECUTE ON FUNCTION '||r.signature||' TO atax_mcp_maintainer';
+  END LOOP;
+END $$;
