@@ -55,7 +55,11 @@ async function call(name,args={},config={}){const res=await post('tools/call',{n
 test('health, route and configuration fail closed',async()=>{
   assert.equal((await handler(new Request('https://atax.example/health'),{})).status,200);
   assert.equal((await handler(new Request('https://atax.example/private'),env)).status,404);
-  assert.equal((await post('initialize',{}, {env:{...env,SUPABASE_SERVICE_ROLE_KEY:''}})).status,503);
+  const production=createRuntimeHandler(upstream);
+  const missing=new Request('https://atax.example/mcp',{
+    method:'POST',headers:{'content-type':'application/json'},body:'{}'
+  });
+  assert.equal((await production(missing,{})).status,503);
 });
 test('reject missing and invalid bearer, origin, wrong content-type and request size',async()=>{
   assert.equal((await post('initialize',{}, {auth:false})).status,401);
