@@ -23,8 +23,8 @@ try {
   assert.ok(Array.isArray(catalog),'published skills catalog must be array');
   const tagged=await db.rpc('goal_ledger_overview',{tags_in:['test-nonmatching']});
   assert.ok(tagged!==undefined);
-  const missing=await db.rpc('goal_ledger_get_by_key',{goal_key_in:'mcp-nonexistent-goal'});
-  assert.ok(missing===null||typeof missing==='object');
+  await assert.rejects(db.rpc('goal_ledger_get_by_key',{
+    goal_key_in:'mcp-nonexistent-goal'}),/goal not found or access denied/);
   console.log('ATAX direct PostgreSQL RPC and restricted config smoke passed');
 } finally {
   await sql.end({timeout:3});
