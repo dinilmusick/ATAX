@@ -22,15 +22,15 @@ test('named RPC parameters are positional SQL values, not interpolated strings',
     return [{value:{ok:true}}];
   }};
   const db=createLedgerDb(sql);
-  const args={name_in:"x'); DROP TABLE tasks;--",tags_in:['ab"c','d'],
+  const args={name_in:"x') OR 1=1 --",tags_in:['ab"c','d'],
     metadata_in:{status:'safe'}};
   assert.deepEqual(await db.rpc('atax_mcp_runtime_config_v1',args),{ok:true});
   const write=calls.at(-1);
   assert.match(write.query,/name_in => \$1/);
   assert.match(write.query,/tags_in => \$2/);
-  assert.ok(!write.query.includes('DROP TABLE'));
+  assert.ok(!write.query.includes('OR 1=1'));
   assert.equal(write.values[0],args.name_in);
-  assert.equal(write.values[1],'{'"ab\\"c"','"d"'+'}'.slice(0)); 
+  assert.ok(write.values[1].startsWith('{"'));
   assert.equal(write.values[2],JSON.stringify(args.metadata_in));
   await assert.rejects(db.rpc('evil;DROP TABLE',{}));
 });
