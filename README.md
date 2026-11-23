@@ -14,7 +14,7 @@ ATAX is a durable substrate for **externally created, transient agents**. One ca
 
 Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Architecture**](docs/architecture.md) first.
 
-**Google AI Studio / React handoff:** [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend environment-variable contract](docs/ENVIRONMENT_CONFIGURATION.md) · [blank `.env.example`](.env.example). The proposed React UI is not yet deployed; sensitive provider keys must never be put in a browser build. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
+**Google AI Studio / Hydrogen UI handoff:** [New MCP configuration/credential-management UI decision](docs/MCP_LEDGER_CONFIG_UI_HANDOFF.md) · [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend environment-variable contract](docs/ENVIRONMENT_CONFIGURATION.md) · [single-URL server-only `.env.example`](.env.example). The React UI is not yet deployed and must include authenticated MCP credential administration alongside read-only graph views; provider secrets must never appear in browser builds. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
 
 ## Resume or create work
 

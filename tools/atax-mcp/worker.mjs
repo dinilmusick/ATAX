@@ -224,14 +224,12 @@ async function routeRpc(msg,principal,env,fetcher){
   return err(id,-32601,'Method not found');
 }
 export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
-  async function dispatch(req,bootstrapEnv={}){
+  async function dispatch(req,runtimeEnv={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL});
     if(url.pathname!=='/mcp' && url.pathname!=='/.well-known/oauth-protected-resource' &&
        url.pathname!=='/.well-known/oauth-protected-resource/mcp')return json({error:'Not found'},404);
-    let env;
-    try{env=await configLoader(bootstrapEnv,fetcher);}
-    catch{return json({error:'ATAX MCP not configured'},503);}
+    const env=runtimeEnv;
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
@@ -258,7 +256,14 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
     if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
     return json(Array.isArray(body)?results:results[0]);
   }
-  return async (req,env={})=>{
+  return async (req,bootstrapEnv={})=>{
+    const path=new URL(req.url).pathname;
+    let env={};
+    if(path==='/mcp'||path==='/.well-known/oauth-protected-resource'||
+       path==='/.well-known/oauth-protected-resource/mcp'){
+      try{env=await configLoader(bootstrapEnv,fetcher);}
+      catch{return json({error:'ATAX MCP not configured'},503);}
+    }
     const response=await dispatch(req,env);
     const origin=req.headers.get('origin');
     if(!origin||!allowedOrigin(req,env))return response;

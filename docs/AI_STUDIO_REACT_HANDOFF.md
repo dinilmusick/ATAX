@@ -1,6 +1,6 @@
 # ATAX → Google AI Studio: React UI handoff (read-only v1)
 
-**Status:** specification for a future React frontend, **not a claim that a React app/API already exists**. Canonical backend and task semantics must remain intact. Start from the current `main` snapshot and add a self-contained UI package; do not reorganize, replace, or mock the substrate as a side effect.
+**Status:** graph-view specification for a future React frontend, **not a claim that a React app/API already exists**. **New 2026-11-23 requirement:** see [MCP ledger configuration and UI handoff](MCP_LEDGER_CONFIG_UI_HANDOFF.md). The UI must ALSO have an authenticated, write-capable MCP credential-management area; the read-only limit below applies ONLY to the graph views. Canonical backend and task semantics must remain intact. Start from the current `main` snapshot and add a self-contained UI package; do not reorganize, replace, or mock the substrate as a side effect.
 
 ## Invariants
 
@@ -8,7 +8,7 @@
 - ATAX is a substrate for **externally arriving transient agents**. The UI never spawns, schedules, runs, or auto-claims agents/tasks. No model/vendor-specific scheduling or new resident orchestrator.
 - Preserve all three entry modes: direct GitHub+Supabase, authorized GitHub-only control bridge, authenticated remote MCP. Do not route direct connectors through the Worker.
 - Keep existing RPCs and fenced claim/lease/heartbeat/verification contracts unchanged. New UI code must be isolated; never silently rewrite schema/migrations, Worker, or CI.
-- **Read-only first release:** no create/edit/delete/reorder/claim/trigger/eval/secret-management actions. Leave future manual vision/goal/task authoring out of the first draft.
+- **Read-only graph views:** no graph create/edit/delete/reorder/claim/trigger/eval actions. Credential management is a separately authenticated/admin-authorized exception defined in MCP_LEDGER_CONFIG_UI_HANDOFF.md. Leave future manual vision/goal/task authoring out of the first draft.
 - Never move Supabase secret keys or GitHub/Cloudflare/Vercel tokens into React/browser bundles, `VITE_*`, `NEXT_PUBLIC_*`, HTML, logs, or local storage. Browser obtains only safe, authorization-filtered graph projections from an authenticated server-side adapter. Do not render secret values or raw claim/fencing tokens.
 - Use real states and evidence. If an API or particular graph interpretation is not yet implemented, show **Unavailable / Not verified**. Do not fill with invented example accounts, jobs, timestamps or activity.
 
@@ -58,6 +58,6 @@ A future backend can expose `GET /api/graph/visions`, `GET /api/graph/goals/:id`
 
 1. Import the repository at a reviewed `main` commit. Treat `AGENTS.md`, `docs/architecture.md`, `docs/connection-modes.md` and this file as constraints.
 2. Add an isolated React client and an authenticated server adapter. Preserve existing tools, migrations, MCP Worker and workflows.
-3. Use `docs/ENVIRONMENT_CONFIGURATION.md` plus root `.env.example` to configure **server-only** bindings. AI Studio's client environment must receive **only** public configuration.
+3. Use `docs/MCP_LEDGER_CONFIG_UI_HANDOFF.md`, `docs/ENVIRONMENT_CONFIGURATION.md` and root `.env.example` for the **single server-secret Supabase URL**. The client receives NO privileged configuration. Build authenticated credentials administration in addition to these read-only graph views.
 4. Run build/unit/UI tests and existing MCP/substrate tests. Capture changed-files list, actual backend connectivity, auth denials, data correctness and a before/after regression report.
 5. Do not claim live integration merely because a React mock displays a graph. Full validation requires live authorized Supabase reads and independent evidence.

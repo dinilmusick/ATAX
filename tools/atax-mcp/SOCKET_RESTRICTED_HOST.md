@@ -27,7 +27,7 @@ The signed OAuth resource token must be an RSA RS256 at+jwt access token with ex
 
 Deploy the separate Worker using npx wrangler deploy --config tools/atax-mcp/wrangler.socket.toml **only after reconciliation and independent verification**.
 
-Required settings: SUPABASE_URL (canonical project), SUPABASE_SECRET_KEY (Worker secret), SOCKET_AUTH_ISSUER, SOCKET_AUTH_JWKS_URL (same HTTPS origin), SOCKET_AUTH_AUDIENCE (socket-only resource audience), SOCKET_AUTH_CLIENT_ID (approved azp), and SOCKET_WORKFLOW_CATALOG_JSON. The workflow catalog is a JSON object of approved workflow keys to permitted input names, e.g. {"safe_ci":{"revision":"sha"}}. Supported workflow input types are sha (40 hexadecimal characters), uuid, slug, integer and boolean; input names and value types are both checked. Empty or malformed catalog disables workflow requests. Do not inject GitHub or Cloudflare secrets into this Worker.
+**New single-bootstrap contract:** the only Worker environment binding is the server-only secret `SUPABASE_URL` with `#key=<privileged-server-key>` in its fragment. The runtime loads `SOCKET_AUTH_ISSUER`, `SOCKET_AUTH_JWKS_URL`, `SOCKET_AUTH_AUDIENCE`, `SOCKET_AUTH_CLIENT_ID` and `SOCKET_WORKFLOW_CATALOG_JSON` from canonical Supabase settings, NOT deployment environment variables. See docs/MCP_LEDGER_CONFIG_UI_HANDOFF.md.  The workflow catalog is a JSON object of approved workflow keys to permitted input names, e.g. {"safe_ci":{"revision":"sha"}}. Supported workflow input types are sha (40 hexadecimal characters), uuid, slug, integer and boolean; input names and value types are both checked. Empty or malformed catalog disables workflow requests. Do not inject GitHub or Cloudflare secrets into this Worker.
 
 ## Production adapter contract for Agents A, B and D
 
@@ -43,7 +43,7 @@ The RPC MUST in one durable PostgreSQL transaction:
 4. Return either a bounded success result with charged inputTokens/outputTokens receipt or a stable denied error code. Reject oversized output after metering its inbound payload.
 5. For workflow requests, verify the task-specific typed grant and insert an auditable idempotent outbox intent; Agent D's separately authorized external controller later dispatches approved workflows. Never perform network/GitHub dispatch within the DB transaction.
 
-This RPC must be accessible only to a server-side privileged role: explicitly REVOKE EXECUTE FROM PUBLIC, anon, authenticated, and preserve row-level security. The socket Worker carries only its server-side Supabase secret. Its interim meter conservatively counts one UTF-8 byte as one token; Agent A's verified cumulative meter must replace it during integration. The gateway checks that the durable receipt covers the full response frame.
+This RPC must be accessible only to a server-side privileged role: explicitly REVOKE EXECUTE FROM PUBLIC, anon, authenticated, and preserve row-level security. The socket Worker carries only the single server-secret Supabase bootstrap URL; its parsed credential never leaves the server. Its interim meter conservatively counts one UTF-8 byte as one token; Agent A's verified cumulative meter must replace it during integration. The gateway checks that the durable receipt covers the full response frame.
 
 **Not production-ready until the RPC, signed identity provider, restricted-host configuration and live denial tests are installed.** Missing RPC or missing credentials fail closed; fake tests do not prove production deployment.
 
