@@ -28,11 +28,11 @@ function textArray(values) {
     throw Error('Invalid PostgreSQL text array');
   return '{'+values.map(value=>'"'+value.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"').join(',')+'}';
 }
-function pgParameter(name,value) {
+function pgParameter(name,value,sql) {
   if(value===undefined)throw Error('Undefined PostgreSQL argument');
   if(value===null)return null;
   if(TEXT_ARRAY.has(name))return textArray(value);
-  if(typeof value==='object')return JSON.stringify(value);
+  if(typeof value==='object')return sql?.json ? sql.json(value) : JSON.stringify(value);
   if(typeof value==='string'||typeof value==='boolean'||typeof value==='number')return value;
   throw Error('Unsupported PostgreSQL argument');
 }
@@ -63,7 +63,7 @@ export function createLedgerDb(sql) {
       throw Error('Invalid canonical RPC arguments');
     const meta=await metadata(name);
     const call='public.'+name+'('+args.map(([key],i)=>key+' => $'+(i+1)).join(',')+')';
-    const values=args.map(([key,value])=>pgParameter(key,value));
+    const values=args.map(([key,value])=>pgParameter(key,value,sql));
     let query;
     if(meta.isSet)
       query="SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]'::jsonb) AS value FROM "+call+" AS t";
