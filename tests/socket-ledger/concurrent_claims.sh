@@ -78,3 +78,59 @@ BEGIN
 END \$race\$;
 SQL
 echo "PASS: two independently authenticated connections, one fenced claim winner"
+
+# Separate PostgreSQL backends also race for a single scoped verifier claim.
+# Deliberately create only a disposable completed/pending fixture; this never
+# contacts the canonical live ledger. Neither command can claim other tasks.
+verify_task="$(psql "$db" -X -v ON_ERROR_STOP=1 -Atc "
+  INSERT INTO public.tasks(
+    agent_id,agent_name,task_name,status,verification_status,
+    result_submitted_at,claimed_by_agent_id,task_definition
+  ) VALUES (
+    'race-author-$id','race-author-$id','verify-$id','completed','pending',
+    statement_timestamp(),'race-executor-$id',
+    jsonb_build_object('name','verify-$id','actions',
+      jsonb_build_array(jsonb_build_object('description','Review fixture')))
+  ) RETURNING id
+")"
+if [[ ! "$verify_task" =~ ^[0-9a-f-]{36}$ ]]; then
+  echo "FAIL: verifier fixture task unavailable" >&2
+  exit 1
+fi
+out1="$(mktemp)"
+out2="$(mktemp)"
+trap 'rm -f "$out1" "$out2"' EXIT
+claim1="SELECT id FROM public.task_ledger_claim_verification_for_task('$verify_task'::uuid,'verifier-a-$id',900)"
+claim2="SELECT id FROM public.task_ledger_claim_verification_for_task('$verify_task'::uuid,'verifier-b-$id',900)"
+PGOPTIONS="-c statement_timeout=10000" psql "$db" -X -v ON_ERROR_STOP=1 -Atc "$claim1" >"$out1" 2>&1 &
+vpid1=$!
+PGOPTIONS="-c statement_timeout=10000" psql "$db" -X -v ON_ERROR_STOP=1 -Atc "$claim2" >"$out2" 2>&1 &
+vpid2=$!
+vrc1=0; vrc2=0
+wait "$vpid1" || vrc1=$?
+wait "$vpid2" || vrc2=$?
+if [[ "$vrc1" -ne 0 || "$vrc2" -ne 0 ]]; then
+  echo "FAIL: a scoped verifier RPC connection errored ($vrc1, $vrc2)" >&2
+  exit 1
+fi
+winner_count=0
+[[ "$(cat "$out1")" == "$verify_task" ]] && winner_count=$((winner_count+1))
+[[ "$(cat "$out2")" == "$verify_task" ]] && winner_count=$((winner_count+1))
+if [[ "$winner_count" -ne 1 ]]; then
+  echo "FAIL: expected exactly one targeted verifier claim winner" >&2
+  exit 1
+fi
+psql "$db" -X -v ON_ERROR_STOP=1 -q <<SQL >/dev/null
+DO \$verify_race\$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.tasks
+    WHERE id='$verify_task'::uuid
+      AND verification_claimed_by_agent_id IN ('verifier-a-$id','verifier-b-$id')
+      AND verification_claim_token IS NOT NULL
+      AND verification_claim_expires_at > statement_timestamp()
+      AND verification_status = 'pending'
+  ) THEN RAISE EXCEPTION 'Targeted verifier race lost claim/fence integrity'; END IF;
+END \$verify_race\$;
+SQL
+echo "PASS: two independent PostgreSQL verifier connections, exactly one fenced targeted claim"
