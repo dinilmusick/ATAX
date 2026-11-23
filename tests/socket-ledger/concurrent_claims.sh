@@ -89,7 +89,8 @@ verify_task="$(psql "$db" -X -v ON_ERROR_STOP=1 -Atc "
   ) VALUES (
     'race-author-$id','race-author-$id','verify-$id','completed','pending',
     statement_timestamp(),'race-executor-$id',
-    jsonb_build_object('name','verify-$id','actions',
+    jsonb_build_object('name','verify-$id',
+      'general_pattern','independent review of submitted result','actions',
       jsonb_build_array(jsonb_build_object('description','Review fixture')))
   ) RETURNING id
 ")"
