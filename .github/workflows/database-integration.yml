@@ -80,6 +80,25 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Run Socket V1 fenced SQL regression and real two-session claim race
+        env:
+          SOCKET_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          SOCKET_TEST_DISPOSABLE: "YES"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SUPABASE_ACCESS_TOKEN:-}"
+          test -z "${SUPABASE_DB_URL:-}"
+          psql "$SOCKET_TEST_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f tests/socket-ledger/socket_atomization_integration.sql
+          bash tests/socket-ledger/concurrent_claims.sh
+
+      - name: Run pinned Socket V1 standalone and adversarial conformance tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/task-socket-conformance/*.test.mjs tools/socket-budget/index.test.mjs tools/atax-mcp/socket-gateway.test.mjs
+          node tests/task-socket-conformance/calibration-cli.mjs
+
       - name: Detect public schema drift
         shell: bash
         run: |
