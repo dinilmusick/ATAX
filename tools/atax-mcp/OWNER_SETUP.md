@@ -1,5 +1,8 @@
 # Personal ATAX MCP — one owner, three substrate connection modes
 
+> **Transition notice (23 November 2026):** The operational commands below describe the existing, pre-migration owner MCP deployment. They are **not** the target for the new UI-based configuration. See [the authoritative one-variable Supabase credential/UI handoff](../../docs/MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md). Future MCP runtime configuration must use only `ATAX_SUPABASE_CONNECTION_URL`; GitHub/Cloudflare/Vercel account credentials and auth/settings become owner-managed records in Supabase. The current Worker has not yet completed that cutover; never disable security checks prematurely.
+
+
 ATAX supports three ways for externally created agents to reach **one** canonical Supabase ledger: **GitHub connector only** (using an authorized, credential-bearing tool/Actions bridge for live ledger operations), **GitHub plus Supabase connectors** (the existing direct path), and **the remote ATAX MCP Worker**. Full coverage and verification differ by transport; the [connection-mode contract](../../docs/connection-modes.md) documents exact boundaries and acceptance gaps.
 
 This document configures **only the third mode**, the single-owner remote MCP Worker. Do **not** resurrect multi-user BYOC enrollment, D1 credential vaults, per-tenant Supabase ledgers, or provider credentials passed in MCP tool arguments.
