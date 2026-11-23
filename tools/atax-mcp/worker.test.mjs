@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash, webcrypto} from 'node:crypto';
-import {createHandler} from './worker.mjs';
+import {createHandler as createRuntimeHandler} from './worker.mjs';
 
 const token='test-operator-token-1234567890';
 const tokenSha=createHash('sha256').update(token).digest('hex');
@@ -21,6 +21,30 @@ const upstream=async (url, options={})=>{
   if(url.includes('/skills?'))return Response.json([{id:17,slug:'coding-router',name:'Coding Router',status:'active',current_version_id:'version-test'}]);
   throw Error('Unexpected upstream '+url);
 };
+// In-memory REST fixture for historical MCP protocol tests only.
+function testLedger(fetcher){
+  const request=async (path,method='GET',body)=>{
+    const res=await fetcher('https://project.supabase.co/rest/v1/'+path,{
+      method,headers:{apikey:'synthetic-unit-test',accept:'application/json'},
+      ...(body===undefined?{}:{body:JSON.stringify(body)})
+    });
+    return res.json();
+  };
+  return {
+    rpc:(name,params)=>request('rpc/'+name,'POST',params),
+    skills:query=>request('skills?select=id,name,slug,description,status,current_version_id&status=eq.active&or=(slug.ilike.*'+encodeURIComponent(String(query))+'*,name.ilike.*'+encodeURIComponent(String(query))+'*)&limit=30'),
+    skill:async slug=>{
+      const records=await request('skills?select=id,name,slug,status,current_version_id&slug=eq.'+encodeURIComponent(slug)+'&limit=1');
+      if(!records.length)throw Error('Skill unavailable');
+      const versions=await request('skill_versions?select=version,instructions,is_published&id=eq.'+encodeURIComponent(records[0].current_version_id)+'&limit=1');
+      return {...records[0],...versions[0]};
+    },
+    request
+  };
+}
+function createHandler(fetcher){
+  return createRuntimeHandler(fetcher,async env=>({...env,__ledgerDb:testLedger(fetcher)}));
+}
 const handler=createHandler(upstream);
 function post(method,params={},config={}){
   const body=JSON.stringify(config.body||{jsonrpc:'2.0',id:config.id??1,method,params});

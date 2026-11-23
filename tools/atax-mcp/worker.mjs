@@ -1,3 +1,4 @@
+import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
@@ -136,28 +137,9 @@ function toolAllowed(principal,env,tool){
   // This personal server never delegates provider secrets or privileged ledger RPCs.
   return canonicalOwner(principal,env) && allowedScope(principal,tool.scope);
 }
-function supabase(env,fetcher){
-  const url=String(env.SUPABASE_URL||'').replace(/\/$/,'');
-  const key=String(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY||'');
-  if(!/^https:\/\/[a-z0-9.-]+$/i.test(url)||!key)throw new Error('ATAX database configuration unavailable');
-  const headers={'apikey':key,'content-type':'application/json','accept':'application/json'};
-  if(!key.startsWith('sb_secret_')) headers.authorization='Bearer '+key;
-  async function request(path,method='GET',body){
-    const res=await fetcher(url+'/rest/v1/'+path,{method,headers:{...headers,...(method==='POST'?{'prefer':'return=representation'}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error'});
-    let parsed;try{parsed=await res.json();}catch{throw new Error('Database returned non-JSON response');}
-    if(!res.ok)throw new Error('Database rejected canonical request (HTTP '+res.status+')');
-    return parsed;
-  }
-  const escapeSearch = str=>String(str).replace(/[\\%*(),.]/g,' ').trim().slice(0,120);
-  const skills = async query => request('skills?select=id,name,slug,description,status,current_version_id&status=eq.active&or=(slug.ilike.*'+encodeURIComponent(escapeSearch(query))+'*,name.ilike.*'+encodeURIComponent(escapeSearch(query))+'*)&limit=30');
-  const skill = async slug=>{
-    const records=await request('skills?select=id,name,slug,status,current_version_id&slug=eq.'+encodeURIComponent(slug)+'&limit=1');
-    if(!records.length)throw new Error('Skill not found');
-    const s=records[0]; const versions=await request('skill_versions?select=version,instructions,is_published&id=eq.'+encodeURIComponent(s.current_version_id)+'&limit=1');
-    if(!versions.length||!versions[0].is_published)throw new Error('Canonical skill version unavailable');
-    return {...s,version:versions[0].version,instructions:versions[0].instructions};
-  };
-  return {request,skills,skill,rpc:(name,params)=>request('rpc/'+name,'POST',params)};
+function supabase(env){
+  if(!env?.__ledgerDb)throw Error('Canonical PostgreSQL ledger unavailable');
+  return env.__ledgerDb;
 }
 async function runCall(name,args,principal,env,fetcher){
   const match=byName.get(name);
@@ -222,7 +204,7 @@ async function routeRpc(msg,principal,env,fetcher){
   }
   return err(id,-32601,'Method not found');
 }
-export function createHandler(fetcher=fetch){
+export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
   async function dispatch(req,env={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL});
@@ -238,7 +220,7 @@ export function createHandler(fetcher=fetch){
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, OPTIONS'}});
     if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET'});
-    if(!env.SUPABASE_URL||!(env.SUPABASE_SECRET_KEY||env.SUPABASE_SERVICE_ROLE_KEY)||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
+    if(!env.__ledgerDb||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
     let principal;try{principal=await authenticate(req,env,fetcher);}catch{return json({error:'Authentication unavailable'},503);}
     if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
     if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
@@ -252,7 +234,14 @@ export function createHandler(fetcher=fetch){
     if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
     return json(Array.isArray(body)?results:results[0]);
   }
-  return async (req,env={})=>{
+  return async (req,bootstrapEnv={})=>{
+    const path=new URL(req.url).pathname;
+    let env={};
+    if(path==='/mcp'||path==='/.well-known/oauth-protected-resource'||
+       path==='/.well-known/oauth-protected-resource/mcp'){
+      try{env=await configLoader(bootstrapEnv);}
+      catch{return json({error:'ATAX MCP not configured'},503);}
+    }
     const response=await dispatch(req,env);
     const origin=req.headers.get('origin');
     if(!origin||!allowedOrigin(req,env))return response;

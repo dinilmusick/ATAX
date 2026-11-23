@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install pinned PostgreSQL transport for server tests and Worker bundling
+        run: npm install --prefix tools/atax-mcp --ignore-scripts --no-audit --no-fund
       - name: Syntax and protocol/auth tests (ATAX gateway only)
         run: |
           node --check tools/atax-mcp/worker.mjs

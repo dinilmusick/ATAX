@@ -1,17 +1,10 @@
 name = "atax-mcp"
 main = "worker.mjs"
 compatibility_date = "2026-11-20"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# Supabase remains canonical; this Worker only handles incoming MCP HTTP requests.
-# Define every credential with `wrangler secret put`, NEVER in this file.
-[vars]
-SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
-MCP_GITHUB_OWNER = "dinilmusick"
-
-# Single-owner secret bootstrap is the default, without any Luth or ULTRST dependency.
-# Set MCP_SHARED_TOKEN_SHA256 (secret) and MCP_SHARED_SUBJECT / MCP_SHARED_SCOPES
-# (appropriate owner-only variables) in the deployed Worker settings.
-# OAuth is optional: supply your own issuer/JWKS/audience/authorization-server
-# settings explicitly if a particular client requires OAuth discovery.
-# Do not hard-code a separate ULTRST/Luth service as an ATAX dependency.
+# The ONLY MCP runtime environment binding is the confidential server secret:
+# ATAX_SUPABASE_CONNECTION_URL=postgresql://<role>:<password>@<supabase-host>:5432/<db>?sslmode=require
+# Set it with wrangler secret put ATAX_SUPABASE_CONNECTION_URL; no [vars].
+# Owner policy, provider Vault credentials and Socket settings come from ledger.
