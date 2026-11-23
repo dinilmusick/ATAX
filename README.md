@@ -1,5 +1,7 @@
 # ATAX
 
+**New ATAX MCP/UI direction (23 Nov 2026):** [MCP server, ledger-managed provider credentials and first-party UI handoff](docs/MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md). The former headless/read-only-first policy is superseded for the MCP management UI. The existing MCP runtime remains legacy-configured until the independently verified database-backed cutover; direct GitHub/Supabase connectors stay unchanged.
+
 ATAX is a durable substrate for **externally created, transient agents**. One canonical Supabase ledger holds systems, goals, tasks, dependencies, constraints, memories, skills, claims, evidence and verified results. ATAX never spawns, schedules or hosts agents.
 
 ## Three connection modes
