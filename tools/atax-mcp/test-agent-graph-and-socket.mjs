@@ -26,7 +26,7 @@ if (existsSync(envPath)) {
   }
 }
 
-const token = process.env.ATAX_MCP_SHARED_TOKEN;
+const token = process.env.ATAX_MCP_SHARED_TOKEN || process.argv[2] || 'atax_5426bb43a95f34297740e50804035fc67db24be2be32098d';
 const mcpUrl = 'http://127.0.0.1:8787/mcp';
 
 let msgId = 1;
