@@ -234,7 +234,7 @@ jobs:
                           # Raw logs remain transient and are deleted below.
                           summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
                             | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL Skipo rule IDs:|FMRL Skipo migration categories:|FMRL dependency migration categories:|FMRL lockfile parse cause:|FMRL Frnes diagnostic state:|FMRL Frnes verifier JSON:|FMRL Frnes exception class:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
-                            | tail -n 8 || true)"
+                            | tail -n 16 || true)"
                           if [[ -n "$summary" ]]; then
                             printf '%s\n' "$summary" | tee -a "$GITHUB_STEP_SUMMARY"
                             break 2
