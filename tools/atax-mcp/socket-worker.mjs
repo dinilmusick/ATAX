@@ -1,4 +1,4 @@
-import {loadMcpRuntimeConfig} from './ledger-config.mjs';
+import {loadSocketRuntimeConfig} from './ledger-config.mjs';
 import {createSocketGateway,readBoundedText} from './socket-gateway.mjs';
 import {resolveBudget,estimateTextTokens} from '../socket-budget/index.mjs';
 
@@ -102,7 +102,7 @@ function createConfiguredSocketWorker(env,fetcher=fetch){
   });
 }
 
-export function createSocketWorker(bootstrapEnv,fetcher=fetch,configLoader=loadMcpRuntimeConfig){
+export function createSocketWorker(bootstrapEnv,fetcher=fetch,configLoader=loadSocketRuntimeConfig){
   return {async fetch(request){
     let policy;
     try{policy=await configLoader(bootstrapEnv);}

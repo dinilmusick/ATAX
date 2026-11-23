@@ -48,3 +48,20 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
   }
   return resolved;
 }
+
+/** Restricted sockets receive ONLY socket policy and a narrowly granted DB RPC adapter.
+ * No GitHub, Cloudflare, Vercel, maintainer bearer hashes, or privileged Vault reads.
+ */
+export async function loadSocketRuntimeConfig(bootstrapEnv,open=openLedger) {
+  const db=await open(bootstrapEnv);
+  const settings=await db.rpc('atax_mcp_socket_config_v1',{});
+  if(!obj(settings))throw Error('Restricted socket policy unavailable');
+  const resolved={__ledgerDb:db};
+  for(const [key,value] of Object.entries(settings)){
+    if(!key.startsWith('SOCKET_')||!SETTINGS.has(key)||
+       typeof value!=='string'||value.length>16384)
+      throw Error('Invalid restricted socket policy');
+    resolved[key]=value;
+  }
+  return resolved;
+}

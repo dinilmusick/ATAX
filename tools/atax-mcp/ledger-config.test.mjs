@@ -29,3 +29,16 @@ test('malformed or malicious canonical settings fail closed',async()=>{
     {settings:{},accounts:[{...config.accounts[0],token:'short'}]}
   ])await assert.rejects(loadMcpRuntimeConfig({},async()=>({rpc:async()=>fake})));
 });
+
+test('restricted socket configuration cannot hydrate any maintainer provider credential',async()=>{
+  const {loadSocketRuntimeConfig}=await import('./ledger-config.mjs');
+  const settings={SOCKET_MODEL_ID:'unknown',SOCKET_AUTH_AUDIENCE:'task-only'};
+  const open=async()=>({rpc:async name=>{
+    assert.equal(name,'atax_mcp_socket_config_v1');
+    return settings;
+  }});
+  const r=await loadSocketRuntimeConfig({},open);
+  assert.deepEqual(Object.keys(r).sort(),['SOCKET_AUTH_AUDIENCE','SOCKET_MODEL_ID','__ledgerDb'].sort());
+  assert.equal(r.GH_KEY_PERSONAL,undefined);
+  assert.equal(r.MCP_SHARED_TOKEN_SHA256,undefined);
+});
