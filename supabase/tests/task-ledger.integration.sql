@@ -12,6 +12,9 @@ declare
   claimed public.tasks;
   duplicate_claim public.tasks;
   verifier public.tasks;
+  denied_claim public.tasks;
+  other_verifier public.tasks;
+  denied_wrong_fence boolean := false;
   checkpoint_index integer;
 begin
   created := public.goal_ledger_create_with_tasks(
@@ -109,16 +112,63 @@ begin
     'completed'
   );
 
-  select * into verifier from public.task_ledger_claim_verification(
-    'integration-test-verifier',900
+  -- Targeted claims must not pull unrelated pending work from the global
+  -- verification queue, including tasks owned by other workspaces.
+  select * into denied_claim from public.task_ledger_claim_verification_for_task(
+    gen_random_uuid(),'integration-test-verifier',900
   );
-  if verifier.id is distinct from task_id then
-    raise exception 'Independent verifier did not claim submitted result';
+  if denied_claim.id is not null then
+    raise exception 'Targeted verification claimed an unrelated task';
+  end if;
+  -- Even a service-role caller may not claim its own submitted result.
+  select * into denied_claim from public.task_ledger_claim_verification_for_task(
+    task_id,'integration-test-worker',900
+  );
+  if denied_claim.id is not null then
+    raise exception 'Executor claimed its own submitted result';
+  end if;
+  select * into verifier from public.task_ledger_claim_verification_for_task(
+    task_id,'integration-test-verifier',900
+  );
+  if verifier.id is distinct from task_id
+     or verifier.verification_claim_token is null
+     or verifier.verification_claim_expires_at <= statement_timestamp() then
+    raise exception 'Targeted verifier did not acquire a live fenced claim';
+  end if;
+  select * into other_verifier from public.task_ledger_claim_verification_for_task(
+    task_id,'integration-test-verifier-two',900
+  );
+  if other_verifier.id is not null then
+    raise exception 'Another verifier stole a live claim';
+  end if;
+  begin
+    perform public.task_ledger_verify_result_claimed(
+      task_id,'integration-test-verifier',gen_random_uuid(),true,'{}'::jsonb
+    );
+  exception when others then
+    denied_wrong_fence := true;
+  end;
+  if not denied_wrong_fence then
+    raise exception 'Incorrect verifier fencing token was accepted';
+  end if;
+  if has_function_privilege('anon',
+       'public.task_ledger_claim_verification_for_task(uuid,text,integer)','EXECUTE')
+     or has_function_privilege('authenticated',
+       'public.task_ledger_claim_verification_for_task(uuid,text,integer)','EXECUTE')
+     or not has_function_privilege('service_role',
+       'public.task_ledger_claim_verification_for_task(uuid,text,integer)','EXECUTE') then
+    raise exception 'Targeted verifier RPC grants violate the service-role-only boundary';
   end if;
   perform public.task_ledger_verify_result_claimed(
     task_id,'integration-test-verifier',verifier.verification_claim_token,
     true,jsonb_build_object('verified',true,'independent',true)
   );
+  select * into denied_claim from public.task_ledger_claim_verification_for_task(
+    task_id,'integration-test-verifier-two',900
+  );
+  if denied_claim.id is not null then
+    raise exception 'A verified task was claimable again';
+  end if;
   if not exists(
     select 1 from public.tasks
     where id=task_id and status='completed' and verification_status='verified'
@@ -129,7 +179,7 @@ begin
     where e.task_id=(created->>'root_task_id')::uuid
       and e.payload->>'event_kind'='loop_contract_ready'
   ) then raise exception 'Independent loop authoring event was not recorded'; end if;
-  raise notice 'PASS: global claim, independent loop authoring, fenced executor, predicate-backed checkpoints and verifier';
+  raise notice 'PASS: independent author/executor, targeted fenced verifier, token/replay denial, scoped ACL and predicate-backed checkpoints';
 end;
 $test$;
 rollback;
