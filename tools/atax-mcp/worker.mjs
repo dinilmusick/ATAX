@@ -159,7 +159,7 @@ async function runCall(name,args,principal,env,fetcher){
     if(spec.enum&&!spec.enum.includes(val))return {isError:true,content:[{type:'text',text:'Unsupported value: '+key}]};
   }
   try{const result=await match.invoke(args,supabase(env,fetcher),principal,{env,fetcher});return {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:{result}};}
-  catch(error){return {isError:true,content:[{type:'text',text:String(error?.message||'Database operation failed').slice(0,180)}]};}
+  catch{return {isError:true,content:[{type:'text',text:'Canonical operation denied or unavailable'}]};}
 }
 async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(msg)||msg.jsonrpc!=='2.0'||(msg.id!==undefined && !(typeof msg.id==='number'||typeof msg.id==='string'||msg.id===null)))return err(null,-32600,'Invalid request');
@@ -194,7 +194,7 @@ async function routeRpc(msg,principal,env,fetcher){
       else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
       else return err(id,-32002,'Unknown resource URI');
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
-    }catch(error){return err(id,-32001,String(error.message).slice(0,180));}
+    }catch{return err(id,-32001,'Canonical resource denied or unavailable');}
   }
   if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]:[]});
   if(msg.method==='prompts/get'){
