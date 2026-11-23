@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+@layer base {
+  :root {
+    --font-display: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #140D0B;
+    color: #F2EBE1;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Subtle HAYATE-inspired atmospheric background for flow canvases */
+.hayate-contour-bg {
+  background-color: #140D0B;
+  background-image:
+    radial-gradient(ellipse 75% 55% at 12% 88%, rgba(200, 50, 20, 0.14), transparent 60%),
+    radial-gradient(ellipse 60% 45% at 88% 12%, rgba(128, 72, 46, 0.14), transparent 62%);
+}
+
+/* React Flow theme overrides aligned to HAYATE espresso + vermilion + sage-ivory */
+.react-flow__node {
+  font-family: var(--font-sans);
+}
+
+.react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__minimap {
+  background-color: #1B120F !important;
+  border: 1px solid #3D2B24 !important;
+  border-radius: 2px !important;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #140D0B;
+}
+::-webkit-scrollbar-thumb {
+  background: #3D2B24;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C83214;
+}

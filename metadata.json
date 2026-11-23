@@ -1,0 +1,7 @@
+{
+  "name": "ATAX Autonomous Agent Substrate & Control Plane",
+  "description": "Durable substrate dashboard and control plane for externally created transient agents, task ledgers, goal-task graphs, skill catalogs, and multi-mode connectivity.",
+  "requestCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
