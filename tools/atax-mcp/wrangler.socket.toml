@@ -1,10 +1,8 @@
 name = "atax-task-socket"
 main = "socket-worker.mjs"
 compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-[vars]
-SUPABASE_URL = "https://vcaerawuwffziufvpbvw.supabase.co"
-# Bind all SOCKET_AUTH_* identity settings and SOCKET_WORKFLOW_CATALOG_JSON
-# at deployment, and the SUPABASE_SECRET_KEY as a Worker secret.
-# Never inject unrestricted GitHub, Cloudflare or maintainer credentials.
+# Only required runtime environment binding: ATAX_SUPABASE_CONNECTION_URL.
+# Restricted socket remains release-gated; never enable without host attestation.

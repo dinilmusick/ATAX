@@ -80,6 +80,17 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Run real single-URI PostgreSQL adapter smoke in disposable Supabase
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SUPABASE_ACCESS_TOKEN:-}"
+          test -z "${SUPABASE_DB_URL:-}"
+          npm install --prefix tools/atax-mcp --ignore-scripts --no-audit --no-fund
+          node tools/atax-mcp/pg-ledger.live-test.mjs
+
       - name: Run Socket V1 fenced SQL regression and real two-session claim race
         env:
           SOCKET_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres

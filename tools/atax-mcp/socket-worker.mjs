@@ -1,3 +1,4 @@
+import {loadSocketRuntimeConfig} from './ledger-config.mjs';
 import {createSocketGateway,readBoundedText} from './socket-gateway.mjs';
 import {resolveBudget,estimateTextTokens} from '../socket-budget/index.mjs';
 
@@ -60,29 +61,18 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
   }catch{return null;}
 }
 
-export function createSocketWorker(env,fetcher=fetch){
+function createConfiguredSocketWorker(env,fetcher=fetch){
   // Model-specific conservative budget is mandatory. Unknown models use Agent A's
   // 8192-token fallback, never an unbounded or self-declared capacity.
   const budgetProfile=resolveBudget(String(env.SOCKET_MODEL_ID||'unknown'));
   const database={
     async executeAtomically(command){
-      // This MUST be a single canonical Postgres transaction (Agent B migration).
-      // Missing RPC, invalid service role, or malformed receipt all fail closed.
-      const base=String(env.SUPABASE_URL||'').replace(/\/$/,'');
-      const secret=String(env.SUPABASE_SECRET_KEY||'');
-      if(!/^https:\/\/[a-z0-9.-]+$/i.test(base)||!secret)
-        throw Error('Canonical database unavailable');
-      const headers={'content-type':'application/json','accept':'application/json','apikey':secret};
-      if(!secret.startsWith('sb_secret_'))headers.authorization='Bearer '+secret;
-      const response=await fetcher(base+'/rest/v1/rpc/atax_socket_execute_v1',{
-        method:'POST',redirect:'error',headers,
-        body:JSON.stringify({command_in:command})
-      });
-      if(!response.ok)throw Error('Canonical transaction unavailable');
-      const body=await readBoundedText(response,16384);
-      if(body===null)throw Error('Canonical response exceeds socket boundary');
-      const result=JSON.parse(body);
-      return Array.isArray(result)?null:result;
+      if(!env.__ledgerDb)throw Error('Canonical PostgreSQL socket transaction unavailable');
+      // One server-controlled PostgreSQL RPC, never a client-directed SQL tool.
+      const result=await env.__ledgerDb.rpc('atax_socket_execute_v1',{command_in:command});
+      if(!result||typeof result!=='object'||Array.isArray(result))
+        throw Error('Canonical socket transaction unavailable');
+      return result;
     }
   };
   let catalog={};
@@ -112,6 +102,16 @@ export function createSocketWorker(env,fetcher=fetch){
   });
 }
 
+export function createSocketWorker(bootstrapEnv,fetcher=fetch,configLoader=loadSocketRuntimeConfig){
+  return {async fetch(request){
+    let policy;
+    try{policy=await configLoader(bootstrapEnv);}
+    catch{return Response.json({error:'ATAX task socket not configured'},{
+      status:503,headers:{'cache-control':'no-store'}
+    });}
+    return createConfiguredSocketWorker(policy,fetcher).fetch(request);
+  }};
+}
 export default {
   fetch(request,env){return createSocketWorker(env).fetch(request);}
 };

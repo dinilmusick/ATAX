@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
-import {createHandler} from './worker.mjs';
+import {createHandler as createRuntimeHandler} from './worker.mjs';
 
 const resource = 'https://atax.example/mcp';
 const issuer = 'https://issuer.example/oauth';
@@ -13,7 +13,15 @@ const fetcher = async (url,options={}) => {
   if (String(url).includes('/rpc/'))return Response.json({ok:true,params:JSON.parse(options.body||'{}')});
   throw Error('Unexpected upstream request');
 };
-const handler=createHandler(fetcher);
+const handler=createRuntimeHandler(fetcher,async env=>({
+  ...env,__ledgerDb:{
+    rpc:async (name,params)=>{
+      const result=await fetcher('https://synthetic.supabase.co/rest/v1/rpc/'+name,{
+        method:'POST',body:JSON.stringify(params)});
+      return result.json();
+    }
+  }
+}));
 const config={
   SUPABASE_URL:'https://project.supabase.co',
   SUPABASE_SECRET_KEY:'testing-only-secret',
