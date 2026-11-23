@@ -14,13 +14,16 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import {
+  AlertTriangle,
   Box,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Cpu,
   Database,
   GitBranch,
+  Loader2,
   Maximize2,
   Orbit,
   Pin,
@@ -31,11 +34,22 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { SubstrateSubsystem, SubstrateSystem } from '../types/substrate';
+import type {
+  SubstrateSubsystem,
+  SubstrateSystem,
+  SubstrateSystemEdge,
+  SubstrateUniverse,
+  SystemsSubstrateResponse,
+} from '../types/substrate';
 import { buildSystemsGraph } from '../utils/graphData';
 import { useFloatyForceLayout } from '../hooks/useFloatyForceLayout';
 import { IconButton } from './IconButton';
 import { NodeDetailProvider, useNodeDetail } from '../context/NodeDetailContext';
+
+interface SystemsGraphViewProps {
+  refreshTick?: number;
+  onLoadingChange?: (loading: boolean) => void;
+}
 
 type SystemNodeData = SubstrateSystem & { expanded?: boolean };
 type SubsystemNodeData = SubstrateSubsystem & { systemName: string };
@@ -163,7 +177,6 @@ function SystemNode({ data, selected }: NodeProps) {
     >
       <BidirectionalHandles />
 
-      {/* Clean Default Node Body: Icon, Title, and Expand Button Only */}
       <div className="flex items-center justify-between gap-2.5 px-3.5 h-full">
         <div className="flex items-center gap-2.5 min-w-0">
           <SystemIcon type={sys.systemType} selected={selected} />
@@ -184,7 +197,6 @@ function SystemNode({ data, selected }: NodeProps) {
         </button>
       </div>
 
-      {/* Expanded Overlay: Reveals All Details with Pin and Collapse Actions */}
       {isExpanded && (
         <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border border-[#C83214] bg-[#211613] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
           <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#2A1B16] border-b border-[#433027]">
@@ -243,15 +255,23 @@ function SystemNode({ data, selected }: NodeProps) {
               </span>
             </div>
 
+            {sys.universeName && (
+              <div className="font-mono text-[10px] text-[#DF6B3B] truncate">
+                Universe: {sys.universeName}
+              </div>
+            )}
+
             <p className="text-xs leading-relaxed text-[#C8B9AC]">
-              {sys.description}
+              {sys.description || 'No description recorded.'}
             </p>
 
             <div className="pt-2 border-t border-[#3D2B24] flex items-center justify-between text-[11px] font-mono text-[#A89688]">
-              <span>v{sys.contextVersion} ctx</span>
+              <span>
+                v{sys.contextVersion} · {sys.memoriesCount} mem · {sys.constraintsCount} cstr
+              </span>
               <span className="inline-flex items-center gap-1 text-[#DFE4D8]">
                 <ChevronRight className="w-3 h-3 text-[#E04819]" />
-                {sys.subsystems.length} subsystems
+                {sys.subsystems.length} sub
               </span>
             </div>
           </div>
@@ -280,7 +300,6 @@ function SubsystemNode({ data, selected }: NodeProps) {
     >
       <BidirectionalHandles />
 
-      {/* Clean Default Subsystem Body: Icon, Title, and Expand Button Only */}
       <div className="flex items-center justify-between gap-2 px-3 h-full">
         <div className="flex items-center gap-2 min-w-0">
           <Box className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />
@@ -301,7 +320,6 @@ function SubsystemNode({ data, selected }: NodeProps) {
         </button>
       </div>
 
-      {/* Expanded Overlay */}
       {isExpanded && (
         <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border border-[#DF6B3B] bg-[#241814] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
           <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#2D1C16] border-b border-[#4A342B]">
@@ -354,10 +372,10 @@ function SubsystemNode({ data, selected }: NodeProps) {
               </span>
             </div>
             <p className="text-[11px] text-[#C8B9AC] leading-relaxed">
-              {sub.description}
+              {sub.description || 'No description recorded.'}
             </p>
             <div className="bg-[#150E0B] border border-[#382821] px-2 py-1 font-mono text-[10px] text-[#DFE4D8] break-all">
-              {sub.contract}
+              {sub.contract || '{}'}
             </div>
           </div>
         </div>
@@ -371,15 +389,57 @@ const nodeTypes = {
   subsystemNode: SubsystemNode,
 };
 
-function SystemsGraphCanvas() {
+function SystemsGraphCanvas({ refreshTick = 0, onLoadingChange }: SystemsGraphViewProps) {
+  const [universes, setUniverses] = useState<SubstrateUniverse[]>([]);
+  const [systems, setSystems] = useState<SubstrateSystem[]>([]);
+  const [rawEdges, setRawEdges] = useState<SubstrateSystemEdge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [showWormholes, setShowWormholes] = useState(true);
   const [expandedSystemIds, setExpandedSystemIds] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<SelectedSystemItem | null>(null);
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
+  const fetchSystems = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    onLoadingChange?.(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/substrate/systems', { signal });
+      const payload = (await res.json()) as Partial<SystemsSubstrateResponse> & { error?: string };
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to load systems (HTTP ${res.status})`);
+      }
+      setUniverses(Array.isArray(payload.universes) ? payload.universes : []);
+      setSystems(Array.isArray(payload.systems) ? payload.systems : []);
+      setRawEdges(Array.isArray(payload.edges) ? payload.edges : []);
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      setError(err instanceof Error ? err.message : 'Unable to load systems from Supabase.');
+    } finally {
+      if (!signal?.aborted) {
+        setLoading(false);
+        onLoadingChange?.(false);
+      }
+    }
+  }, [onLoadingChange]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchSystems(controller.signal);
+    return () => controller.abort();
+  }, [fetchSystems, refreshTick]);
+
   const initialGraph = useMemo(
-    () => buildSystemsGraph({ showWormholes, expandedSystemIds }),
-    [showWormholes, expandedSystemIds]
+    () =>
+      buildSystemsGraph({
+        systems,
+        edges: rawEdges,
+        showWormholes,
+        expandedSystemIds,
+      }),
+    [systems, rawEdges, showWormholes, expandedSystemIds]
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
@@ -412,12 +472,17 @@ function SystemsGraphCanvas() {
   const handleReset = useCallback(() => {
     setExpandedSystemIds([]);
     setSelectedItem(null);
-    const fresh = buildSystemsGraph({ showWormholes, expandedSystemIds: [] });
+    const fresh = buildSystemsGraph({
+      systems,
+      edges: rawEdges,
+      showWormholes,
+      expandedSystemIds: [],
+    });
     setNodes(fresh.nodes);
     setEdges(fresh.edges);
     resetBodies(fresh.nodes, true);
     setTimeout(() => fitView({ padding: 0.22, duration: 220 }), 120);
-  }, [showWormholes, setNodes, setEdges, resetBodies, fitView]);
+  }, [systems, rawEdges, showWormholes, setNodes, setEdges, resetBodies, fitView]);
 
   const clickTimerRef = useRef<number | null>(null);
 
@@ -453,20 +518,174 @@ function SystemsGraphCanvas() {
     );
   }, []);
 
-  const visibleSubsystemsCount = nodes.filter((n) => n.type === 'subsystemNode').length;
+  const [isBreadcrumbPinned, setIsBreadcrumbPinned] = useState(false);
+
+  // Derive active system & subsystem for breadcrumbs
+  const activeSubsystem = useMemo(() => {
+    if (selectedItem?.kind === 'subsystem') return selectedItem.data;
+    return null;
+  }, [selectedItem]);
+
+  const activeSystem = useMemo(() => {
+    if (selectedItem?.kind === 'system') return selectedItem.data;
+    if (activeSubsystem) {
+      return (
+        systems.find(
+          (s) =>
+            s.name === activeSubsystem.systemName ||
+            s.subsystems.some((sub) => sub.id === activeSubsystem.id)
+        ) || null
+      );
+    }
+    if (expandedSystemIds.length > 0) {
+      const lastId = expandedSystemIds[expandedSystemIds.length - 1];
+      return systems.find((s) => s.id === lastId) || null;
+    }
+    return null;
+  }, [selectedItem, activeSubsystem, expandedSystemIds, systems]);
+
+  const breadcrumbs = useMemo(() => {
+    const crumbs: Array<{
+      id: string;
+      label: string;
+      icon?: React.ComponentType<{ className?: string }>;
+      onClick?: () => void;
+      isLeaf: boolean;
+    }> = [
+      {
+        id: 'root',
+        label: 'Systems',
+        icon: Cpu,
+        isLeaf: !activeSystem,
+        onClick: () => {
+          setExpandedSystemIds([]);
+          setSelectedItem(null);
+          fitView({ padding: 0.18, duration: 220 });
+        },
+      },
+    ];
+
+    if (activeSystem) {
+      crumbs.push({
+        id: activeSystem.id,
+        label: activeSystem.name,
+        isLeaf: !activeSubsystem,
+        onClick: () => {
+          setSelectedItem({ kind: 'system', data: activeSystem });
+          fitView({ nodes: [{ id: activeSystem.id }], duration: 220, maxZoom: 1.1 });
+        },
+      });
+    }
+
+    if (activeSubsystem) {
+      crumbs.push({
+        id: activeSubsystem.id,
+        label: activeSubsystem.name,
+        isLeaf: true,
+        onClick: () => {
+          setSelectedItem({ kind: 'subsystem', data: activeSubsystem });
+        },
+      });
+    }
+
+    return crumbs;
+  }, [activeSystem, activeSubsystem, fitView]);
+
+  const handleBack = useCallback(() => {
+    if (activeSubsystem && activeSystem) {
+      setSelectedItem({ kind: 'system', data: activeSystem });
+      fitView({ nodes: [{ id: activeSystem.id }], duration: 220, maxZoom: 1.1 });
+    } else if (activeSystem) {
+      setExpandedSystemIds((prev) => prev.filter((id) => id !== activeSystem.id));
+      setSelectedItem(null);
+      fitView({ padding: 0.18, duration: 220 });
+    }
+  }, [activeSubsystem, activeSystem, fitView]);
 
   return (
     <div className="flex flex-col w-full h-[calc(100vh-112px)] min-h-[680px] border border-[#3B2A23] bg-[#140D0B] overflow-hidden">
-      {/* Dedicated Top Canvas Control Bar */}
+      {/* Dedicated Top Canvas Control Bar: Breadcrumbs on Left, Zoom/Controls on Right */}
       <div className="h-14 shrink-0 px-4 border-b border-[#382821] bg-[#18100D] flex items-center justify-between gap-4 z-20">
-        <div className="flex items-center gap-1.5">
+        {/* Left: Breadcrumbs UI showing nesting path and go-back / pin actions */}
+        <nav
+          aria-label="Systems nesting hierarchy"
+          className="flex items-center gap-1.5 min-w-0 max-w-[70%] overflow-x-auto py-1"
+        >
+          {breadcrumbs.length > 1 && (
+            <button
+              type="button"
+              onClick={handleBack}
+              aria-label="Go back one nesting level"
+              title="Go back"
+              className="p-1.5 rounded-xs border border-[#3F2E27] bg-[#1F1512] text-[#D8CFC2] hover:text-[#F7F3EC] hover:border-[#E04819] transition-colors cursor-pointer mr-0.5 shrink-0"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <ol className="flex items-center gap-1.5 font-mono text-xs text-[#B9AA9D] list-none p-0 m-0">
+            {breadcrumbs.map((crumb, idx) => {
+              const isLast = idx === breadcrumbs.length - 1;
+              const Icon = crumb.icon;
+              return (
+                <li key={crumb.id} className="inline-flex items-center gap-1.5 shrink-0">
+                  {idx > 0 && (
+                    <ChevronRight className="w-3 h-3 text-[#6E584B] shrink-0" aria-hidden="true" />
+                  )}
+                  {isLast ? (
+                    <span
+                      aria-current="location"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-[#241814] text-[#F7F3EC] border border-[#594238] font-semibold truncate max-w-[240px]"
+                    >
+                      {Icon && <Icon className="w-3.5 h-3.5 text-[#E04819] shrink-0" />}
+                      <span className="truncate">{crumb.label}</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={crumb.onClick}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xs hover:bg-[#2C1E19] hover:text-[#F7F3EC] text-[#D8CFC2] transition-colors cursor-pointer truncate max-w-[200px]"
+                    >
+                      {Icon && <Icon className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />}
+                      <span className="truncate">{crumb.label}</span>
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          {breadcrumbs.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setIsBreadcrumbPinned((p) => !p)}
+              aria-label={isBreadcrumbPinned ? 'Unpin breadcrumb view' : 'Pin breadcrumb view'}
+              title={
+                isBreadcrumbPinned
+                  ? 'Unpin path (auto-clears on background click)'
+                  : 'Pin path (stays focused)'
+              }
+              aria-pressed={isBreadcrumbPinned}
+              className={`p-1.5 rounded-xs border transition-colors cursor-pointer ml-1 shrink-0 ${
+                isBreadcrumbPinned
+                  ? 'bg-[#C83214] text-[#F7F3EC] border-[#E04819]'
+                  : 'border-transparent text-[#8C7263] hover:text-[#F7F3EC] hover:bg-[#2C1E19]'
+              }`}
+            >
+              <Pin className={`w-3.5 h-3.5 ${isBreadcrumbPinned ? 'fill-current' : ''}`} />
+            </button>
+          )}
+        </nav>
+
+        {/* Right: Zoom and Other Controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <IconButton label="Zoom In" onClick={() => zoomIn({ duration: 150 })}>
             <ZoomIn className="w-4 h-4" />
           </IconButton>
           <IconButton label="Zoom Out" onClick={() => zoomOut({ duration: 150 })}>
             <ZoomOut className="w-4 h-4" />
           </IconButton>
-          <IconButton label="Fit Systems Graph" onClick={() => fitView({ padding: 0.2, duration: 220 })}>
+          <IconButton label="Fit Systems Graph" onClick={() => fitView({ padding: 0.18, duration: 220 })}>
             <Maximize2 className="w-4 h-4" />
           </IconButton>
           <div className="w-px h-6 bg-[#3D2B24] mx-1" />
@@ -481,16 +700,6 @@ function SystemsGraphCanvas() {
           <IconButton label="Reset & Collapse Systems" onClick={handleReset}>
             <RotateCcw className="w-4 h-4" />
           </IconButton>
-        </div>
-
-        <div className="text-[11px] font-mono text-[#B9AA9D] flex items-center gap-3">
-          <span>Systems: 6</span>
-          <span aria-hidden="true">·</span>
-          <span className="text-[#DFE4D8]">Subsystems: {visibleSubsystemsCount}</span>
-          <span aria-hidden="true">·</span>
-          <span>Links: {edges.length}</span>
-          <span aria-hidden="true">·</span>
-          <span className="text-[#E04819]">Dbl-click system to nest</span>
         </div>
       </div>
 
@@ -511,10 +720,14 @@ function SystemsGraphCanvas() {
             onNodeMouseEnter={onNodeMouseEnter}
             onNodeMouseLeave={onNodeMouseLeave}
             onNodeClick={handleNodeClick}
-            onPaneClick={() => setSelectedItem(null)}
+            onPaneClick={() => {
+              if (!isBreadcrumbPinned) {
+                setSelectedItem(null);
+              }
+            }}
             fitView
-            fitViewOptions={{ padding: 0.22 }}
-            minZoom={0.35}
+            fitViewOptions={{ padding: 0.18 }}
+            minZoom={0.18}
             maxZoom={1.6}
           >
             <Background
@@ -536,6 +749,50 @@ function SystemsGraphCanvas() {
             />
           </ReactFlow>
         </div>
+
+        {/* Live Status Overlay for Loading / Error / Empty */}
+        {loading && systems.length === 0 && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#140D0B]/75 backdrop-blur-[1px]">
+            <div className="border border-[#433129] bg-[#1D1411] px-6 py-4 rounded-sm flex items-center gap-3 text-xs font-mono text-[#DFE4D8]">
+              <Loader2 className="w-4 h-4 animate-spin text-[#E04819]" />
+              <span>Loading systems from Supabase ledger...</span>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="absolute top-4 left-4 right-4 z-30 flex justify-center pointer-events-none">
+            <div
+              role="alert"
+              className="pointer-events-auto max-w-lg w-full border border-[#C83214] bg-[#241310] px-4 py-3 rounded-sm flex items-center justify-between gap-3 text-xs text-[#F7F3EC] shadow-xl"
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-[#E04819] shrink-0 mt-0.5" />
+                <span className="font-mono break-words">{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchSystems()}
+                className="px-2.5 py-1 text-[11px] font-mono bg-[#C83214] hover:bg-[#E04819] text-[#F7F3EC] rounded-xs shrink-0 cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!loading && !error && systems.length === 0 && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="pointer-events-auto border border-[#433129] bg-[#1D1411] px-6 py-5 rounded-sm text-center space-y-2 max-w-md">
+              <div className="font-display text-base font-semibold text-[#F7F3EC]">
+                No Active Systems Recorded
+              </div>
+              <p className="text-xs text-[#B9AA9D]">
+                The connected Supabase ledger returned zero active rows in <span className="font-mono text-[#DFE4D8]">public.systems</span>.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Slide-over Detail Drawer */}
         {selectedItem && (
@@ -566,23 +823,33 @@ function SystemsGraphCanvas() {
 
             {selectedItem.kind === 'system' ? (
               <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
+                {selectedItem.data.universeName && (
+                  <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2">
+                    Universe: <span className="font-semibold text-[#18120F]">{selectedItem.data.universeName}</span>
+                  </div>
+                )}
+
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
                     Substrate Role
                   </h3>
                   <p className="text-sm text-[#2C221D] leading-relaxed">
-                    {selectedItem.data.description}
+                    {selectedItem.data.description || 'No description recorded.'}
                   </p>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 border-y border-[#C5CBBF] py-3 font-mono">
+                <div className="grid grid-cols-4 gap-2 border-y border-[#C5CBBF] py-3 font-mono">
                   <div>
                     <div className="text-[10px] text-[#6B5A4E]">Version</div>
                     <div className="text-sm font-semibold">v{selectedItem.data.contextVersion}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-[#6B5A4E]">Subsystems</div>
+                    <div className="text-[10px] text-[#6B5A4E]">Subsys</div>
                     <div className="text-sm font-semibold">{selectedItem.data.subsystems.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-[#6B5A4E]">Memories</div>
+                    <div className="text-sm font-semibold">{selectedItem.data.memoriesCount}</div>
                   </div>
                   <div>
                     <div className="text-[10px] text-[#6B5A4E]">Constraints</div>
@@ -590,48 +857,73 @@ function SystemsGraphCanvas() {
                   </div>
                 </div>
 
+                {Object.keys(selectedItem.data.parameters || {}).length > 0 && (
+                  <div>
+                    <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-2">
+                      Parameters
+                    </h3>
+                    <pre className="bg-[#D2D8CA] border border-[#B6BEAE] p-2.5 font-mono text-[11px] text-[#18120F] rounded-xs overflow-x-auto whitespace-pre-wrap break-all">
+                      {JSON.stringify(selectedItem.data.parameters, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-2">
                     Nested Subsystems
                   </h3>
-                  <div className="space-y-2">
-                    {selectedItem.data.subsystems.map((sub) => (
-                      <div
-                        key={sub.id}
-                        className="bg-[#D2D8CA] border border-[#B6BEAE] p-2.5 rounded-xs space-y-1"
-                      >
-                        <div className="flex items-center justify-between font-mono text-[10px]">
-                          <span className="text-[#C83214] font-semibold">{sub.readableKey}</span>
-                          <span className="uppercase text-[#5A4B42]">{sub.status}</span>
+                  {selectedItem.data.subsystems.length === 0 ? (
+                    <p className="font-mono text-[11px] text-[#6B5A4E]">
+                      No nested subsystems recorded.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedItem.data.subsystems.map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="bg-[#D2D8CA] border border-[#B6BEAE] p-2.5 rounded-xs space-y-1"
+                        >
+                          <div className="flex items-center justify-between font-mono text-[10px]">
+                            <span className="text-[#C83214] font-semibold">{sub.readableKey}</span>
+                            <span className="uppercase text-[#5A4B42]">{sub.status}</span>
+                          </div>
+                          <div className="font-semibold text-[#18120F]">{sub.name}</div>
+                          <div className="font-mono text-[10px] text-[#4C4039] break-all">
+                            {sub.contract}
+                          </div>
                         </div>
-                        <div className="font-semibold text-[#18120F]">{sub.name}</div>
-                        <div className="font-mono text-[10px] text-[#4C4039]">{sub.contract}</div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-2">
                     System Functions
                   </h3>
-                  <div className="space-y-2.5">
-                    {selectedItem.data.functions.map((fn) => (
-                      <div
-                        key={fn.key}
-                        className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs space-y-1"
-                      >
-                        <div className="font-semibold text-[#18120F]">{fn.name}</div>
-                        <div className="font-mono text-[11px] text-[#C83214]">{fn.key}</div>
-                        <div className="font-mono text-[11px] text-[#4C4039] pt-1">
-                          In: {fn.inputContract}
+                  {selectedItem.data.functions.length === 0 ? (
+                    <p className="font-mono text-[11px] text-[#6B5A4E]">
+                      No functions recorded.
+                    </p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {selectedItem.data.functions.map((fn) => (
+                        <div
+                          key={fn.key}
+                          className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs space-y-1"
+                        >
+                          <div className="font-semibold text-[#18120F]">{fn.name}</div>
+                          <div className="font-mono text-[11px] text-[#C83214]">{fn.key}</div>
+                          <div className="font-mono text-[11px] text-[#4C4039] pt-1">
+                            In: {fn.inputContract}
+                          </div>
+                          <div className="font-mono text-[11px] text-[#4C4039]">
+                            Out: {fn.outputContract}
+                          </div>
                         </div>
-                        <div className="font-mono text-[11px] text-[#4C4039]">
-                          Out: {fn.outputContract}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -644,15 +936,15 @@ function SystemsGraphCanvas() {
                     Subsystem Responsibility
                   </h3>
                   <p className="text-sm text-[#2C221D] leading-relaxed">
-                    {selectedItem.data.description}
+                    {selectedItem.data.description || 'No description recorded.'}
                   </p>
                 </div>
                 <div>
                   <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
                     Interface Contract
                   </h3>
-                  <pre className="bg-[#18120F] text-[#F2EBE1] p-3 font-mono text-[11px] rounded-xs whitespace-pre-wrap">
-                    {selectedItem.data.contract}
+                  <pre className="bg-[#18120F] text-[#F2EBE1] p-3 font-mono text-[11px] rounded-xs whitespace-pre-wrap break-all">
+                    {selectedItem.data.contract || '{}'}
                   </pre>
                 </div>
               </div>
@@ -664,11 +956,11 @@ function SystemsGraphCanvas() {
   );
 }
 
-export function SystemsGraphView() {
+export function SystemsGraphView(props: SystemsGraphViewProps) {
   return (
     <ReactFlowProvider>
       <NodeDetailProvider>
-        <SystemsGraphCanvas />
+        <SystemsGraphCanvas {...props} />
       </NodeDetailProvider>
     </ReactFlowProvider>
   );

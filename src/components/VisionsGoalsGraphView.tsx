@@ -10,14 +10,19 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  type Edge,
   type Node,
   type NodeProps,
 } from '@xyflow/react';
 import {
+  AlertTriangle,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Flag,
+  GitBranch,
+  Loader2,
   Maximize2,
   Pin,
   RotateCcw,
@@ -30,16 +35,20 @@ import {
 import type {
   GoalGraphNodeData,
   TaskGraphNodeData,
+  TaskOccupancyInfo,
+  VisionGoalTaskEdge,
   VisionGraphNodeData,
+  VisionsGoalsSubstrateResponse,
 } from '../types/substrate';
-import {
-  buildVisionsGoalsGraph,
-  formatContextUsage,
-  GOAL_NODES,
-} from '../utils/graphData';
+import { buildVisionsGoalsGraph, formatContextUsage } from '../utils/graphData';
 import { useFloatyForceLayout } from '../hooks/useFloatyForceLayout';
 import { IconButton } from './IconButton';
 import { NodeDetailProvider, useNodeDetail } from '../context/NodeDetailContext';
+
+interface VisionsGoalsGraphViewProps {
+  refreshTick?: number;
+  onLoadingChange?: (loading: boolean) => void;
+}
 
 type VisionNodeData = VisionGraphNodeData & { expanded?: boolean };
 type GoalNodeData = GoalGraphNodeData & { expanded?: boolean };
@@ -48,6 +57,32 @@ type SelectedGraphItem =
   | { kind: 'vision'; data: VisionGraphNodeData }
   | { kind: 'goal'; data: GoalGraphNodeData }
   | { kind: 'task'; data: TaskGraphNodeData };
+
+function leaseBadgeClass(state: TaskOccupancyInfo['leaseState']): string {
+  switch (state) {
+    case 'lease_valid':
+      return 'text-[#6CC48E] border-[#3E7A56] bg-[#13241A]';
+    case 'lease_expired':
+      return 'text-[#E04819] border-[#8C3B28] bg-[#261410]';
+    case 'unknown':
+      return 'text-[#E09F3E] border-[#8C5B23] bg-[#23190E]';
+    default:
+      return 'text-[#B9AA9D] border-[#3F2E27] bg-[#1A110E]';
+  }
+}
+
+function leaseLabel(state: TaskOccupancyInfo['leaseState']): string {
+  switch (state) {
+    case 'lease_valid':
+      return 'Lease Valid';
+    case 'lease_expired':
+      return 'Lease Expired';
+    case 'unknown':
+      return 'Lease Unknown';
+    default:
+      return 'Unclaimed';
+  }
+}
 
 function VisionNode({ data, selected }: NodeProps) {
   const vision = data as unknown as VisionNodeData;
@@ -58,33 +93,35 @@ function VisionNode({ data, selected }: NodeProps) {
     return (
       <div
         data-node-id={vision.id}
-        className={`w-full h-full rounded-sm border-2 transition-colors duration-150 flex flex-col ${
+        className={`w-full h-full rounded-md border-2 transition-colors duration-150 flex flex-col shadow-xl ${
           selected
-            ? 'bg-[#19120F]/95 border-[#C83214] ring-1 ring-[#C83214]'
-            : 'bg-[#16100D]/95 border-[#C5CBBF]/80 hover:border-[#DFE4D8]'
+            ? 'bg-[#E5EAE0] border-[#2C4A35] ring-2 ring-[#2C4A35]'
+            : 'bg-[#DFE4D8] border-[#5A7356] hover:border-[#2C4A35]'
         }`}
       >
         <Handle
           type="target"
           position={Position.Left}
-          className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#18120F] !rounded-none"
+          className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#E5EAE0] !rounded-full"
         />
         <Handle
           type="source"
           position={Position.Right}
-          className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#18120F] !rounded-none"
+          className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#E5EAE0] !rounded-full"
         />
 
-        {/* Sage-Ivory Header Band on Expanded Container */}
-        <div className="bg-[#DFE4D8] text-[#18120F] px-4 py-2.5 border-b border-[#B6BEAE] flex items-center justify-between gap-3">
+        <div className="bg-[#2C4A35] text-[#F2EBE1] px-4 py-3 border-b border-[#43634E] flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <Target className="w-4 h-4 text-[#C83214] shrink-0" />
-            <h3 className="font-display text-sm font-bold text-[#18120F] truncate">
+            <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#1E3324] text-[#8FE3AB] font-bold">
+              VISION
+            </span>
+            <Target className="w-4 h-4 text-[#8FE3AB] shrink-0" />
+            <h3 className="font-display text-sm font-bold text-[#F2EBE1] truncate">
               {vision.title}
             </h3>
           </div>
-          <div className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#18120F] shrink-0">
-            <ChevronDown className="w-3 h-3 text-[#C83214]" />
+          <div className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#8FE3AB] shrink-0">
+            <ChevronDown className="w-3.5 h-3.5" />
             <span>{vision.goalsCount} goals</span>
           </div>
         </div>
@@ -98,24 +135,26 @@ function VisionNode({ data, selected }: NodeProps) {
     <div
       data-node-id={vision.id}
       data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-sm border transition-colors duration-150 relative ${
+      className={`w-full h-full rounded-md border-2 transition-all duration-150 relative shadow-lg ${
         isExpanded
-          ? 'bg-[#EAEFE3] text-[#18120F] border-[#C83214] ring-1 ring-[#C83214] z-40'
+          ? 'bg-[#EAEFE3] text-[#18120F] border-[#2C4A35] ring-2 ring-[#2C4A35] z-40'
           : selected
-          ? 'bg-[#EAEFE3] text-[#18120F] border-[#C83214] ring-1 ring-[#C83214]'
-          : 'bg-[#DFE4D8] text-[#18120F] border-[#968A7B] hover:border-[#C83214]'
+          ? 'bg-[#E5EAE0] text-[#18120F] border-[#2C4A35] ring-2 ring-[#2C4A35]'
+          : 'bg-[#DFE4D8] text-[#18120F] border-[#6E7E62] hover:border-[#2C4A35]'
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#18120F] !rounded-none"
+        className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#DFE4D8] !rounded-full"
       />
 
-      {/* Clean Default Vision Body: Icon, Title, and Expand Button Only */}
       <div className="flex items-center justify-between gap-2.5 px-3.5 h-full">
         <div className="flex items-center gap-2.5 min-w-0">
-          <Target className="w-4 h-4 text-[#C83214] shrink-0" />
+          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#2C4A35] text-[#8FE3AB] font-bold shrink-0">
+            VISION
+          </span>
+          <Target className="w-4 h-4 text-[#2C4A35] shrink-0" />
           <span className="font-display text-sm font-bold leading-tight text-[#18120F] truncate">
             {vision.title}
           </span>
@@ -127,19 +166,21 @@ function VisionNode({ data, selected }: NodeProps) {
             e.stopPropagation();
             toggleExpand();
           }}
-          className="nodrag nopan p-1 rounded-xs text-[#5D5046] hover:text-[#18120F] hover:bg-[#C5CBBF] transition-colors shrink-0 cursor-pointer"
+          className="nodrag nopan p-1 rounded-xs text-[#4A5D45] hover:text-[#18120F] hover:bg-[#C5CBBF] transition-colors shrink-0 cursor-pointer"
         >
           <ChevronDown className="w-3.5 h-3.5 pointer-events-none" />
         </button>
       </div>
 
-      {/* Expanded Overlay: Reveals All Details with Pin and Collapse Actions */}
       {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border border-[#C83214] bg-[#DFE4D8] text-[#18120F] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#D2D8CA] border-b border-[#B6BEAE]">
+        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-md border-2 border-[#2C4A35] bg-[#DFE4D8] text-[#18120F] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex items-center justify-between gap-2 px-3.5 py-3 bg-[#2C4A35] text-[#F2EBE1] border-b border-[#43634E]">
             <div className="flex items-center gap-2 min-w-0">
-              <Target className="w-4 h-4 text-[#C83214] shrink-0 pointer-events-none" />
-              <span className="font-display text-sm font-bold truncate text-[#18120F]">
+              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#1E3324] text-[#8FE3AB] font-bold">
+                VISION
+              </span>
+              <Target className="w-4 h-4 text-[#8FE3AB] shrink-0 pointer-events-none" />
+              <span className="font-display text-sm font-bold truncate text-[#F2EBE1]">
                 {vision.title}
               </span>
             </div>
@@ -158,8 +199,8 @@ function VisionNode({ data, selected }: NodeProps) {
                 }}
                 className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
                   isPinned
-                    ? 'bg-[#C83214] text-[#F7F3EC] border border-[#E04819]'
-                    : 'text-[#5D5046] hover:text-[#18120F] hover:bg-[#B6BEAE] border border-transparent'
+                    ? 'bg-[#8FE3AB] text-[#18120F] border border-[#2C4A35]'
+                    : 'text-[#C5CBBF] hover:text-[#F2EBE1] hover:bg-[#395D47] border border-transparent'
                 }`}
               >
                 <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
@@ -171,31 +212,31 @@ function VisionNode({ data, selected }: NodeProps) {
                   e.stopPropagation();
                   toggleExpand();
                 }}
-                className="nodrag nopan p-1 rounded-xs text-[#5D5046] hover:text-[#18120F] hover:bg-[#B6BEAE] transition-colors cursor-pointer"
+                className="nodrag nopan p-1 rounded-xs text-[#C5CBBF] hover:text-[#F2EBE1] hover:bg-[#395D47] transition-colors cursor-pointer"
               >
                 <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
               </button>
             </div>
           </div>
 
-          <div className="p-3.5 space-y-2 text-xs">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#5D5046]">
-              <span>VISION · {vision.readableKey}</span>
-              <span className="uppercase font-semibold text-[#C83214]">
+          <div className="p-4 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#4A5D45]">
+              <span>KEY: {vision.readableKey}</span>
+              <span className="uppercase font-semibold text-[#2C4A35]">
                 {vision.status.replace('_', ' ')}
               </span>
             </div>
 
-            <p className="text-xs text-[#3F352E] leading-relaxed">
-              {vision.description}
+            <p className="text-xs text-[#2C3829] leading-relaxed">
+              {vision.description || 'No description recorded.'}
             </p>
 
-            <div className="pt-2 border-t border-[#C4CABD] flex items-center justify-between text-[11px] font-mono text-[#52463E]">
+            <div className="pt-2 border-t border-[#C4CABD] flex items-center justify-between text-[11px] font-mono text-[#4A5D45]">
               <span className="truncate">
-                {vision.targetType}: {vision.targetLabel}
+                {vision.targetLabel ? `${vision.targetType}: ${vision.targetLabel}` : vision.targetType}
               </span>
               <span className="inline-flex items-center gap-1 font-semibold text-[#18120F] shrink-0">
-                <ChevronRight className="w-3 h-3 text-[#C83214]" />
+                <ChevronRight className="w-3 h-3 text-[#2C4A35]" />
                 {vision.goalsCount} goals
               </span>
             </div>
@@ -206,7 +247,7 @@ function VisionNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#18120F] !rounded-none"
+        className="!w-3 !h-3 !bg-[#2C4A35] !border-2 !border-[#DFE4D8] !rounded-full"
       />
     </div>
   );
@@ -221,32 +262,35 @@ function GoalNode({ data, selected }: NodeProps) {
     return (
       <div
         data-node-id={goal.id}
-        className={`w-full h-full rounded-sm border transition-colors duration-150 flex flex-col ${
+        className={`w-full h-full rounded-md border-2 transition-colors duration-150 flex flex-col shadow-xl ${
           selected
-            ? 'bg-[#170F0C]/95 text-[#F7F3EC] border-[#E04819] ring-1 ring-[#E04819]'
-            : 'bg-[#130C0A]/95 text-[#F2EBE1] border-[#C83214]/80 hover:border-[#E04819]'
+            ? 'bg-[#3A1E17] border-[#E04819] ring-2 ring-[#E04819]'
+            : 'bg-[#28130E] border-[#8C3B28] hover:border-[#E04819]'
         }`}
       >
         <Handle
           type="target"
           position={Position.Left}
-          className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#140D0B] !rounded-none"
+          className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
         />
         <Handle
           type="source"
           position={Position.Right}
-          className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#140D0B] !rounded-none"
+          className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
         />
 
-        <div className="bg-[#251915] border-b border-[#3E2C25] px-3.5 py-2 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <Flag className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />
-            <h3 className="font-display text-sm font-semibold text-[#F7F3EC] truncate">
+        <div className="bg-[#C83214] text-[#F7F3EC] px-4 py-3 border-b border-[#8C220E] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#52170B] text-[#FFB399] font-bold">
+              GOAL
+            </span>
+            <Flag className="w-4 h-4 text-[#FFB399] shrink-0" />
+            <h3 className="font-display text-sm font-bold text-[#F7F3EC] truncate">
               {goal.title}
             </h3>
           </div>
-          <div className="inline-flex items-center gap-1 text-[11px] font-mono text-[#DFE4D8] shrink-0">
-            <ChevronDown className="w-3.5 h-3.5 text-[#E04819]" />
+          <div className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-[#FFB399] shrink-0">
+            <ChevronDown className="w-3.5 h-3.5" />
             <span>{goal.tasksCount} tasks</span>
           </div>
         </div>
@@ -260,25 +304,27 @@ function GoalNode({ data, selected }: NodeProps) {
     <div
       data-node-id={goal.id}
       data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-sm border transition-colors duration-150 relative ${
+      className={`w-full h-full rounded-md border-2 transition-all duration-150 relative shadow-lg ${
         isExpanded
-          ? 'bg-[#281A16] text-[#F7F3EC] border-[#E04819] ring-1 ring-[#E04819] z-40'
+          ? 'bg-[#3A1E17] text-[#F7F3EC] border-[#E04819] ring-2 ring-[#E04819] z-40'
           : selected
-          ? 'bg-[#2F201B] text-[#F7F3EC] border-[#E04819] ring-1 ring-[#E04819]'
-          : 'bg-[#251915] text-[#F2EBE1] border-[#594238] hover:border-[#C83214]'
+          ? 'bg-[#321A13] text-[#F7F3EC] border-[#E04819] ring-2 ring-[#E04819]'
+          : 'bg-[#28130E] text-[#F7F3EC] border-[#8C3B28] hover:border-[#E04819]'
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#140D0B] !rounded-none"
+        className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
       />
 
-      {/* Clean Default Goal Body: Icon, Title, and Expand Button Only */}
-      <div className="flex items-center justify-between gap-2.5 px-3 h-full">
-        <div className="flex items-center gap-2 min-w-0">
-          <Flag className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />
-          <span className="font-display text-xs font-semibold leading-tight text-[#F7F3EC] truncate">
+      <div className="flex items-center justify-between gap-2.5 px-3.5 h-full">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#C83214] text-[#F7F3EC] font-bold shrink-0">
+            GOAL
+          </span>
+          <Flag className="w-4 h-4 text-[#E04819] shrink-0" />
+          <span className="font-display text-sm font-bold leading-tight text-[#F7F3EC] truncate">
             {goal.title}
           </span>
         </div>
@@ -289,19 +335,21 @@ function GoalNode({ data, selected }: NodeProps) {
             e.stopPropagation();
             toggleExpand();
           }}
-          className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] transition-colors shrink-0 cursor-pointer"
+          className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#522E25] transition-colors shrink-0 cursor-pointer"
         >
           <ChevronDown className="w-3.5 h-3.5 pointer-events-none" />
         </button>
       </div>
 
-      {/* Expanded Overlay: Reveals All Details with Pin and Collapse Actions */}
       {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border border-[#C83214] bg-[#251915] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#2E1E19] border-b border-[#433027]">
+        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-md border-2 border-[#E04819] bg-[#22100C] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex items-center justify-between gap-2 px-3.5 py-3 bg-[#C83214] text-[#F7F3EC] border-b border-[#8C220E]">
             <div className="flex items-center gap-2 min-w-0">
-              <Flag className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0 pointer-events-none" />
-              <span className="font-display text-sm font-semibold truncate text-[#F7F3EC]">
+              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#52170B] text-[#FFB399] font-bold">
+                GOAL
+              </span>
+              <Flag className="w-4 h-4 text-[#FFB399] shrink-0 pointer-events-none" />
+              <span className="font-display text-sm font-bold truncate text-[#F7F3EC]">
                 {goal.title}
               </span>
             </div>
@@ -320,8 +368,8 @@ function GoalNode({ data, selected }: NodeProps) {
                 }}
                 className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
                   isPinned
-                    ? 'bg-[#C83214] text-[#F7F3EC] border border-[#E04819]'
-                    : 'text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] border border-transparent'
+                    ? 'bg-[#FFB399] text-[#22100C] border border-[#C83214]'
+                    : 'text-[#E6DDD1] hover:text-[#F7F3EC] hover:bg-[#A82A11] border border-transparent'
                 }`}
               >
                 <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
@@ -333,21 +381,17 @@ function GoalNode({ data, selected }: NodeProps) {
                   e.stopPropagation();
                   toggleExpand();
                 }}
-                className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] transition-colors cursor-pointer"
+                className="nodrag nopan p-1 rounded-xs text-[#E6DDD1] hover:text-[#F7F3EC] hover:bg-[#A82A11] transition-colors cursor-pointer"
               >
                 <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
               </button>
             </div>
           </div>
 
-          <div className="p-3.5 space-y-2 text-xs">
-            <div className="flex items-center justify-between gap-2 text-[11px] font-mono">
-              <span className="text-[#D8CFC2]">GOAL · {goal.readableKey}</span>
-              <span
-                className={`uppercase font-medium ${
-                  goal.status === 'verified' ? 'text-[#6CC48E]' : 'text-[#E04819]'
-                }`}
-              >
+          <div className="p-4 space-y-3 text-xs">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-[#B9AA9D]">
+              <span className="text-[#FFB399]">KEY: {goal.readableKey}</span>
+              <span className="uppercase font-semibold text-[#E6DDD1]">
                 {goal.status}
               </span>
             </div>
@@ -355,26 +399,30 @@ function GoalNode({ data, selected }: NodeProps) {
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[11px] font-mono text-[#B9AA9D]">
                 <span>
-                  Loop {goal.currentIteration}/{goal.maxIterations}
+                  {goal.maxIterations > 0
+                    ? `Loop ${goal.currentIteration}/${goal.maxIterations}`
+                    : `Iteration ${goal.currentIteration}`}
                 </span>
                 <span>{goal.progress}%</span>
               </div>
-              <div className="w-full h-1.5 bg-[#140D0B] overflow-hidden">
+              <div className="w-full h-2 bg-[#1A0E0B] rounded-full overflow-hidden border border-[#522E25]">
                 <div
                   className={`h-full ${
-                    goal.status === 'verified' ? 'bg-[#6CC48E]' : 'bg-[#C83214]'
+                    goal.status === 'verified' || goal.status === 'completed'
+                      ? 'bg-[#6CC48E]'
+                      : 'bg-[#C83214]'
                   }`}
                   style={{ width: `${goal.progress}%` }}
                 />
               </div>
             </div>
 
-            <div className="pt-2 border-t border-[#3E2C25] flex items-center justify-between text-[11px] font-mono text-[#A89688]">
+            <div className="pt-2 border-t border-[#522E25] flex items-center justify-between text-[11px] font-mono text-[#A89688]">
               <span>
                 Priority {goal.priority.toFixed(2)} · Notoriety {goal.blockerNotoriety}
               </span>
-              <span className="inline-flex items-center gap-1 text-[#DFE4D8]">
-                <ChevronRight className="w-3 h-3 text-[#E04819]" />
+              <span className="inline-flex items-center gap-1 text-[#FF7A50] font-semibold">
+                <ChevronRight className="w-3 h-3" />
                 {goal.tasksCount} tasks
               </span>
             </div>
@@ -385,7 +433,7 @@ function GoalNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-[#C83214] !border !border-[#140D0B] !rounded-none"
+        className="!w-3 !h-3 !bg-[#E04819] !border-2 !border-[#28130E] !rounded-full"
       />
     </div>
   );
@@ -393,30 +441,32 @@ function GoalNode({ data, selected }: NodeProps) {
 
 function TaskNode({ data, selected }: NodeProps) {
   const task = data as unknown as TaskGraphNodeData;
-  const ctx = formatContextUsage(task.contextLimit);
+  const ctx = task.contextLimit ? formatContextUsage(task.contextLimit) : null;
   const { isExpanded, isPinned, toggleExpand, togglePin } = useNodeDetail(task.id);
 
   return (
     <div
       data-node-id={task.id}
       data-expanded-node={isExpanded}
-      className={`w-full h-full rounded-sm border transition-colors duration-150 relative ${
+      className={`w-full h-full rounded-sm border-2 transition-all duration-150 relative overflow-hidden shadow-md ${
         isExpanded
-          ? 'bg-[#221612] text-[#F7F3EC] border-[#E04819] ring-1 ring-[#E04819] z-40'
+          ? 'bg-[#18100E] text-[#F7F3EC] border-[#DF6B3B] ring-2 ring-[#DF6B3B] z-40'
           : selected
-          ? 'bg-[#261A16] text-[#F7F3EC] border-[#E04819] ring-1 ring-[#E04819]'
-          : 'bg-[#1A110E] text-[#F2EBE1] border-[#4A362D] hover:border-[#C83214]'
+          ? 'bg-[#160E0C] text-[#F7F3EC] border-[#DF6B3B] ring-2 ring-[#DF6B3B]'
+          : 'bg-[#120B09] text-[#F7F3EC] border-[#3B261E] hover:border-[#DF6B3B]'
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#140D0B] !rounded-none"
+        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#120B09] !rounded-full"
       />
 
-      {/* Clean Default Task Body: Icon, Title, and Expand Button Only */}
-      <div className="flex items-center justify-between gap-2.5 px-3 h-full">
+      <div className="flex items-center justify-between gap-2 px-3 h-full">
         <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#2B1D18] text-[#F0946E] font-bold shrink-0">
+            TASK
+          </span>
           <Terminal className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />
           <span className="font-display text-xs font-semibold leading-tight text-[#F7F3EC] truncate">
             {task.title}
@@ -424,23 +474,25 @@ function TaskNode({ data, selected }: NodeProps) {
         </div>
         <button
           type="button"
-          aria-label={`Expand details for ${task.title}`}
+          aria-label={`Expand task details for ${task.title}`}
           onClick={(e) => {
             e.stopPropagation();
             toggleExpand();
           }}
-          className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] transition-colors shrink-0 cursor-pointer"
+          className="nodrag nopan p-1 rounded-xs text-[#9C8A7C] hover:text-[#F7F3EC] hover:bg-[#2C1D18] transition-colors shrink-0 cursor-pointer"
         >
-          <ChevronDown className="w-3.5 h-3.5 pointer-events-none" />
+          <ChevronDown className="w-3 h-3 pointer-events-none" />
         </button>
       </div>
 
-      {/* Expanded Overlay: Reveals All Details with Pin and Collapse Actions */}
       {isExpanded && (
-        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border border-[#DF6B3B] bg-[#1A110E] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-[#251814] border-b border-[#3D2921]">
+        <div className="nodrag nopan absolute top-0 left-0 w-full z-50 rounded-sm border-2 border-[#DF6B3B] bg-[#140D0B] text-[#F7F3EC] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-[#2B1D18] text-[#F7F3EC] border-b border-[#432C24]">
             <div className="flex items-center gap-2 min-w-0">
-              <Terminal className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0 pointer-events-none" />
+              <span className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-xs bg-[#42261C] text-[#F0946E] font-bold">
+                TASK
+              </span>
+              <Terminal className="w-3.5 h-3.5 text-[#F0946E] shrink-0 pointer-events-none" />
               <span className="font-display text-sm font-semibold truncate text-[#F7F3EC]">
                 {task.title}
               </span>
@@ -460,8 +512,8 @@ function TaskNode({ data, selected }: NodeProps) {
                 }}
                 className={`nodrag nopan p-1 rounded-xs transition-colors cursor-pointer ${
                   isPinned
-                    ? 'bg-[#C83214] text-[#F7F3EC] border border-[#E04819]'
-                    : 'text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] border border-transparent'
+                    ? 'bg-[#DF6B3B] text-[#120B09] border border-[#DF6B3B]'
+                    : 'text-[#A89688] hover:text-[#F7F3EC] hover:bg-[#2C1D18] border border-transparent'
                 }`}
               >
                 <Pin className={`w-3.5 h-3.5 pointer-events-none ${isPinned ? 'fill-current' : ''}`} />
@@ -473,92 +525,121 @@ function TaskNode({ data, selected }: NodeProps) {
                   e.stopPropagation();
                   toggleExpand();
                 }}
-                className="nodrag nopan p-1 rounded-xs text-[#B9AA9D] hover:text-[#F7F3EC] hover:bg-[#382821] transition-colors cursor-pointer"
+                className="nodrag nopan p-1 rounded-xs text-[#A89688] hover:text-[#F7F3EC] hover:bg-[#2C1D18] transition-colors cursor-pointer"
               >
                 <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
               </button>
             </div>
           </div>
 
-          <div className="p-3.5 space-y-2.5 text-xs max-h-[340px] overflow-y-auto">
+          <div className="p-3.5 space-y-2.5 text-xs max-h-[360px] overflow-y-auto">
             <div className="flex items-center justify-between gap-2 text-[11px] font-mono">
-              <span className="text-[#DF6B3B] font-semibold">
-                TASK · {task.readableKey}
+              <span className="text-[#F0946E] font-semibold truncate">
+                KEY: {task.readableKey}
               </span>
-              <span className="text-[#B9AA9D] uppercase">{task.status}</span>
+              <span className="text-[#B9AA9D] uppercase shrink-0 px-2 py-0.5 bg-[#241712] rounded-xs">
+                {task.status}
+              </span>
             </div>
 
-            {/* Eval Script */}
+            <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+              <span className={`px-2 py-0.5 border rounded-xs ${leaseBadgeClass(task.occupancy.leaseState)}`}>
+                {leaseLabel(task.occupancy.leaseState)}
+              </span>
+              <span className="text-[#A89688] truncate">
+                Verif: {task.verificationStatus}
+              </span>
+            </div>
+
+            {task.occupancy.agentDisplayLabel && (
+              <div className="text-[10px] font-mono text-[#DFE4D8] truncate">
+                Holder: {task.occupancy.agentDisplayLabel}
+              </div>
+            )}
+
             <div className="space-y-1">
               <div className="text-[10px] font-mono uppercase tracking-wider text-[#9C8A7C]">
                 Eval Script
               </div>
-              <pre className="bg-[#110B09] border border-[#352620] px-2.5 py-1.5 text-[10px] font-mono text-[#E8DFD3] whitespace-pre-wrap break-all leading-relaxed">
-                {task.evalScript}
+              <pre className="bg-[#0A0605] border border-[#2B1D18] px-2.5 py-1.5 text-[10px] font-mono text-[#F0946E] whitespace-pre-wrap break-all leading-relaxed">
+                {task.evalScript || 'No evaluation script recorded.'}
               </pre>
             </div>
 
-            {/* Inputs & Outputs */}
-            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-[#150E0B] border border-[#352620] p-2">
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-[#0F0907] border border-[#2B1D18] p-2">
               <div className="min-w-0">
                 <div className="uppercase tracking-wider text-[#9C8A7C] mb-1">Inputs</div>
-                <ul className="space-y-0.5 text-[#D8CFC2]">
-                  {task.inputs.map((inp) => (
-                    <li key={inp} className="truncate">
-                      {inp}
-                    </li>
-                  ))}
-                </ul>
+                {task.inputs.length === 0 ? (
+                  <span className="text-[#7C695D]">None</span>
+                ) : (
+                  <ul className="space-y-0.5 text-[#D8CFC2]">
+                    {task.inputs.map((inp) => (
+                      <li key={inp} className="truncate">
+                        {inp}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <div className="min-w-0 border-l border-[#352620] pl-2">
+              <div className="min-w-0 border-l border-[#2B1D18] pl-2">
                 <div className="uppercase tracking-wider text-[#9C8A7C] mb-1">Outputs</div>
-                <ul className="space-y-0.5 text-[#DFE4D8]">
-                  {task.outputs.map((out) => (
-                    <li key={out} className="truncate">
-                      {out}
-                    </li>
-                  ))}
-                </ul>
+                {task.outputs.length === 0 ? (
+                  <span className="text-[#7C695D]">None</span>
+                ) : (
+                  <ul className="space-y-0.5 text-[#DFE4D8]">
+                    {task.outputs.map((out) => (
+                      <li key={out} className="truncate">
+                        {out}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
 
-            {/* Tools Available */}
             <div className="space-y-1">
               <div className="text-[10px] font-mono uppercase tracking-wider text-[#9C8A7C]">
                 Tools Available
               </div>
-              <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[#E6DDD1]">
-                {task.toolsAvailable.map((tool, idx) => (
-                  <React.Fragment key={tool}>
-                    <span className="bg-[#291D19] border border-[#433129] px-1.5 py-0.5 rounded-xs">
-                      {tool}
-                    </span>
-                    {idx < task.toolsAvailable.length - 1 && (
-                      <span className="text-[#6B5A4E]" aria-hidden="true">
-                        ·
+              {task.toolsAvailable.length === 0 ? (
+                <div className="font-mono text-[10px] text-[#7C695D]">None specified</div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[#E6DDD1]">
+                  {task.toolsAvailable.map((tool, idx) => (
+                    <React.Fragment key={tool}>
+                      <span className="bg-[#241712] border border-[#3B261E] px-1.5 py-0.5 rounded-xs text-[#F0946E]">
+                        {tool}
                       </span>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
+                      {idx < task.toolsAvailable.length - 1 && (
+                        <span className="text-[#6B5A4E]" aria-hidden="true">
+                          ·
+                        </span>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Context Limit */}
-            <div className="pt-2 border-t border-[#352620] space-y-1">
+            <div className="pt-2 border-t border-[#2B1D18] space-y-1">
               <div className="flex items-center justify-between text-[10px] font-mono">
-                <span className="uppercase tracking-wider text-[#9C8A7C]">Context Limit</span>
-                <span className="text-[#E6DDD1]">
-                  {ctx.usedLabel} / {ctx.maxLabel} ({ctx.percent}%)
-                </span>
+                <span className="uppercase tracking-wider text-[#9C8A7C]">Context Budget</span>
+                {ctx ? (
+                  <span className="text-[#E6DDD1]">
+                    {ctx.usedLabel} / {ctx.maxLabel} ({ctx.percent}%)
+                  </span>
+                ) : (
+                  <span className="text-[#7C695D]">Not configured</span>
+                )}
               </div>
-              <div className="w-full h-1.5 bg-[#110B09] overflow-hidden">
-                <div
-                  className={`h-full ${
-                    ctx.percent >= 75 ? 'bg-[#E04819]' : 'bg-[#C83214]'
-                  }`}
-                  style={{ width: `${ctx.percent}%` }}
-                />
-              </div>
+              {ctx && (
+                <div className="w-full h-2 bg-[#0A0605] rounded-full overflow-hidden border border-[#2B1D18]">
+                  <div
+                    className={`h-full ${ctx.percent >= 75 ? 'bg-[#E04819]' : 'bg-[#DF6B3B]'}`}
+                    style={{ width: `${ctx.percent}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -567,7 +648,7 @@ function TaskNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#140D0B] !rounded-none"
+        className="!w-2.5 !h-2.5 !bg-[#DF6B3B] !border !border-[#120B09] !rounded-full"
       />
     </div>
   );
@@ -579,18 +660,65 @@ const nodeTypes = {
   taskNode: TaskNode,
 };
 
-function VisionsGoalsCanvas() {
+function VisionsGoalsGraphCanvas({ refreshTick = 0, onLoadingChange }: VisionsGoalsGraphViewProps) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [substrateData, setSubstrateData] = useState<VisionsGoalsSubstrateResponse | null>(null);
+
   const [expandedVisionIds, setExpandedVisionIds] = useState<string[]>([]);
   const [expandedGoalIds, setExpandedGoalIds] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<SelectedGraphItem | null>(null);
+  const [isBreadcrumbPinned, setIsBreadcrumbPinned] = useState(false);
+
   const { zoomIn, zoomOut, fitView } = useReactFlow();
 
-  const initialGraph = useMemo(
-    () => buildVisionsGoalsGraph({ expandedVisionIds, expandedGoalIds }),
-    [expandedVisionIds, expandedGoalIds]
-  );
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    onLoadingChange?.(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/substrate/visions-goals');
+      if (!res.ok) {
+        throw new Error(`Failed to load Visions & Goals substrate (${res.status} ${res.statusText})`);
+      }
+      const json: VisionsGoalsSubstrateResponse = await res.json();
+      setSubstrateData(json);
+
+      const initialVisions = json.visions.map((v) => v.id);
+      const initialGoals = json.goals.map((g) => g.id);
+      setExpandedVisionIds(initialVisions);
+      setExpandedGoalIds(initialGoals);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+      onLoadingChange?.(false);
+    }
+  }, [onLoadingChange]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, refreshTick]);
+
+  const initialGraph = useMemo(() => {
+    if (!substrateData) return { nodes: [], edges: [] };
+    return buildVisionsGoalsGraph({
+      visions: substrateData.visions,
+      goals: substrateData.goals,
+      tasks: substrateData.tasks,
+      edges: substrateData.edges,
+      expandedVisionIds: new Set(expandedVisionIds),
+      expandedGoalIds: new Set(expandedGoalIds),
+    });
+  }, [substrateData, expandedVisionIds, expandedGoalIds]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialGraph.edges);
+
+  useEffect(() => {
+    setNodes(initialGraph.nodes);
+    setEdges(initialGraph.edges);
+  }, [initialGraph, setNodes, setEdges]);
 
   const {
     onNodeDragStart,
@@ -598,66 +726,35 @@ function VisionsGoalsCanvas() {
     onNodeDragStop,
     onNodeMouseEnter,
     onNodeMouseLeave,
-    applySavedAnchors,
-    resetBodies,
   } = useFloatyForceLayout({
     baseNodes: initialGraph.nodes,
     edges,
     setNodes,
     enabled: true,
-    amplitude: 4.5,
+    amplitude: 4.2,
   });
-
-  useEffect(() => {
-    const anchoredNodes = applySavedAnchors(initialGraph.nodes);
-    setNodes(anchoredNodes);
-    setEdges(initialGraph.edges);
-    resetBodies(anchoredNodes, false);
-    const timer = window.setTimeout(() => fitView({ padding: 0.16, duration: 200 }), 140);
-    return () => window.clearTimeout(timer);
-  }, [initialGraph, setNodes, setEdges, applySavedAnchors, resetBodies, fitView]);
-
-  const handleReset = useCallback(() => {
-    setExpandedVisionIds([]);
-    setExpandedGoalIds([]);
-    setSelectedItem(null);
-    const fresh = buildVisionsGoalsGraph({ expandedVisionIds: [], expandedGoalIds: [] });
-    setNodes(fresh.nodes);
-    setEdges(fresh.edges);
-    resetBodies(fresh.nodes, true);
-    setTimeout(() => fitView({ padding: 0.24, duration: 220 }), 120);
-  }, [setNodes, setEdges, resetBodies, fitView]);
 
   const clickTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
-    };
-  }, []);
-
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
-    clickTimerRef.current = window.setTimeout(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
+    }
+    clickTimerRef.current = window.setTimeout(() => {
+      if (!substrateData) return;
       if (node.type === 'visionNode') {
-        setSelectedItem({
-          kind: 'vision',
-          data: node.data as unknown as VisionGraphNodeData,
-        });
+        const found = substrateData.visions.find((v) => v.id === node.id);
+        if (found) setSelectedItem({ kind: 'vision', data: found });
       } else if (node.type === 'goalNode') {
-        setSelectedItem({
-          kind: 'goal',
-          data: node.data as unknown as GoalGraphNodeData,
-        });
+        const found = substrateData.goals.find((g) => g.id === node.id);
+        if (found) setSelectedItem({ kind: 'goal', data: found });
       } else if (node.type === 'taskNode') {
-        setSelectedItem({
-          kind: 'task',
-          data: node.data as unknown as TaskGraphNodeData,
-        });
+        const found = substrateData.tasks.find((t) => t.id === node.id);
+        if (found) setSelectedItem({ kind: 'task', data: found });
       }
     }, 210);
-  }, []);
+  }, [substrateData]);
 
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
     if (clickTimerRef.current !== null) {
@@ -665,60 +762,242 @@ function VisionsGoalsCanvas() {
       clickTimerRef.current = null;
     }
     if (node.type === 'visionNode') {
-      const visionId = node.id;
-      setExpandedVisionIds((prev) => {
-        const isCurrentlyExpanded = prev.includes(visionId);
-        if (isCurrentlyExpanded) {
-          const childGoalIds = new Set(
-            GOAL_NODES.filter((g) => g.visionId === visionId).map((g) => g.id)
-          );
-          setExpandedGoalIds((gPrev) => gPrev.filter((gid) => !childGoalIds.has(gid)));
-          return prev.filter((id) => id !== visionId);
-        }
-        return [...prev, visionId];
-      });
+      setExpandedVisionIds((prev) =>
+        prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
+      );
     } else if (node.type === 'goalNode') {
-      const goalId = node.id;
       setExpandedGoalIds((prev) =>
-        prev.includes(goalId) ? prev.filter((id) => id !== goalId) : [...prev, goalId]
+        prev.includes(node.id) ? prev.filter((id) => id !== node.id) : [...prev, node.id]
       );
     }
   }, []);
 
-  const visibleVisions = nodes.filter((n) => n.type === 'visionNode').length;
-  const visibleGoals = nodes.filter((n) => n.type === 'goalNode').length;
-  const visibleTasks = nodes.filter((n) => n.type === 'taskNode').length;
+  // Derive active items for breadcrumb navigation
+  const activeVision = useMemo(() => {
+    if (selectedItem?.kind === 'vision') return selectedItem.data;
+    if (selectedItem?.kind === 'goal' && substrateData) {
+      return substrateData.visions.find((v) => v.id === selectedItem.data.visionId) || null;
+    }
+    return null;
+  }, [selectedItem, substrateData]);
+
+  const activeGoal = useMemo(() => {
+    if (selectedItem?.kind === 'goal') return selectedItem.data;
+    if (selectedItem?.kind === 'task' && substrateData) {
+      return substrateData.goals.find((g) => g.id === selectedItem.data.goalId) || null;
+    }
+    return null;
+  }, [selectedItem, substrateData]);
+
+  const activeTask = useMemo(() => {
+    if (selectedItem?.kind === 'task') return selectedItem.data;
+    return null;
+  }, [selectedItem]);
+
+  const breadcrumbs = useMemo(() => {
+    const crumbs: Array<{
+      id: string;
+      label: string;
+      icon?: React.ComponentType<{ className?: string }>;
+      onClick?: () => void;
+      isLeaf: boolean;
+    }> = [
+      {
+        id: 'root',
+        label: 'Visions & Goals',
+        icon: Target,
+        isLeaf: !activeVision,
+        onClick: () => {
+          setSelectedItem(null);
+          fitView({ padding: 0.18, duration: 220 });
+        },
+      },
+    ];
+
+    if (activeVision) {
+      crumbs.push({
+        id: activeVision.id,
+        label: activeVision.title,
+        isLeaf: !activeGoal,
+        onClick: () => {
+          setSelectedItem({ kind: 'vision', data: activeVision });
+          fitView({ nodes: [{ id: activeVision.id }], duration: 220, maxZoom: 1.1 });
+        },
+      });
+    }
+
+    if (activeGoal) {
+      crumbs.push({
+        id: activeGoal.id,
+        label: activeGoal.title,
+        isLeaf: !activeTask,
+        onClick: () => {
+          setSelectedItem({ kind: 'goal', data: activeGoal });
+          fitView({ nodes: [{ id: activeGoal.id }], duration: 220, maxZoom: 1.2 });
+        },
+      });
+    }
+
+    if (activeTask) {
+      crumbs.push({
+        id: activeTask.id,
+        label: activeTask.title,
+        isLeaf: true,
+        onClick: () => {
+          setSelectedItem({ kind: 'task', data: activeTask });
+        },
+      });
+    }
+
+    return crumbs;
+  }, [activeVision, activeGoal, activeTask, fitView]);
+
+  const handleBack = useCallback(() => {
+    if (activeTask && activeGoal) {
+      setSelectedItem({ kind: 'goal', data: activeGoal });
+      fitView({ nodes: [{ id: activeGoal.id }], duration: 220, maxZoom: 1.2 });
+    } else if (activeGoal && activeVision) {
+      setSelectedItem({ kind: 'vision', data: activeVision });
+      fitView({ nodes: [{ id: activeVision.id }], duration: 220, maxZoom: 1.1 });
+    } else if (activeVision) {
+      setSelectedItem(null);
+      fitView({ padding: 0.18, duration: 220 });
+    }
+  }, [activeTask, activeGoal, activeVision, fitView]);
+
+  if (loading && !substrateData) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full h-[calc(100vh-112px)] min-h-[680px] bg-[#140D0B] text-[#D8CFC2]">
+        <Loader2 className="w-8 h-8 text-[#DF6B3B] animate-spin mb-3" />
+        <p className="font-mono text-xs tracking-wider">Loading Visions & Goals Substrate...</p>
+      </div>
+    );
+  }
+
+  if (error && !substrateData) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full h-[calc(100vh-112px)] min-h-[680px] bg-[#140D0B] text-[#F7F3EC] p-6 text-center">
+        <AlertTriangle className="w-10 h-10 text-[#E04819] mb-3" />
+        <h2 className="font-display text-lg font-bold mb-1">Failed to Connect Substrate</h2>
+        <p className="font-mono text-xs text-[#B9AA9D] max-w-md mb-4">{error}</p>
+        <button
+          type="button"
+          onClick={fetchData}
+          className="px-4 py-2 bg-[#DF6B3B] hover:bg-[#C83214] text-[#F7F3EC] font-mono text-xs font-bold rounded-xs transition-colors cursor-pointer"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col w-full h-[calc(100vh-112px)] min-h-[700px] border border-[#3B2A23] bg-[#140D0B] overflow-hidden">
-      {/* Dedicated Top Icon-Only Control Bar (Filter Buttons Removed per Request) */}
+    <div className="flex flex-col w-full h-[calc(100vh-112px)] min-h-[680px] border border-[#3B2A23] bg-[#140D0B] overflow-hidden">
+      {/* Dedicated Top Canvas Control Bar: Breadcrumbs on Left, Zoom/Controls on Right */}
       <div className="h-14 shrink-0 px-4 border-b border-[#382821] bg-[#18100D] flex items-center justify-between gap-4 z-20">
-        <div className="flex items-center gap-1.5">
+        <nav
+          aria-label="Visions nesting hierarchy"
+          className="flex items-center gap-1.5 min-w-0 max-w-[70%] overflow-x-auto py-1"
+        >
+          {breadcrumbs.length > 1 && (
+            <button
+              type="button"
+              onClick={handleBack}
+              aria-label="Go back one nesting level"
+              title="Go back"
+              className="p-1.5 rounded-xs border border-[#3F2E27] bg-[#1F1512] text-[#D8CFC2] hover:text-[#F7F3EC] hover:border-[#DF6B3B] transition-colors cursor-pointer mr-0.5 shrink-0"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <ol className="flex items-center gap-1.5 font-mono text-xs text-[#B9AA9D] list-none p-0 m-0">
+            {breadcrumbs.map((crumb, idx) => {
+              const isLast = idx === breadcrumbs.length - 1;
+              const Icon = crumb.icon;
+              return (
+                <li key={crumb.id} className="inline-flex items-center gap-1.5 shrink-0">
+                  {idx > 0 && (
+                    <ChevronRight className="w-3 h-3 text-[#6E584B] shrink-0" aria-hidden="true" />
+                  )}
+                  {isLast ? (
+                    <span
+                      aria-current="location"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-[#241814] text-[#F7F3EC] border border-[#594238] font-semibold truncate max-w-[240px]"
+                    >
+                      {Icon && <Icon className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />}
+                      <span className="truncate">{crumb.label}</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={crumb.onClick}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xs hover:bg-[#2C1E19] hover:text-[#F7F3EC] text-[#D8CFC2] transition-colors cursor-pointer truncate max-w-[200px]"
+                    >
+                      {Icon && <Icon className="w-3.5 h-3.5 text-[#DF6B3B] shrink-0" />}
+                      <span className="truncate">{crumb.label}</span>
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          {breadcrumbs.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setIsBreadcrumbPinned((p) => !p)}
+              aria-label={isBreadcrumbPinned ? 'Unpin breadcrumb view' : 'Pin breadcrumb view'}
+              title={
+                isBreadcrumbPinned
+                  ? 'Unpin path (auto-clears on background click)'
+                  : 'Pin path (stays focused)'
+              }
+              aria-pressed={isBreadcrumbPinned}
+              className={`p-1.5 rounded-xs border transition-colors cursor-pointer ml-1 shrink-0 ${
+                isBreadcrumbPinned
+                  ? 'bg-[#DF6B3B] text-[#F7F3EC] border-[#E04819]'
+                  : 'border-transparent text-[#8C7263] hover:text-[#F7F3EC] hover:bg-[#2C1E19]'
+              }`}
+            >
+              <Pin className={`w-3.5 h-3.5 ${isBreadcrumbPinned ? 'fill-current' : ''}`} />
+            </button>
+          )}
+        </nav>
+
+        {/* Right: Zoom and Other Controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <IconButton label="Zoom In" onClick={() => zoomIn({ duration: 150 })}>
             <ZoomIn className="w-4 h-4" />
           </IconButton>
           <IconButton label="Zoom Out" onClick={() => zoomOut({ duration: 150 })}>
             <ZoomOut className="w-4 h-4" />
           </IconButton>
-          <IconButton
-            label="Fit Vision-Goal-Task Flow"
-            onClick={() => fitView({ padding: 0.2, duration: 220 })}
-          >
+          <IconButton label="Fit Visions & Goals" onClick={() => fitView({ padding: 0.18, duration: 220 })}>
             <Maximize2 className="w-4 h-4" />
           </IconButton>
-          <IconButton label="Reset & Collapse Flow" onClick={handleReset}>
+          <div className="w-px h-6 bg-[#3D2B24] mx-1" />
+          <IconButton
+            label="Expand All Visions & Goals"
+            onClick={() => {
+              if (!substrateData) return;
+              setExpandedVisionIds(substrateData.visions.map((v) => v.id));
+              setExpandedGoalIds(substrateData.goals.map((g) => g.id));
+            }}
+          >
+            <ChevronDown className="w-4 h-4" />
+          </IconButton>
+          <IconButton
+            label="Reset & Collapse All"
+            onClick={() => {
+              setExpandedVisionIds([]);
+              setExpandedGoalIds([]);
+              setSelectedItem(null);
+              fitView({ padding: 0.18, duration: 220 });
+            }}
+          >
             <RotateCcw className="w-4 h-4" />
           </IconButton>
-        </div>
-
-        <div className="text-[11px] font-mono text-[#B9AA9D] flex items-center gap-3">
-          <span className="text-[#DFE4D8]">Visions: {visibleVisions}</span>
-          <span aria-hidden="true">·</span>
-          <span className="text-[#E04819]">Goals: {visibleGoals}</span>
-          <span aria-hidden="true">·</span>
-          <span>Tasks: {visibleTasks}</span>
-          <span aria-hidden="true">·</span>
-          <span className="text-[#DF6B3B]">Dbl-click to nest · Edges: data flow</span>
         </div>
       </div>
 
@@ -739,49 +1018,57 @@ function VisionsGoalsCanvas() {
             onNodeMouseEnter={onNodeMouseEnter}
             onNodeMouseLeave={onNodeMouseLeave}
             onNodeClick={handleNodeClick}
-            onPaneClick={() => setSelectedItem(null)}
+            onPaneClick={() => {
+              if (!isBreadcrumbPinned) {
+                setSelectedItem(null);
+              }
+            }}
             fitView
-            fitViewOptions={{ padding: 0.24 }}
-            minZoom={0.28}
+            fitViewOptions={{ padding: 0.18 }}
+            minZoom={0.16}
             maxZoom={1.6}
           >
             <Background
-              variant={BackgroundVariant.Lines}
-              gap={36}
-              lineWidth={0.6}
-              color="#261B17"
+              variant={BackgroundVariant.Dots}
+              gap={24}
+              size={1.2}
+              color="#3D2B24"
             />
             <MiniMap
-              style={{ width: 132, height: 82 }}
+              style={{ width: 136, height: 84 }}
               nodeColor={(n) =>
                 n.type === 'visionNode'
-                  ? '#DFE4D8'
+                  ? '#2C4A35'
                   : n.type === 'goalNode'
                   ? '#C83214'
-                  : '#6D5447'
+                  : '#DF6B3B'
               }
               maskColor="rgba(20, 13, 11, 0.72)"
             />
           </ReactFlow>
         </div>
 
-        {/* Node Inspector Drawer */}
+        {/* Sidebar Detail Panel */}
         {selectedItem && (
           <aside
-            aria-label="Node contract inspector"
-            className="absolute top-4 right-4 bottom-4 w-full max-w-md z-30 bg-[#DFE4D8] text-[#18120F] border border-[#8C7263] shadow-2xl flex flex-col overflow-hidden rounded-sm"
+            aria-label="Vision, Goal or Task details"
+            className="absolute top-4 right-4 bottom-4 w-full max-w-sm z-30 bg-[#DFE4D8] text-[#18120F] border border-[#8C7263] shadow-2xl flex flex-col overflow-hidden rounded-sm"
           >
-            <div className="px-5 py-4 border-b border-[#C5CBBF] flex items-start justify-between gap-3">
+            <div className="px-5 py-4 border-b border-[#C5CBBF] flex items-start justify-between gap-3 bg-[#E5EAE0]">
               <div className="min-w-0">
-                <div className="font-mono text-[11px] uppercase tracking-wider text-[#C83214] font-semibold">
-                  {selectedItem.kind} · {selectedItem.data.readableKey}
+                <div className="font-mono text-[11px] text-[#6B5A4E] truncate uppercase tracking-wider">
+                  {selectedItem.kind === 'vision'
+                    ? `Vision · ${selectedItem.data.readableKey}`
+                    : selectedItem.kind === 'goal'
+                    ? `Goal · ${selectedItem.data.readableKey}`
+                    : `Task · ${selectedItem.data.readableKey}`}
                 </div>
                 <h2 className="font-display text-lg font-bold tracking-tight text-[#18120F] mt-0.5">
                   {selectedItem.data.title}
                 </h2>
               </div>
               <IconButton
-                label="Close Node Inspector"
+                label="Close Details"
                 tooltipSide="left"
                 className="!bg-[#18120F] !text-[#DFE4D8] !border-[#18120F] hover:!bg-[#C83214] hover:!border-[#C83214]"
                 onClick={() => setSelectedItem(null)}
@@ -790,126 +1077,85 @@ function VisionsGoalsCanvas() {
               </IconButton>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs">
-              {selectedItem.kind === 'vision' && (
-                <>
+            {selectedItem.kind === 'vision' && (
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
+                  <span>Status: <strong className="uppercase text-[#2C4A35]">{selectedItem.data.status}</strong></span>
+                  <span>{selectedItem.data.goalsCount} Goals</span>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Vision Description
+                  </h3>
                   <p className="text-sm text-[#2C221D] leading-relaxed">
-                    {selectedItem.data.description}
+                    {selectedItem.data.description || 'No description recorded.'}
                   </p>
-                  <div className="border-t border-[#C5CBBF] pt-3 space-y-2 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5A4E]">Target Type</span>
-                      <span>{selectedItem.data.targetType}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5A4E]">Target Label</span>
-                      <span>{selectedItem.data.targetLabel}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5A4E]">Status</span>
-                      <span className="uppercase font-semibold text-[#C83214]">
-                        {selectedItem.data.status}
-                      </span>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {selectedItem.kind === 'goal' && (
-                <div className="space-y-3 font-mono">
-                  <div className="flex justify-between border-b border-[#C5CBBF] pb-2">
-                    <span className="text-[#6B5A4E]">Goal Type</span>
-                    <span>{selectedItem.data.goalType}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-[#C5CBBF] pb-2">
-                    <span className="text-[#6B5A4E]">Loop Iteration</span>
-                    <span>
-                      {selectedItem.data.currentIteration} / {selectedItem.data.maxIterations}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-b border-[#C5CBBF] pb-2">
-                    <span className="text-[#6B5A4E]">Priority</span>
-                    <span>{selectedItem.data.priority}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#6B5A4E]">Blocker Notoriety</span>
-                    <span className="font-semibold text-[#C83214]">
-                      {selectedItem.data.blockerNotoriety}
-                    </span>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Target Alignment
+                  </h3>
+                  <div className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs font-mono text-xs text-[#18120F]">
+                    <div>Type: <strong className="text-[#2C4A35]">{selectedItem.data.targetType}</strong></div>
+                    {selectedItem.data.targetLabel && (
+                      <div className="mt-1">Label: {selectedItem.data.targetLabel}</div>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {selectedItem.kind === 'task' && (
-                <div className="space-y-4">
+            {selectedItem.kind === 'goal' && (
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
+                  <span>Status: <strong className="uppercase text-[#C83214]">{selectedItem.data.status}</strong></span>
+                  <span>Progress: {selectedItem.data.progress}%</span>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Goal Directive
+                  </h3>
+                  <p className="text-sm text-[#2C221D] leading-relaxed">
+                    {selectedItem.data.title}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 font-mono text-xs bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs">
                   <div>
-                    <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
-                      Eval Script
-                    </h3>
-                    <pre className="bg-[#18120F] text-[#F2EBE1] p-3 font-mono text-[11px] overflow-x-auto rounded-xs whitespace-pre-wrap break-all">
-                      {selectedItem.data.evalScript}
-                    </pre>
+                    <span className="text-[#6B5A4E]">Priority:</span> <strong className="text-[#18120F]">{selectedItem.data.priority.toFixed(2)}</strong>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs">
-                      <h4 className="font-mono text-[10px] uppercase tracking-wider text-[#5D5046] mb-1.5">
-                        Inputs
-                      </h4>
-                      <ul className="space-y-1 font-mono text-[11px] text-[#18120F]">
-                        {selectedItem.data.inputs.map((i) => (
-                          <li key={i}>{i}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="bg-[#D2D8CA] border border-[#B6BEAE] p-3 rounded-xs">
-                      <h4 className="font-mono text-[10px] uppercase tracking-wider text-[#5D5046] mb-1.5">
-                        Outputs
-                      </h4>
-                      <ul className="space-y-1 font-mono text-[11px] text-[#18120F]">
-                        {selectedItem.data.outputs.map((o) => (
-                          <li key={o}>{o}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-
                   <div>
-                    <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
-                      Tools Available
-                    </h3>
-                    <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                      {selectedItem.data.toolsAvailable.map((t) => (
-                        <span
-                          key={t}
-                          className="bg-[#18120F] text-[#DFE4D8] px-2.5 py-1 rounded-xs"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-[#C5CBBF] pt-3 space-y-1.5 font-mono">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[#5D5046]">Context Limit</span>
-                      <span className="font-semibold">
-                        {selectedItem.data.contextLimit.usedTokens.toLocaleString()} /{' '}
-                        {selectedItem.data.contextLimit.maxTokens.toLocaleString()} tokens
-                      </span>
-                    </div>
-                    <div className="w-full h-2 bg-[#C4CABD] overflow-hidden">
-                      <div
-                        className="h-full bg-[#C83214]"
-                        style={{
-                          width: `${formatContextUsage(selectedItem.data.contextLimit).percent}%`,
-                        }}
-                      />
-                    </div>
+                    <span className="text-[#6B5A4E]">Notoriety:</span> <strong className="text-[#18120F]">{selectedItem.data.blockerNotoriety}</strong>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {selectedItem.kind === 'task' && (
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+                <div className="font-mono text-[11px] text-[#5D5046] border-b border-[#C5CBBF] pb-2 flex items-center justify-between">
+                  <span>Status: <strong className="uppercase text-[#DF6B3B]">{selectedItem.data.status}</strong></span>
+                  <span className={`px-2 py-0.5 border rounded-xs font-mono text-[10px] ${leaseBadgeClass(selectedItem.data.occupancy.leaseState)}`}>
+                    {leaseLabel(selectedItem.data.occupancy.leaseState)}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Task Specification
+                  </h3>
+                  <p className="text-sm text-[#2C221D] leading-relaxed">
+                    {selectedItem.data.title}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[11px] uppercase tracking-wider text-[#6B5A4E] mb-1.5">
+                    Evaluation Script
+                  </h3>
+                  <pre className="bg-[#18120F] text-[#F2EBE1] p-3 font-mono text-[11px] rounded-xs whitespace-pre-wrap break-all">
+                    {selectedItem.data.evalScript || 'No evaluation script recorded.'}
+                  </pre>
+                </div>
+              </div>
+            )}
           </aside>
         )}
       </div>
@@ -917,11 +1163,11 @@ function VisionsGoalsCanvas() {
   );
 }
 
-export function VisionsGoalsGraphView() {
+export function VisionsGoalsGraphView(props: VisionsGoalsGraphViewProps) {
   return (
     <ReactFlowProvider>
       <NodeDetailProvider>
-        <VisionsGoalsCanvas />
+        <VisionsGoalsGraphCanvas {...props} />
       </NodeDetailProvider>
     </ReactFlowProvider>
   );

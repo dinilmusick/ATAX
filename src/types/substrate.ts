@@ -35,14 +35,19 @@ export type SystemRelationType =
   | 'depends_on'
   | 'integrates_with'
   | 'interacts_with'
-  | 'dispatches_to'
-  | 'deployed_on';
+  | 'hosts'
+  | 'deployed_on'
+  | 'derived_from'
+  | 'related_to'
+  | 'dispatches_to';
 
 export interface SystemFunctionSummary {
   key: string;
   name: string;
   inputContract: string;
   outputContract: string;
+  description?: string;
+  status?: string;
 }
 
 export interface SubstrateSubsystem {
@@ -51,20 +56,30 @@ export interface SubstrateSubsystem {
   readableKey: string;
   name: string;
   subsystemType: string;
-  status: 'active' | 'planned' | 'paused';
+  status: string;
   contract: string;
   description: string;
 }
 
+export interface SubstrateUniverse {
+  id: string;
+  universeKey: string;
+  name: string;
+  description: string;
+  status: string;
+}
+
 export interface SubstrateSystem {
   id: string;
+  universeId?: string | null;
+  universeName?: string | null;
   systemKey: string;
   name: string;
   systemType: string;
-  status: 'active' | 'planned' | 'paused';
+  status: string;
   description: string;
   contextVersion: number;
-  parameters: Record<string, string | number | boolean>;
+  parameters: Record<string, string | number | boolean | unknown>;
   functions: SystemFunctionSummary[];
   memoriesCount: number;
   constraintsCount: number;
@@ -79,7 +94,14 @@ export interface SubstrateSystemEdge {
   relationType: SystemRelationType | 'wormhole';
   label: string;
   isWormhole?: boolean;
-  syncMode?: 'bidirectional' | 'source_to_target';
+  syncMode?: 'bidirectional' | 'source_to_target' | 'target_to_source';
+}
+
+export interface SystemsSubstrateResponse {
+  universes: SubstrateUniverse[];
+  systems: SubstrateSystem[];
+  edges: SubstrateSystemEdge[];
+  fetchedAt: string;
 }
 
 export interface VisionGraphNodeData {
@@ -89,7 +111,7 @@ export interface VisionGraphNodeData {
   description: string;
   targetType: string;
   targetLabel: string;
-  status: 'in_progress' | 'verified' | 'planned';
+  status: string;
   goalsCount: number;
   position: { x: number; y: number };
 }
@@ -97,11 +119,14 @@ export interface VisionGraphNodeData {
 export interface GoalGraphNodeData {
   id: string;
   readableKey: string;
-  visionId: string;
+  visionId: string | null;
+  visionTargetLabel?: string | null;
+  systemKey?: string | null;
   title: string;
+  description?: string;
   goalType: string;
   priority: number;
-  status: 'active' | 'verified' | 'queued' | 'blocked';
+  status: string;
   blockerNotoriety: number;
   progress: number;
   maxIterations: number;
@@ -116,19 +141,41 @@ export interface TaskContextLimit {
   windowLabel: string;
 }
 
+export interface TaskCheckpointSummary {
+  parameterId: string;
+  objective: string;
+  status: string;
+  predicateKey?: string | null;
+}
+
+export interface TaskOccupancyInfo {
+  agentDisplayLabel: string | null;
+  claimedAt: string | null;
+  heartbeatAt: string | null;
+  claimExpiresAt: string | null;
+  leaseState: 'lease_valid' | 'lease_expired' | 'no_claim' | 'unknown';
+  currentStep: string | null;
+  blocker: string | null;
+}
+
 export interface TaskGraphNodeData {
   id: string;
   readableKey: string;
-  goalId: string;
+  goalId: string | null;
   title: string;
+  description?: string;
   taskType: string;
-  status: 'claimed' | 'unclaimed' | 'verifying' | 'completed';
+  status: string;
+  verificationStatus: string;
   evalScript: string;
   inputs: string[];
   outputs: string[];
   toolsAvailable: string[];
-  contextLimit: TaskContextLimit;
-  fencingToken: number;
+  contextLimit: TaskContextLimit | null;
+  checkpoints: TaskCheckpointSummary[];
+  occupancy: TaskOccupancyInfo;
+  blockerNotoriety: number;
+  updatedAt?: string | null;
   position: { x: number; y: number };
 }
 
@@ -137,7 +184,16 @@ export interface VisionGoalTaskEdge {
   source: string;
   target: string;
   edgeKind: 'vision_dependency' | 'goal_dependency' | 'task_dependency' | 'artifact_flow';
+  dependencyType?: 'blocking' | 'advisory';
   label: string;
+}
+
+export interface VisionsGoalsSubstrateResponse {
+  visions: VisionGraphNodeData[];
+  goals: GoalGraphNodeData[];
+  tasks: TaskGraphNodeData[];
+  edges: VisionGoalTaskEdge[];
+  fetchedAt: string;
 }
 
 export interface SkillRecord {
@@ -145,12 +201,20 @@ export interface SkillRecord {
   name: string;
   slug: string;
   path: string;
+  description?: string;
   category: string;
   version: string;
-  status: 'active' | 'deprecated';
+  status: string;
   tools: Array<{
     slug: string;
+    name?: string;
     type: string;
     required: boolean;
   }>;
+}
+
+export interface SkillsSubstrateResponse {
+  skills: SkillRecord[];
+  categories: string[];
+  fetchedAt: string;
 }

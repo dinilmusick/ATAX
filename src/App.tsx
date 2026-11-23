@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { BookOpen, Cpu, GitBranch, RefreshCw, Settings } from 'lucide-react';
 import type { ActiveTab } from './types/substrate';
 import { IconButton } from './components/IconButton';
@@ -28,6 +28,7 @@ function HayateCrest() {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('visions-goals');
+  const [refreshTick, setRefreshTick] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [operatorSession, setOperatorSession] = useState<{
     token: string;
@@ -35,10 +36,14 @@ export default function App() {
     expiresAt: number;
   } | null>(null);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 450);
-  };
+    setRefreshTick((t) => t + 1);
+  }, []);
+
+  const handleLoadingChange = useCallback((loading: boolean) => {
+    setIsRefreshing(loading);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#140D0B] text-[#F2EBE1] flex flex-col">
@@ -104,11 +109,22 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-5 flex flex-col">
-        {activeTab === 'systems' && <SystemsGraphView />}
-        {activeTab === 'visions-goals' && <VisionsGoalsGraphView />}
-        {activeTab === 'skills' && <SkillCatalogView />}
+        {activeTab === 'systems' && (
+          <SystemsGraphView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
+        )}
+        {activeTab === 'visions-goals' && (
+          <VisionsGoalsGraphView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
+        )}
+        {activeTab === 'skills' && (
+          <SkillCatalogView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
+        )}
         {activeTab === 'settings' && (
-          <SettingsView session={operatorSession} onSessionChange={setOperatorSession} />
+          <SettingsView
+            session={operatorSession}
+            onSessionChange={setOperatorSession}
+            refreshTick={refreshTick}
+            onLoadingChange={handleLoadingChange}
+          />
         )}
       </main>
     </div>

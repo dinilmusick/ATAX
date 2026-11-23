@@ -32,6 +32,8 @@ interface OperatorSession {
 interface SettingsViewProps {
   session: OperatorSession | null;
   onSessionChange: (session: OperatorSession | null) => void;
+  refreshTick?: number;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 const PROVIDERS: Array<{
@@ -46,7 +48,7 @@ const PROVIDERS: Array<{
     id: 'github',
     label: 'GitHub',
     accountIdLabel: 'GitHub Owner / Org (optional)',
-    accountIdPlaceholder: 'dinilmusick',
+    accountIdPlaceholder: 'owner-or-org',
     tokenPlaceholder: 'github_pat_... or ghp_...',
     hint: 'Stored in Supabase Vault for repository creation, FMRL workflows, and private CI dispatch.',
   },
@@ -74,13 +76,18 @@ function ProviderIcon({ provider, className = 'w-4 h-4' }: { provider: ProviderT
   return <Triangle className={className} />;
 }
 
-export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
+export function SettingsView({
+  session,
+  onSessionChange,
+  refreshTick = 0,
+  onLoadingChange,
+}: SettingsViewProps) {
   const [status, setStatus] = useState<SettingsStatusResponse | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   // Auth form state (in-memory only)
-  const [operatorSubjectInput, setOperatorSubjectInput] = useState('atax-operator');
+  const [operatorSubjectInput, setOperatorSubjectInput] = useState('');
   const [passphraseInput, setPassphraseInput] = useState('');
   const [confirmPassphraseInput, setConfirmPassphraseInput] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -90,7 +97,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
   const [activeProvider, setActiveProvider] = useState<ProviderType>('github');
   const [accounts, setAccounts] = useState<ProviderAccountSummary[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [aliasInput, setAliasInput] = useState('PERSONAL');
+  const [aliasInput, setAliasInput] = useState('');
   const [accountIdInput, setAccountIdInput] = useState('');
   const [credentialInput, setCredentialInput] = useState('');
   const [showCredential, setShowCredential] = useState(false);
@@ -105,6 +112,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
 
   const loadStatus = useCallback(async (tokenOverride?: string | null) => {
     setLoadingStatus(true);
+    onLoadingChange?.(true);
     setStatusError(null);
     try {
       const token = tokenOverride !== undefined ? tokenOverride : session?.token;
@@ -123,8 +131,9 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
       setStatusError(err instanceof Error ? err.message : 'Unable to reach backend settings API.');
     } finally {
       setLoadingStatus(false);
+      onLoadingChange?.(false);
     }
-  }, [session?.token, onSessionChange]);
+  }, [session?.token, onSessionChange, onLoadingChange]);
 
   const loadAccounts = useCallback(async (token: string) => {
     setLoadingAccounts(true);
@@ -153,7 +162,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
 
   useEffect(() => {
     void loadStatus();
-  }, [loadStatus]);
+  }, [loadStatus, refreshTick]);
 
   useEffect(() => {
     if (session?.token) {
@@ -161,7 +170,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
     } else {
       setAccounts([]);
     }
-  }, [session?.token, loadAccounts]);
+  }, [session?.token, loadAccounts, refreshTick]);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,6 +545,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
                   type="text"
                   value={operatorSubjectInput}
                   onChange={(e) => setOperatorSubjectInput(e.target.value)}
+                  placeholder="operator-name"
                   required
                   minLength={3}
                   maxLength={120}
@@ -680,7 +690,7 @@ export function SettingsView({ session, onSessionChange }: SettingsViewProps) {
                     type="text"
                     value={aliasInput}
                     onChange={(e) => setAliasInput(e.target.value.toUpperCase())}
-                    placeholder="PERSONAL"
+                    placeholder="PRIMARY"
                     required
                     maxLength={48}
                     className="w-full bg-[#140D0B] border border-[#4A362D] px-3 py-1.5 text-sm font-mono text-[#F2EBE1] rounded-sm focus:outline-none focus:border-[#C83214]"

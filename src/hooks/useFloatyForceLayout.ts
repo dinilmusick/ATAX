@@ -71,7 +71,9 @@ export function useFloatyForceLayout({
       if (elapsed >= 32) {
         lastTick = now;
         const bodies = bodiesRef.current;
-        if (bodies.size > 0) {
+        const shouldAnimate =
+          bodies.size > 0 && (bodies.size <= 32 || draggedIdRef.current !== null);
+        if (shouldAnimate) {
           const timeSec = (now - startTimeRef.current) / 1000;
           const nextPositions = stepForceSimulation(bodies, {
             timeSec,

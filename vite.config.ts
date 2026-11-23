@@ -8,4 +8,14 @@ export default defineConfig({
     port: 3000,
     allowedHosts: true,
   },
+  build: {
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE') {
+          return;
+        }
+        warn(warning);
+      },
+    },
+  },
 });

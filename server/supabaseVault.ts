@@ -193,7 +193,7 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
 
 const pools = new Map<string, ReturnType<typeof postgres>>();
 
-function getSqlRunner(connectionUrl: string): SqlRunner {
+export function getSqlRunner(connectionUrl: string): SqlRunner {
   let sql = pools.get(connectionUrl);
   if (!sql) {
     sql = postgres(connectionUrl, {

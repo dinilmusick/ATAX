@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OperatorAuthStore, isSameOriginRequest } from './server/operatorAuth.ts';
+import { createSubstrateService } from './server/supabaseSubstrate.ts';
 import { createVaultService, inspectSupabaseConnection } from './server/supabaseVault.ts';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ hydrateSingleEnvFromDotEnv();
 
 const authStore = new OperatorAuthStore();
 const vaultService = createVaultService(process.env);
+const substrateService = createSubstrateService(process.env);
 
 const app = express();
 app.disable('x-powered-by');
@@ -243,6 +245,65 @@ app.post('/api/settings/providers/:provider/:alias/test', requireOperator, async
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Connection verification failed.';
     res.status(400).json({ error: message });
+  }
+});
+
+app.get('/api/substrate/systems', async (_req, res) => {
+  const conn = inspectSupabaseConnection(process.env);
+  if (!conn.configured) {
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+    });
+    return;
+  }
+  try {
+    const data = await substrateService.getSystemsGraph();
+    res.json(data);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unable to query systems from Supabase.';
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get('/api/substrate/visions-goals', async (_req, res) => {
+  const conn = inspectSupabaseConnection(process.env);
+  if (!conn.configured) {
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+    });
+    return;
+  }
+  try {
+    const data = await substrateService.getVisionsGoalsGraph();
+    res.json(data);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Unable to query visions and goals from Supabase.';
+    res.status(502).json({ error: message });
+  }
+});
+
+app.get('/api/substrate/skills', async (_req, res) => {
+  const conn = inspectSupabaseConnection(process.env);
+  if (!conn.configured) {
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+    });
+    return;
+  }
+  try {
+    const data = await substrateService.getSkillsCatalog();
+    res.json(data);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Unable to query skills catalog from Supabase.';
+    res.status(502).json({ error: message });
   }
 });
 
