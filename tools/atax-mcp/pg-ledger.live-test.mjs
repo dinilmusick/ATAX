@@ -9,8 +9,8 @@ if(!url||!url.includes('@127.0.0.1:54322/'))throw Error('Disposable PostgreSQL r
 const sql=postgres(url,{max:1,prepare:false});
 try {
   const db=createLedgerDb(sql);
-  const context=await db.rpc('agent_context_overview',{});
-  assert.ok(context&&typeof context==='object','canonical overview must be a JSON result');
+  const overview=await db.rpc('goal_ledger_overview',{tags_in:null});
+  assert.ok(overview!==undefined,'migrated canonical goal overview must resolve');
   const policy=await db.rpc('atax_mcp_runtime_config_v1',{});
   assert.ok(policy&&typeof policy.settings==='object');
   assert.ok(Array.isArray(policy.accounts));
