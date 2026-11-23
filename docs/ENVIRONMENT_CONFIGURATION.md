@@ -1,5 +1,8 @@
 # ATAX environment configuration: React handoff + existing control plane
 
+> **Architecture transition (23 November 2026):** This document inventories the **currently deployed legacy** Worker configuration; do not mistake it for the future configuration contract. The new [MCP/UI ledger-credential handoff](MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md) supersedes it for new implementation: exactly **one** ATAX MCP/UI server runtime variable, `ATAX_SUPABASE_CONNECTION_URL` (confidential server-only PostgreSQL TLS URI), with other settings and multi-provider secrets managed in canonical Supabase. **The source has not yet completed this migration.** Do not remove existing runtime credentials or weaken authentication until cutover tests pass. Direct GitHub/Supabase connector settings and separate CI/CLI secrets are outside the MCP runtime change.
+
+
 This is an **inventory and setup contract**, not proof that a UI server or Vercel provider adapter already exists. Source of truth for the existing MCP Worker is `tools/atax-mcp/wrangler.toml`, `worker.mjs`, `provider-accounts.mjs`, `github-tools.mjs` and `OWNER_SETUP.md`. All values in `.env.example` are intentionally blank.
 
 ## Security boundary: Google AI Studio and React
