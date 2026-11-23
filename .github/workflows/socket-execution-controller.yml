@@ -20,6 +20,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   relay-or-observe:
+    # Source may merge before production release. Both manual dispatch and
+    # scheduled reconciliation remain inert unless explicitly enabled by
+    # the repository operator after live release certification.
+    if: vars.ATAX_SOCKET_RELAY_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
