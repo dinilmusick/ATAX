@@ -82,7 +82,8 @@ echo "PASS: two independently authenticated connections, one fenced claim winner
 # Separate PostgreSQL backends also race for a single scoped verifier claim.
 # Deliberately create only a disposable completed/pending fixture; this never
 # contacts the canonical live ledger. Neither command can claim other tasks.
-verify_task="$(psql "$db" -X -v ON_ERROR_STOP=1 -Atc "
+verify_task="$(psql "$db" -X -q -v ON_ERROR_STOP=1 -Atc "
+  WITH created_verification_fixture AS (
   INSERT INTO public.tasks(
     agent_id,agent_name,task_name,status,verification_status,
     result_submitted_at,claimed_by_agent_id,task_definition
@@ -93,6 +94,8 @@ verify_task="$(psql "$db" -X -v ON_ERROR_STOP=1 -Atc "
       'general_pattern','independent review of submitted result','actions',
       jsonb_build_array(jsonb_build_object('description','Review fixture')))
   ) RETURNING id
+  )
+  SELECT id::text FROM created_verification_fixture
 ")"
 if [[ ! "$verify_task" =~ ^[0-9a-f-]{36}$ ]]; then
   echo "FAIL: verifier fixture task unavailable" >&2
