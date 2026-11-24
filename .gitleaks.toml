@@ -28,3 +28,10 @@ id = "generic-api-key"
   regexTarget = "match"
   paths = ['''upstream/forge/wrangler\.quick-production\.jsonc$''']
   regexes = ['''Ov23limRaIiQdRQ3xoyd''']
+
+  [[rules.allowlists]]
+  description = "GitHub provider validation test uses a deterministic non-secret fixture token"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/vaultAndAuth\.test\.ts$''']
+  regexes = ['''ghp_1234567890abcdef123456''']
