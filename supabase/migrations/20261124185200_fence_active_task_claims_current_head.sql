@@ -3,8 +3,9 @@
 -- of stale heartbeat. Existing claim ordering and task contracts are preserved.
 --
 -- This migration rewrites the currently deployed claim functions from their
--- exact live definitions, changing only the recovery predicate and publishes
--- an active-lease ownership guard. Historical task rows are untouched.
+-- exact live definitions, changing only the recovery predicate and recovery
+-- evidence semantics, and publishes an active-lease ownership guard.
+-- Historical task rows are untouched.
 
 DO $migration$
 DECLARE
@@ -31,6 +32,16 @@ BEGIN
       RAISE EXCEPTION 'Expected two-minute heartbeat predicate not found in %', fn.signature;
     END IF;
     definition := replace(definition, old_heartbeat_predicate, new_recovery_predicate);
+    definition := replace(
+      definition,
+      'after at least 2 minutes without a heartbeat',
+      'after at least 5 minutes without a heartbeat'
+    );
+    definition := replace(
+      definition,
+      '''recovery_threshold_minutes'',2',
+      '''recovery_threshold_minutes'',5'
+    );
     EXECUTE definition;
   END LOOP;
 END
