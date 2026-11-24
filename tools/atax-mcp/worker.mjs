@@ -252,7 +252,7 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
     let env={};
     if(path==='/mcp'||path==='/socket'||path==='/.well-known/oauth-protected-resource'||
        path==='/.well-known/oauth-protected-resource/mcp'){
-      try{env=await configLoader(bootstrapEnv);}
+      try{env=await configLoader(bootstrapEnv,req);}
       catch(err){console.error('[worker:configLoader]', err);return json({error:'ATAX MCP not configured'},503);}
     }
     const response=await dispatch(req,env);
