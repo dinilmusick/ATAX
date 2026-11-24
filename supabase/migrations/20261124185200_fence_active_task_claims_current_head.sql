@@ -10,9 +10,9 @@ DO $migration$
 DECLARE
   fn record;
   definition text;
-  old_predicate text :=
-    'coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes'' and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp() and coalesce(t.claim_expires_at,''-infinity''::timestamptz)<=statement_timestamp()';
-  new_predicate text :=
+  old_heartbeat_predicate text :=
+    'coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''2 minutes''';
+  new_recovery_predicate text :=
     't.claim_expires_at is not null and t.claim_expires_at<=now() and t.claim_token is not null and coalesce(t.heartbeat_at,''-infinity''::timestamptz)<=now()-interval ''5 minutes''';
 BEGIN
   FOR fn IN
@@ -27,10 +27,10 @@ BEGIN
       )
   LOOP
     SELECT pg_get_functiondef(fn.oid) INTO definition;
-    IF position(old_predicate IN definition)=0 THEN
-      RAISE EXCEPTION 'Expected two-minute recovery predicate not found in %', fn.signature;
+    IF position(old_heartbeat_predicate IN definition)=0 THEN
+      RAISE EXCEPTION 'Expected two-minute heartbeat predicate not found in %', fn.signature;
     END IF;
-    definition := replace(definition, old_predicate, new_predicate);
+    definition := replace(definition, old_heartbeat_predicate, new_recovery_predicate);
     EXECUTE definition;
   END LOOP;
 END
