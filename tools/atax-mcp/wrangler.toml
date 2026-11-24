@@ -4,7 +4,10 @@ compatibility_date = "2026-11-20"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# The ONLY MCP runtime environment binding is the confidential server secret:
-# ATAX_SUPABASE_CONNECTION_URL=postgresql://<role>:<password>@<supabase-host>:5432/<db>?sslmode=require
-# Set it with wrangler secret put ATAX_SUPABASE_CONNECTION_URL; no [vars].
-# Owner policy, provider Vault credentials and Socket settings come from ledger.
+# Production database transport is Cloudflare Hyperdrive. No Supabase Edge Function or
+# database HTTP bridge is used by the MCP Worker. Bind the production Hyperdrive config:
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<PRODUCTION_HYPERDRIVE_CONFIG_ID>"
+# Local/CI tests may still inject ATAX_SUPABASE_CONNECTION_URL directly.
+# Owner policy, provider Vault credentials and Socket settings come from the ledger.
