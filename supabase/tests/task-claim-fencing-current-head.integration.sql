@@ -3,7 +3,7 @@ BEGIN;
 
 DO $fixture$
 DECLARE
-  goal_id uuid;
+  fixture_goal_id uuid;
   task_row public.tasks;
   first_claim public.tasks;
   second_claim public.tasks;
@@ -11,7 +11,7 @@ BEGIN
   INSERT INTO public.goals(name,created_by_agent_id,status)
   VALUES ('Fenced claim regression ' || replace(gen_random_uuid()::text,'-',''),
           'fenced-claim-test','ready')
-  RETURNING id INTO goal_id;
+  RETURNING id INTO fixture_goal_id;
 
   SELECT * INTO task_row FROM public.task_ledger_register(
     'fenced-claim-test','Fenced Claim Test','Lease fencing regression',
@@ -20,12 +20,12 @@ BEGIN
     'Verify fenced task recovery','{}'::jsonb,NULL
   );
 
-  UPDATE public.tasks
-  SET goal_id=goal_id,
-      target=(SELECT target FROM public.goals WHERE id=goal_id),
+  UPDATE public.tasks t
+  SET goal_id=fixture_goal_id,
+      target=(SELECT g.target FROM public.goals g WHERE g.id=fixture_goal_id),
       required_capabilities=ARRAY['fenced-claim-test']::text[],
       task_role='loop_authoring'
-  WHERE id=task_row.id;
+  WHERE t.id=task_row.id;
 
   SELECT * INTO first_claim
   FROM public.task_ledger_claim_next(
@@ -37,7 +37,6 @@ BEGIN
     RAISE EXCEPTION 'fixture task was not claimed';
   END IF;
 
-  -- Stale heartbeat alone must not permit takeover while the lease is valid.
   UPDATE public.tasks
   SET heartbeat_at=now()-interval '6 minutes'
   WHERE id=first_claim.id;
@@ -52,7 +51,6 @@ BEGIN
     RAISE EXCEPTION 'stale heartbeat stole an unexpired lease';
   END IF;
 
-  -- Generic SQL cannot replace or shorten a live claim through service_role.
   SET LOCAL ROLE service_role;
 
   BEGIN
@@ -75,7 +73,6 @@ BEGIN
 
   RESET ROLE;
 
-  -- Expire the lease while retaining a stale heartbeat and recover atomically.
   UPDATE public.tasks
   SET claim_expires_at=now()-interval '1 second',
       heartbeat_at=now()-interval '6 minutes'
