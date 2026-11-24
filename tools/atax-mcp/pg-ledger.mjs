@@ -95,16 +95,34 @@ export function createLedgerDb(sql) {
   return {rpc,skills,skill,request};
 }
 
-async function defaultClient(uri) {
+async function defaultClient(uri,hyperdrive=false) {
   let postgres;
   try{postgres=(await import('postgres')).default;}
   catch{throw Error('PostgreSQL transport unavailable');}
+  if(hyperdrive){
+    // Hyperdrive terminates the upstream Supabase TLS connection and exposes
+    // a Worker-safe PostgreSQL connection string. Do not add ssl/CA options
+    // here; the binding owns the upstream TLS policy.
+    return postgres(uri,{max:5,prepare:true,fetch_types:false,idle_timeout:20});
+  }
   return postgres(uri,{
     ssl:'require',max:1,prepare:false,connectionTimeoutMillis:8000,
     connect_timeout:8,idle_timeout:20
   });
 }
 export async function openLedger(bootstrapEnv,clientFactory=defaultClient) {
+  const hyperdrive=bootstrapEnv?.HYPERDRIVE;
+  if(hyperdrive&&typeof hyperdrive.connectionString==='string'&&hyperdrive.connectionString.length>0){
+    if(clientFactory!==defaultClient)return createLedgerDb(await clientFactory(hyperdrive.connectionString));
+    const uri=hyperdrive.connectionString;
+    let promise=pools.get(uri);
+    if(!promise){
+      promise=defaultClient(uri,true).then(createLedgerDb);
+      pools.set(uri,promise);
+      promise.catch(()=>{if(pools.get(uri)===promise)pools.delete(uri);});
+    }
+    return promise;
+  }
   const uri=parseConnectionUri(bootstrapEnv);
   if(clientFactory!==defaultClient)return createLedgerDb(await clientFactory(uri));
   let promise=pools.get(uri);
