@@ -46,6 +46,7 @@ export default {
     if (url.pathname === '/health') {
       return json({
         service: 'atax',
+        version: '1.0.0',
         status: 'ok',
         transports: ['dashboard', 'mcp', 'socket'],
         supabaseConfigured:
