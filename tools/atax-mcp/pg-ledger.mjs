@@ -20,6 +20,14 @@ export function parseConnectionUri(env) {
      !['require','verify-full'].includes(url.searchParams.get('sslmode'))||
      [...url.searchParams.keys()].some(key=>key!=='sslmode'))
     throw Error('ATAX requires a canonical TLS Supabase PostgreSQL URL');
+  // Cloudflare Workers should use Supabase's IPv4 shared transaction pooler.
+  // Accept an existing session-pooler URL and normalize it to transaction mode so
+  // the deployed Worker does not require a manual secret rotation just to change ports.
+  if (url.hostname.endsWith('.pooler.supabase.com') && (url.port === '5432' || url.port === '')) {
+    url.port = '6543';
+    url.searchParams.set('sslmode', 'require');
+    return url.toString();
+  }
   return raw;
 }
 
