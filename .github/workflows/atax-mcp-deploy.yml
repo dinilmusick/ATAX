@@ -1,52 +1,61 @@
-name: Deploy ATAX MCP Worker
+name: Deploy ATAX Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "server/**"
+      - "worker-dashboard.ts"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
+      - "tools/atax-mcp/**"
+      - ".github/workflows/atax-mcp-deploy.yml"
   workflow_dispatch:
-    inputs:
-      cloudflare_account_id:
-        description: 'Cloudflare account ID (the owner selects the destination explicitly)'
-        required: true
-        type: string
-      worker_url:
-        description: 'Optional exact public Worker URL for health probe (no credentials)'
-        required: false
-        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: atax-worker-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: atax-mcp
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288ac02d1e84afbd3f7d6820020
         with:
-          node-version: '22'
-      - name: Verify MCP gateway
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify dashboard and MCP
         run: |
+          npm run lint
+          npm run build
           node --check tools/atax-mcp/worker.mjs
-          node --check tools/atax-mcp/provider-accounts.mjs
           node --test tools/atax-mcp/*.test.mjs
       - name: Deploy Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
+          CLOUDFLARE_ACCOUNT_ID: 66d0445d1a4373ff430e092c2ffb8f87
         run: |
           set -euo pipefail
-          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid Cloudflare account ID'; exit 1; }
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing ATAX_MCP_CLOUDFLARE_API_TOKEN repository secret'; exit 1; }
-          npx --yes wrangler@4 deploy --config tools/atax-mcp/wrangler.toml
-      - name: Verify health at explicit URL
-        if: inputs.worker_url != ''
-        env:
-          WORKER_URL: ${{ inputs.worker_url }}
+          npx --yes wrangler@4 deploy --config wrangler.toml
+      - name: Verify public health
         run: |
           set -euo pipefail
-          [[ "$WORKER_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo 'Expected HTTPS Worker URL'; exit 1; }
-          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/health"
+          curl --fail --silent --show-error --max-time 20 https://atax.dextro1n1laevo.workers.dev/health
+      - name: Verify MCP unauthenticated boundary
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' --max-time 20 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci-smoke","version":"1.0"}}}' https://atax.dextro1n1laevo.workers.dev/mcp)"
+          test "$code" = "401" || { echo "Expected 401 for unauthenticated MCP request, got $code"; cat /tmp/mcp-response.json; exit 1; }
