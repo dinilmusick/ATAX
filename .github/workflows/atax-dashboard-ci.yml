@@ -1,0 +1,47 @@
+name: Validate ATAX Cloudflare deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "server/**"
+      - "worker-dashboard.ts"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
+      - "tools/atax-mcp/**"
+      - ".github/workflows/atax-dashboard-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atax-cloudflare-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea528caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck
+        run: npm run lint
+      - name: Build dashboard
+        run: npm run build
+      - name: Validate Worker bundle
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.toml
+      - name: Validate MCP modules
+        run: |
+          node --check tools/atax-mcp/worker.mjs
+          node --test tools/atax-mcp/*.test.mjs
