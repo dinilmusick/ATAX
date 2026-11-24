@@ -58,3 +58,21 @@ test('injected PostgreSQL transport uses one URL, without provider or API-key bi
     });
   assert.deepEqual(await db.rpc('agent_context_overview',{}),{ok:true});
 });
+
+
+test('Hyperdrive is the only production Worker database transport',async()=>{
+  const binding={connectionString:'postgresql://hyperdrive.invalid/postgres'};
+  let used=null;
+  const db=await openLedger(binding,async uri=>{
+    used=uri;
+    return {unsafe:async q=>q.includes('pg_catalog.pg_proc')?[{is_set:false,kind:'b'}]:[{value:{ok:true}}]};
+  });
+  assert.equal(used,binding.connectionString);
+  assert.deepEqual(await db.rpc('agent_context_overview',{}),{ok:true});
+});
+test('database bridge and Edge Function transport are absent',async()=>{
+  const source=(await import('node:fs/promises')).readFile(new URL('./pg-ledger.mjs',import.meta.url),'utf8');
+  assert.equal(source.includes('functions/v1/atax-mcp-db'),false);
+  assert.equal(source.includes('createHttpLedgerDb'),false);
+  assert.equal(source.includes('authHeader'),false);
+});
