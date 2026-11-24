@@ -1,0 +1,34 @@
+name: Probe live ATAX endpoint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker-dashboard.ts"
+      - "wrangler.toml"
+      - ".github/workflows/atax-live-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 https://atax.dextro1n1laevo.workers.dev/health
+      - name: Probe dashboard
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 https://atax.dextro1n1laevo.workers.dev/
+      - name: Probe MCP unauthenticated boundary
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --output /tmp/mcp-response.json --write-out '%{http_code}' --max-time 20 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci-probe","version":"1.0"}}}' https://atax.dextro1n1laevo.workers.dev/mcp)"
+          echo "HTTP $code"
+          cat /tmp/mcp-response.json
+          test "$code" = "401" || test "$code" = "503"
