@@ -46,12 +46,15 @@ export default {
     if (url.pathname === '/health') {
       return json({
         service: 'atax',
-        version: '1.0.2',
+        version: '1.0.3',
         status: 'ok',
         transports: ['dashboard', 'mcp', 'socket'],
-        supabaseConfigured:
-          typeof env.ATAX_SUPABASE_CONNECTION_URL === 'string' &&
-          env.ATAX_SUPABASE_CONNECTION_URL.length > 0,
+        databaseTransport:
+          env.HYPERDRIVE &&
+          typeof env.HYPERDRIVE.connectionString === 'string' &&
+          env.HYPERDRIVE.connectionString.length > 0
+            ? 'cloudflare-hyperdrive'
+            : 'unconfigured',
       });
     }
 
