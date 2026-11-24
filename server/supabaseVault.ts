@@ -119,11 +119,19 @@ export function inspectSupabaseConnection(
     };
   }
 
+  // Cloudflare Workers use the IPv4 shared Supavisor transaction pooler.
+  // Normalize a session-pooler URL supplied during initial deployment so the
+  // Worker does not depend on a manual secret rotation just to change ports.
+  if (url.hostname.endsWith('.pooler.supabase.com') && (url.port === '5432' || url.port === '')) {
+    url.port = '6543';
+    url.searchParams.set('sslmode', 'require');
+  }
+
   return {
     configured: true,
     hostLabel: url.hostname,
     error: null,
-    connectionUrl: raw,
+    connectionUrl: url.toString(),
   };
 }
 
@@ -198,7 +206,7 @@ export function getSqlRunner(connectionUrl: string): SqlRunner {
   if (!sql) {
     sql = postgres(connectionUrl, {
       ssl: 'require',
-      max: 3,
+      max: 1,
       prepare: false,
       connect_timeout: 8,
       idle_timeout: 20,
