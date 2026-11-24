@@ -16,7 +16,9 @@ const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 /** Use openLedger() by default, inject a fake for isolated tests only. */
 export async function loadMcpRuntimeConfig(bootstrapEnv,request=null,open=openLedger) {
   const authHeader=request?.headers?.get?.('authorization')||null;
-  const db=await open(bootstrapEnv,open===openLedger?undefined:open,authHeader);
+  const db=open===openLedger
+    ? await open(bootstrapEnv,undefined,authHeader)
+    : await open(bootstrapEnv);
   const config=await db.rpc('atax_mcp_runtime_config_v1',{});
   if(!obj(config)||!obj(config.settings)||!Array.isArray(config.accounts))
     throw Error('Canonical MCP policy unavailable');
