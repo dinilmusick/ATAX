@@ -112,7 +112,7 @@ async function defaultClient(uri,hyperdrive=false) {
 }
 export function createHttpLedgerDb(bridgeUrl,authHeader,fetcher=fetch) {
   if(typeof bridgeUrl!=='string'||!/^https:\/\//.test(bridgeUrl))throw Error('Invalid PostgreSQL bridge URL');
-  if(typeof authHeader!=='string'||!/^Bearer [\\x21-\\x7E]{12,8192}$/.test(authHeader))throw Error('MCP authorization required for PostgreSQL bridge');
+  if(typeof authHeader!=='string'||!/^Bearer [\x21-\x7E]{12,8192}$/.test(authHeader))throw Error('MCP authorization required for PostgreSQL bridge');
   async function rpc(name,params={}) {
     if(!NAME.test(name)||params===null||typeof params!=='object'||Array.isArray(params))
       throw Error('Invalid canonical RPC');
