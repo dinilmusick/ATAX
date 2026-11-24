@@ -8,3 +8,9 @@ workers_dev = true
 directory = "./dist"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/health", "/mcp", "/socket", "/.well-known/*"]
+
+# Production MCP/substrate database transport: Cloudflare Hyperdrive.
+# Bind the production Hyperdrive configuration in the deployment account.
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<PRODUCTION_HYPERDRIVE_CONFIG_ID>"
