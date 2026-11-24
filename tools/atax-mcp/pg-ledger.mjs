@@ -92,7 +92,7 @@ async function defaultClient(uri) {
   try{postgres=(await import('postgres')).default;}
   catch{throw Error('PostgreSQL transport unavailable');}
   return postgres(uri,{
-    ssl:'require',max:2,prepare:false,
+    ssl:'require',max:1,prepare:false,connectionTimeoutMillis:8000,
     connect_timeout:8,idle_timeout:20
   });
 }
