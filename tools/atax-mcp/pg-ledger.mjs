@@ -1,6 +1,6 @@
 /**
  * Direct TLS PostgreSQL adapter for the one ATAX ledger connection URI.
- * No Supabase REST API key, Cloudflare-specific binding, or generic SQL MCP tool.
+ * No Supabase Edge Function, REST bridge, API key, or generic SQL MCP tool.
  * Never expose connection strings or database errors to agent-facing results.
  */
 const NAME=/^[a-z][a-z0-9_]{0,100}$/;
@@ -110,38 +110,8 @@ async function defaultClient(uri,hyperdrive=false) {
     connect_timeout:8,idle_timeout:20
   });
 }
-export function createHttpLedgerDb(bridgeUrl,authHeader,fetcher=fetch) {
-  if(typeof bridgeUrl!=='string'||!/^https:\/\//.test(bridgeUrl))throw Error('Invalid PostgreSQL bridge URL');
-  if(typeof authHeader!=='string'||!/^Bearer [\x21-\x7E]{12,8192}$/.test(authHeader))throw Error('MCP authorization required for PostgreSQL bridge');
-  async function rpc(name,params={}) {
-    if(!NAME.test(name)||params===null||typeof params!=='object'||Array.isArray(params))
-      throw Error('Invalid canonical RPC');
-    const response=await fetcher(bridgeUrl,{method:'POST',redirect:'error',headers:{
-      authorization:authHeader,'content-type':'application/json','accept':'application/json'
-    },body:JSON.stringify({rpc:name,params})});
-    if(!response.ok)throw Error('Canonical PostgreSQL bridge unavailable');
-    const payload=await response.json();
-    if(!payload||!Object.prototype.hasOwnProperty.call(payload,'data'))throw Error('Canonical PostgreSQL bridge returned an invalid response');
-    return payload.data;
-  }
-  async function skills(term){return rpc('atax_mcp_skills_search_v1',{term_in:String(term).slice(0,120)});}
-  async function skill(slug){return rpc('atax_mcp_skill_get_v1',{slug_in:String(slug).slice(0,120)});}
-  async function request(path){
-    if(!path.startsWith('skills?select='))throw Error('Unsupported canonical resource');
-    return rpc('atax_mcp_skills_catalog_v1',{});
-  }
-  return {rpc,skills,skill,request};
-}
 
-const DEFAULT_BRIDGE_URL='https://vcaerawuwffziufvpbvw.supabase.co/functions/v1/atax-mcp-db';
-
-export async function openLedger(bootstrapEnv,clientFactory=defaultClient,authHeader=null) {
-  const bridgeUrl=typeof bootstrapEnv?.ATAX_MCP_DB_BRIDGE_URL==='string'&&bootstrapEnv.ATAX_MCP_DB_BRIDGE_URL
-    ? bootstrapEnv.ATAX_MCP_DB_BRIDGE_URL
-    : DEFAULT_BRIDGE_URL;
-  if(authHeader){
-    return createHttpLedgerDb(bridgeUrl,authHeader);
-  }
+export async function openLedger(bootstrapEnv,clientFactory=defaultClient) {
   const hyperdrive=bootstrapEnv?.HYPERDRIVE;
   if(hyperdrive&&typeof hyperdrive.connectionString==='string'&&hyperdrive.connectionString.length>0){
     if(clientFactory!==defaultClient)return createLedgerDb(await clientFactory(hyperdrive.connectionString));
@@ -154,6 +124,8 @@ export async function openLedger(bootstrapEnv,clientFactory=defaultClient,authHe
     }
     return promise;
   }
+  // Local/CI fallback only. Production Cloudflare Workers must use Hyperdrive;
+  // direct Supabase TLS is not a supported Worker transport.
   const uri=parseConnectionUri(bootstrapEnv);
   if(clientFactory!==defaultClient)return createLedgerDb(await clientFactory(uri));
   let promise=pools.get(uri);
