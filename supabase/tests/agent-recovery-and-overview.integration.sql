@@ -89,9 +89,9 @@ begin
   where id=first_claim.id;
 
   select * into recovered
-  from public.goal_ledger_claim_task_by_key(
-    goal_key_value,'recovery-worker-new','Recovery Worker','worker',
-    array['recovery-test']::text[],'recovery-session-new',900
+  from public.task_ledger_claim_goal_next(
+    goal_id_value,'recovery-worker-new','Recovery Worker','worker',
+    array['recovery-test']::text[],900
   );
   if recovered.id is distinct from first_claim.id then
     raise exception 'Stale task was not reclaimed';
