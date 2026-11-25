@@ -13,13 +13,19 @@ export interface ProviderAccountSummary {
 }
 
 export interface SettingsStatusResponse {
-  supabaseConfigured: boolean;
-  supabaseHost: string | null;
-  supabaseError: string | null;
-  operatorClaimed: boolean;
-  authenticated: boolean;
-  operatorSubject: string | null;
-  requiredEnvVars: string[];
+  backend: {
+    configured: boolean;
+    reachable: boolean;
+  };
+  authentication: {
+    required: true;
+    authenticated: boolean;
+  };
+  providers: {
+    github: boolean;
+    cloudflare: boolean;
+    vercel: false;
+  };
 }
 
 export interface ProviderTestResult {
