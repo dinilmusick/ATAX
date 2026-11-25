@@ -218,14 +218,18 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
   const testAccount=async(account:ProviderAccountSummary)=>{
     const key=`${account.provider}:${account.alias}`;
     setBusyKey(key);
+    let failureStatus=500;
     try{
       const res=await fetch(`/api/settings/providers/${encodeURIComponent(account.provider)}/${encodeURIComponent(account.alias)}/test`,{method:'POST'});
       const data=await jsonResponse<ProviderTestResult & {error?:string}>(res);
       if(res.status===401){await loadStatus();throw new Error('Instance authentication expired.');}
-      if(!res.ok) throw new Error(data.error||'Provider connection test failed.');
+      if(!res.ok){
+        failureStatus=res.status;
+        throw new Error(data.error||`Provider connection test failed (HTTP ${res.status}).`);
+      }
       setTestResults(prev=>({...prev,[key]:data}));
     }catch(err){
-      setTestResults(prev=>({...prev,[key]:{ok:false,provider:account.provider,alias:account.alias,statusCode:500,summary:err instanceof Error?err.message:'Provider test failed.',checkedAt:new Date().toISOString()}}));
+      setTestResults(prev=>({...prev,[key]:{ok:false,provider:account.provider,alias:account.alias,statusCode:failureStatus,summary:err instanceof Error?err.message:'Provider test failed.',checkedAt:new Date().toISOString()}}));
     }finally{setBusyKey(null);}
   };
 

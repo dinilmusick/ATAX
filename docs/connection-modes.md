@@ -42,11 +42,12 @@ The three modes are **interfaces to one substrate**, not three separate implemen
 
 ### Mode 3 — ATAX remote MCP
 
-- Authenticate the single-owner client to the `/mcp` protected resource using the configured owner OAuth flow (or an explicitly configured owner bootstrap token where client support permits).
+- Authenticate the single-owner client to `/mcp` (`https://atax.dextro1n1laevo.workers.dev/mcp`) using **Supabase OAuth 2.1 + Google Sign-In** (discovered automatically via `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`, with RFC 7591 dynamic registration at Supabase's `/auth/v1/oauth/clients/register`), or an explicitly configured owner shared bearer token (`MCP_SHARED_TOKEN_SHA256`).
+- Incoming JWTs (`ES256`/`RS256`/`EdDSA`, `typ: 'JWT'` or `'at+jwt'`) are verified against cached Supabase JWKS (`/.well-known/jwks.json`), checked for `iss`, `aud`, `exp`, `nbf`, and `sub`, and mapped strictly to the single ATAX owner when `sub === MCP_ATAX_OWNER_JWT_SUBJECT`.
 - The Worker runtime holds only `ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SECRET_KEY` (communicating with Supabase **exclusively via HTTPS Data API / PostgREST**). Named GitHub/Cloudflare credentials live encrypted in **Supabase Vault** via `/api/settings/providers`, and Vercel integration stays disabled (`501`).
-- The Worker must not store provider credentials in D1, expose them in tool arguments/results, or mutate local task state instead of the Supabase RPCs.
-- `GET /health` proves only liveness. Real acceptance requires authenticated initialization, tools/list, Supabase read, atomic claim fencing, account selection, and independent verification.
-- **Current scope warning:** this MCP implementation exposes a bounded subset of GitHub tools and **read-only** Cloudflare diagnostics; full capability parity across modes is an intended contract, **not an already verified fact**. Claude/Gemini native client interoperability requires separate production evidence.
+- Multiple GitHub accounts (`GH_KEY_<ALIAS>`) are explicitly scoped by alias (`account` required when >1 account exists), with `dispatched_account` consistency checks across `atax_fmrl_create_run_dispose` and `atax_fmrl_get_status`. Secret values are never accepted as tool inputs or returned in MCP results.
+- `GET /health` proves only liveness. Real acceptance requires authenticated initialization, `tools/list`, Supabase read, atomic claim fencing, account selection, independent verification, and live interactive client login verification.
+- See [mcp-oauth-architecture.md](mcp-oauth-architecture.md) for sequence diagrams and troubleshooting.
 
 ## Safety and parity rules
 

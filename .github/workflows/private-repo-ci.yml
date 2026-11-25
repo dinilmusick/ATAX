@@ -267,6 +267,6 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$BRIDGE" =~ ^[A-Za-z0-9_.-]+/FMRL-[A-Za-z0-9-]+$ ]]
-          [[ "$BRIDGE" != dinilmusick/ATAX ]]
+          [[ "$BRIDGE" != "$GITHUB_REPOSITORY" ]]
           python3 tools/github/repository_lifecycle.py delete --repository "$BRIDGE"
           echo "FMRL cleanup independently verified." >> "$GITHUB_STEP_SUMMARY"

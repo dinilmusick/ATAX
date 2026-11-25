@@ -42,7 +42,20 @@ This is **exclusive authorized occupancy**, not a claim that only one external A
 | `ATAX_SUPABASE_URL` | **Secret** | Canonical ATAX Supabase HTTPS API URL (`https://<project>.supabase.co`) |
 | `ATAX_SUPABASE_SECRET_KEY` | **Secret** | Dedicated server-side Supabase secret key for HTTPS PostgREST / Data API; never exposed through an API/MCP response |
 
-Owner authentication policies (`MCP_OWNER_SUBJECT`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_ATAX_OWNER_JWT_SUBJECT`, `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE`, `MCP_AUTH_OWNER_SCOPES`) are stored in `atax_private.mcp_server_settings` and loaded via `atax_mcp_runtime_config_v1`. Keep executing agents and independent verifiers in distinct identities/scopes.
+Owner authentication policies (`MCP_OWNER_SUBJECT`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_ATAX_OWNER_JWT_SUBJECT`, `MCP_AUTH_OWNER_SCOPES`, `MCP_AUTH_AUTHORIZATION_SERVER`, `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE`) are stored in `atax_private.mcp_server_settings` and loaded via `atax_mcp_runtime_config_v1`. Keep executing agents and independent verifiers in distinct identities/scopes.
+
+## Configure Supabase OAuth 2.1 & Google Sign-In
+
+1. **Supabase Dashboard -> Authentication -> Providers -> Google:** Enable Google Sign-In with your Google OAuth Client ID and Client Secret, and ensure Supabase Auth OAuth 2.1 Server + Dynamic Client Registration (`/auth/v1/oauth/clients/register`) are enabled.
+2. **Sign in once with the owner's Google account** through the OAuth flow (or check Supabase **Authentication -> Users**) to obtain the owner's permanent **User UID (`user.id` UUID)** — never use an email address.
+3. **Set OAuth policy in `atax_private.mcp_server_settings`** (via `atax_mcp_set_settings_v1`):
+   - `MCP_AUTH_AUTHORIZATION_SERVER`: `https://<project>.supabase.co/auth/v1`
+   - `MCP_AUTH_ISSUER`: `https://<project>.supabase.co/auth/v1`
+   - `MCP_AUTH_JWKS_URL`: `https://<project>.supabase.co/auth/v1/.well-known/jwks.json`
+   - `MCP_AUTH_AUDIENCE`: `authenticated` (or space/comma-separated list including custom audiences if Custom Access Token Hooks set one)
+   - `MCP_ATAX_OWNER_JWT_SUBJECT`: `<owner-supabase-user-uuid>`
+   - `MCP_AUTH_OWNER_SCOPES`: `atax:read atax:write atax:github:read atax:github:create atax:cloudflare:read atax:fmrl:execute` (omit `atax:verify` unless explicitly intended; keep independent verifiers separate)
+4. **Security boundary:** Non-owner Supabase Auth users (even with valid Google accounts) fail `isOwnerPrincipal()` and receive no owner tools or credentials.
 
 ## Add named provider accounts via Supabase Vault
 
@@ -50,9 +63,9 @@ Manage named **GitHub** and **Cloudflare** credentials through the authenticated
 
 Initialize the instance passkey once via Supabase SQL Editor (`SELECT atax_private.initialize_instance_passkey_v1('<12+ char passkey>');`), then unlock the Settings UI with `Enter passkey` to add, test, enable/disable, rotate, or revoke aliases.
 
-The `atax_provider_accounts_list` tool lists **aliases only**. When just one account is configured, tools can omit `account`; when several exist, tools must select an explicit alias. Selected GitHub credentials serve repository inspection, permanent repository creation and FMRL controller workflow dispatch/status. `CF_KEY_<ALIAS>` supplies Cloudflare account discovery and Worker-list diagnostics. Cloudflare mutation/deployment tools are **not yet** offered by this MCP surface. Vercel is intentionally deferred.
-
-For FMRL, configure the nonsecret `MCP_GITHUB_OWNER` and `MCP_FMRL_ALLOWED_TARGETS` policy. Select a GitHub account whose permissions permit dispatching/reading the canonical ATAX FMRL controller. Its GitHub Actions workflow retains its own established secrets. A successful dispatch is not proof of test success or disposable-repo cleanup.
+- **Troubleshooting Settings `Test` button:** `/api/settings/providers/:provider/:alias/test` resolves the instance owner from the canonical database before calling `vault.testAccountConnection(ownerSubject, provider, alias)` and returns `503` if the instance owner is not configured or session is invalid, or `404` if the account alias is disabled in Vault (only enabled accounts are active in `atax_mcp_runtime_config_v1`).
+- **Multi-account GitHub + FMRL:** `atax_provider_accounts_list` lists aliases only. When two or more GitHub accounts are registered (e.g. `PERSONAL`, `WORK`), callers must specify `account` explicitly on every GitHub and FMRL tool call; `atax_fmrl_create_run_dispose` returns `dispatched_account`, which can be passed back to `atax_fmrl_get_status` to enforce same-account polling.
+- Configure `MCP_GITHUB_OWNER` (valid GitHub login for the ATAX controller repo) and `MCP_FMRL_ALLOWED_TARGETS` for FMRL CI dispatch. Selected GitHub credentials never leak in responses or logs.
 
 ## GitHub repository secrets are a separate boundary
 

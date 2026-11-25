@@ -225,11 +225,97 @@ test('createVaultService calls singleton instance owner and PostgREST Vault RPCs
     (err: unknown) => err instanceof VaultError && err.statusCode === 400 && err.message === 'Provider account not found'
   );
 
-  const probe = await vault.testAccountConnection(undefined, 'github', 'PERSONAL');
+  const probe = await vault.testAccountConnection('dinilmusick', 'github', 'PERSONAL');
   assert.equal(probe.ok, true);
   assert.equal(probe.summary, 'Verified GitHub account @dinilmusick');
   assert.equal(auditedTest, true);
   assert.equal(JSON.stringify(probe).includes('synthetic-github-credential-value'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1 regression: testAccountConnection with undefined/null/empty owner
+// ---------------------------------------------------------------------------
+test('Phase1 regression: testAccountConnection rejects undefined owner before making any RPC call', async () => {
+  const secretKey = ['synthetic', 'test', 'key', 'regression', '0123456789abcdef'].join('-');
+  const rpcCalled: string[] = [];
+  const fakeFetch = (async (input: RequestInfo | URL) => {
+    rpcCalled.push(String(input));
+    return Response.json({ owner: 'should-not-reach' });
+  }) as typeof fetch;
+
+  const vault = createVaultService(
+    { ATAX_SUPABASE_URL: 'https://abc.supabase.co', ATAX_SUPABASE_SECRET_KEY: secretKey },
+    fakeFetch
+  );
+
+  // undefined — the original bug: testProvider called testAccountConnection(undefined, ...)
+  await assert.rejects(
+    () => vault.testAccountConnection(undefined as unknown as string, 'github', 'PERSONAL'),
+    (err: unknown) => err instanceof VaultError && err.statusCode === 503 && err.message.toLowerCase().includes('owner')
+  );
+
+  // null
+  await assert.rejects(
+    () => vault.testAccountConnection(null as unknown as string, 'github', 'PERSONAL'),
+    (err: unknown) => err instanceof VaultError && err.statusCode === 503
+  );
+
+  // empty string
+  await assert.rejects(
+    () => vault.testAccountConnection('', 'github', 'PERSONAL'),
+    (err: unknown) => err instanceof VaultError && err.statusCode === 503
+  );
+
+  // No Supabase RPC should have been reached — the guard fires synchronously
+  assert.equal(rpcCalled.some(u => u.includes('/rpc/')), false,
+    'Supabase RPCs must NOT be called when owner subject is missing');
+});
+
+test('Phase1 regression: account isolation — only the requested alias credential is used', async () => {
+  const secretKey = ['synthetic', 'test', 'key', 'isolation', '0123456789abcdef'].join('-');
+  const usedTokens: string[] = [];
+
+  const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const headers = (init?.headers || {}) as Record<string, string>;
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_instance_owner_subject_v1')) return Response.json('dinilmusick');
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_runtime_config_v1')) {
+      return Response.json({
+        settings: { MCP_OWNER_SUBJECT: 'dinilmusick' },
+        accounts: [
+          { provider: 'github', alias: 'PERSONAL', token: 'token-personal-acct-unique' },
+          { provider: 'github', alias: 'WORK', token: 'token-work-acct-unique' },
+        ],
+      });
+    }
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_audit_provider_test_v1')) return new Response(null, { status: 204 });
+    if (url === 'https://api.github.com/user') {
+      const auth = headers['Authorization'] || headers['authorization'] || '';
+      usedTokens.push(auth.replace('Bearer ', ''));
+      return Response.json({ login: 'dinilmusick' });
+    }
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const vault = createVaultService(
+    { ATAX_SUPABASE_URL: 'https://abc.supabase.co', ATAX_SUPABASE_SECRET_KEY: secretKey },
+    fakeFetch
+  );
+
+  // Test PERSONAL
+  usedTokens.length = 0;
+  const r1 = await vault.testAccountConnection('dinilmusick', 'github', 'PERSONAL');
+  assert.equal(r1.ok, true);
+  assert.equal(usedTokens.length, 1);
+  assert.equal(usedTokens[0], 'token-personal-acct-unique', 'PERSONAL alias must use PERSONAL token only');
+
+  // Test WORK — must NOT use PERSONAL token
+  usedTokens.length = 0;
+  const r2 = await vault.testAccountConnection('dinilmusick', 'github', 'WORK');
+  assert.equal(r2.ok, true);
+  assert.equal(usedTokens.length, 1);
+  assert.equal(usedTokens[0], 'token-work-acct-unique', 'WORK alias must use WORK token, not PERSONAL');
+  assert.notEqual(usedTokens[0], 'token-personal-acct-unique', 'Credentials must never be confused between accounts');
 });
 
 test('createVaultService scrubs secrets and URLs from upstream PostgREST errors', async () => {

@@ -208,3 +208,30 @@ test('backend availability is reported as 503 rather than authentication require
   assert.equal(providers.status,503);
   assert.equal((providers.body as {error?:string}).error,'Supabase backend unavailable.');
 });
+
+test('Phase1 regression: testProvider resolves DB owner subject from session and passes it to testAccountConnection', async () => {
+  const {controller, state} = makeFixture();
+  // Unauthenticated test request -> 401
+  const unauth = await controller.testProvider(
+    req('https://atax.example/api/settings/providers/github/PRIMARY/test', {method:'POST'}),
+    'github',
+    'PRIMARY'
+  );
+  assert.equal(unauth.status, 401);
+
+  // Valid unlocked session -> resolves 'canonical-owner' and passes it (not undefined)
+  const unlock = await controller.unlock(
+    req('https://atax.example/api/settings/auth/unlock', {method:'POST'}),
+    'right-passphrase'
+  );
+  const cookie = unlock.headers.get('set-cookie')!.split(';')[0];
+  const okRes = await controller.testProvider(
+    req('https://atax.example/api/settings/providers/github/PRIMARY/test', {method:'POST', headers:{cookie}}),
+    'github',
+    'PRIMARY'
+  );
+  assert.equal(okRes.status, 200);
+  const testCall = state.providerCalls.find(c => c.name === 'vault.testAccountConnection');
+  assert.ok(testCall, 'vault.testAccountConnection must be called');
+  assert.deepEqual(testCall.params.args, ['canonical-owner', 'github', 'PRIMARY']);
+});

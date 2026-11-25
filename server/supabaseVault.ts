@@ -329,10 +329,19 @@ export function createVaultService(
   }
 
   async function testAccountConnection(
-    suppliedOwner: string | undefined,
+    suppliedOwner: string | null | undefined,
     providerRaw: string,
     aliasRaw: string
   ): Promise<ProviderTestResult> {
+    // Phase 1 bug fix: reject undefined/null owner up front with a clear error
+    // rather than forwarding it to the RPC which would silently fail to find
+    // the credential because no owner subject was supplied for the Vault lookup.
+    if (suppliedOwner === undefined || suppliedOwner === null || suppliedOwner === '') {
+      throw new VaultError(
+        'Instance owner subject is required to retrieve provider credentials. Ensure the instance passkey is initialized and the session is valid.',
+        503
+      );
+    }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
     const db = await open();
     const owner = await ownerSubject(db, suppliedOwner);

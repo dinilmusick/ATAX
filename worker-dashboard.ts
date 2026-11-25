@@ -41,7 +41,10 @@ export function createDashboardWorker(
         url.pathname === '/mcp' ||
         url.pathname === '/socket' ||
         url.pathname === '/.well-known/oauth-protected-resource' ||
-        url.pathname === '/.well-known/oauth-protected-resource/mcp'
+        url.pathname === '/.well-known/oauth-protected-resource/mcp' ||
+        url.pathname === '/.well-known/oauth-authorization-server' ||
+        url.pathname === '/.well-known/oauth-authorization-server/mcp' ||
+        url.pathname === '/.well-known/openid-configuration'
       ) {
         return mcpHandler(request, env, ctx);
       }

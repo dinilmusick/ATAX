@@ -76,8 +76,12 @@ test('Provider-neutral EdDSA resource audience and owner policy unlock only the 
   assert.ok(!noPolicyNames.includes('atax_context'));
   const incorrectAudience=await rpc(await jwt({aud:'https://some-other-api/mcp'}));
   assert.equal(incorrectAudience.status,401);
+  // Phase 2: azp is now optional (Supabase Auth access tokens often omit it).
+  // A token without azp is accepted; a token with an INVALID azp format is rejected.
   const missingClient=await rpc(await jwt({azp:undefined}));
-  assert.equal(missingClient.status,401);
+  assert.equal(missingClient.status,200,'Token without azp must be accepted (Supabase-compatible)');
+  const badAzp=await rpc(await jwt({azp:'!@#invalid-format'}));
+  assert.equal(badAzp.status,401,'Token with malformed azp must be rejected');
   const expired=await rpc(await jwt({exp:1}));
   assert.equal(expired.status,401);
   const parts=(await jwt()).split('.');

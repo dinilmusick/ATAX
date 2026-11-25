@@ -269,8 +269,13 @@ export function createSettingsControlPlane(
     if (typeof enabled !== 'boolean') {
       return { body: { error: 'Boolean enabled field is required.' }, status: 400 };
     }
+    const hash = await sessionHashFromRequest(request);
+    const ownerSubject = hash ? await resolveSessionOwner(hash) : null;
+    if (!ownerSubject) {
+      return { body: { error: 'Instance owner not configured or session invalid.' }, status: 503 };
+    }
     try {
-      await vault.setAccountEnabled(undefined, provider, alias, enabled);
+      await vault.setAccountEnabled(ownerSubject, provider, alias, enabled);
       return { body: { ok: true }, status: 200 };
     } catch (err) {
       return {
@@ -286,8 +291,13 @@ export function createSettingsControlPlane(
     }
     const auth = await requireSession(request);
     if (!auth.ok) return { body: { error: auth.error }, status: auth.status };
+    const hash = await sessionHashFromRequest(request);
+    const ownerSubject = hash ? await resolveSessionOwner(hash) : null;
+    if (!ownerSubject) {
+      return { body: { error: 'Instance owner not configured or session invalid.' }, status: 503 };
+    }
     try {
-      await vault.deleteAccount(undefined, provider, alias);
+      await vault.deleteAccount(ownerSubject, provider, alias);
       return { body: { ok: true }, status: 200 };
     } catch (err) {
       return {
@@ -297,11 +307,34 @@ export function createSettingsControlPlane(
     }
   }
 
+  async function resolveSessionOwner(hash: string): Promise<string | null> {
+    // Resolve the authenticated instance owner subject from the canonical DB,
+    // so the owner is always derived from the authoritative source, never from
+    // user-supplied input or session metadata.
+    try {
+      const connection = await db();
+      const subject = await connection.rpc('atax_mcp_instance_owner_subject_v1', {});
+      if (typeof subject === 'string' && /^[\w.@:-]{3,200}$/.test(subject)) return subject;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   async function testProvider(request: Request, provider: string, alias: string) {
     const auth = await requireSession(request);
     if (!auth.ok) return { body: { error: auth.error }, status: auth.status };
+    // Phase 1 bug fix: resolve the authenticated owner subject from the DB
+    // before calling testAccountConnection. Previously undefined was passed,
+    // causing the Supabase RPC that retrieves the encrypted credential to fail
+    // with "Provider account unavailable" because no owner subject was supplied.
+    const hash = await sessionHashFromRequest(request);
+    const ownerSubject = hash ? await resolveSessionOwner(hash) : null;
+    if (!ownerSubject) {
+      return { body: { error: 'Instance owner not configured or session invalid.' }, status: 503 };
+    }
     try {
-      return { body: await vault.testAccountConnection(undefined, provider, alias), status: 200 };
+      return { body: await vault.testAccountConnection(ownerSubject, provider, alias), status: 200 };
     } catch (err) {
       return {
         body: { error: err instanceof Error ? err.message : 'Provider test failed.' },

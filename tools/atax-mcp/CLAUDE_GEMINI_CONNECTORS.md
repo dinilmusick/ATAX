@@ -1,50 +1,57 @@
-# Connect the independent ATAX MCP Worker to Claude and Gemini
+# Connect ATAX Remote MCP to Claude and Gemini
 
-## Standalone single-owner design
+## Overview
 
-The ATAX Cloudflare Worker is a **stateless, Streamable HTTP MCP resource server**, not an OAuth provider, agent runtime, or tenant credential vault. ATAX requires only its **own** configured Supabase key and an owner authentication scheme. Provider credentials (GitHub, Cloudflare) are stored in Supabase Vault and managed through the Settings UI. It has **no mandatory Luth, ULTRST, Vercel or third-party authorization-server dependency**.
+The ATAX Cloudflare Worker (`worker-dashboard.ts` -> `tools/atax-mcp/worker.mjs`) exposes a **stateless, Streamable HTTP MCP resource server** at:
 
-MCP endpoint: `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`.
+- Live endpoint: `https://atax.dextro1n1laevo.workers.dev/mcp`
 
-## Option A — private single-owner bearer (fastest setup)
+ATAX is strictly the **MCP protected resource server**, never an OAuth token issuer or tenant vault:
 
-Configure in the selected Cloudflare Worker:
+- **Authorization Server:** Canonical ATAX Supabase Auth (`https://<project>.supabase.co/auth/v1`) with Google sign-in and OAuth 2.1 Dynamic Client Registration (`/auth/v1/oauth/clients/register`).
+- **Owner Mapping:** Authenticated Supabase Auth user UUID (`sub`) is matched against `MCP_ATAX_OWNER_JWT_SUBJECT` in `atax_private.mcp_server_settings`. A valid Google login alone never grants ATAX owner access.
+- **Provider Credentials:** GitHub and Cloudflare tokens are encrypted in **Supabase Vault** (`atax_private.provider_accounts`), managed in the Settings UI (`/api/settings/providers`), and never pasted into Claude or Gemini.
 
-- `ATAX_SUPABASE_URL`: canonical ATAX Supabase HTTPS API URL, **Worker secret**
-- `ATAX_SUPABASE_SECRET_KEY`: canonical ledger server key for HTTPS PostgREST / Data API, **Worker secret**
-- Provider credentials (GitHub, Cloudflare) are stored in **Supabase Vault** and managed through the Settings UI — do NOT configure them as direct Worker secrets
-- `MCP_SHARED_TOKEN_SHA256`: **SHA-256 hex digest** of a high-entropy, owner-only bearer token, **Worker secret**
-- `MCP_SHARED_SUBJECT`: one stable owner subject
-- `MCP_SHARED_SCOPES`: only the tools needed for that token; `atax:read atax:write` and separately authorized GitHub/Cloudflare/FMRL scopes as appropriate; verifier must be separately authorized
+## Primary Path — Supabase OAuth 2.1 (URL-Only Discovery + Dynamic Registration)
 
-**Never place the bearer token itself in a Worker plain variable or in source.** Each MCP client that supports an external `Authorization: Bearer <token>` header can use the endpoint directly. An HTTPS client without custom-header support cannot necessarily use this method; do not claim universal client compatibility based on a protocol smoke test.
+MCP clients that support RFC 9728 Protected Resource Metadata, RFC 8414 / OIDC discovery, PKCE (`S256`), and RFC 7591 Dynamic Client Registration (such as Gemini and Claude custom remote MCP connectors) require **only** the `/mcp` HTTPS URL.
 
-## Option B — optional standards-based OAuth resource tokens
+### How discovery and authentication work
 
-Some Claude/Gemini connector experiences require OAuth 2.1 authorization rather than an externally supplied bearer header. If such a client requires OAuth, ATAX can be configured as a JWT-verifying **resource server** with an authorization server of the owner's choice. No specific provider is hard-coded.
+1. Client sends unauthenticated `POST /mcp` -> Worker returns `401 Unauthorized` with:
+   `WWW-Authenticate: Bearer resource_metadata="https://atax.dextro1n1laevo.workers.dev/.well-known/oauth-protected-resource/mcp"`
+2. Client fetches `/.well-known/oauth-protected-resource/mcp` (or `/.well-known/oauth-protected-resource`) and receives:
+   - `authorization_servers`: `["https://<project>.supabase.co/auth/v1"]`
+   - `registration_endpoint`: `"https://<project>.supabase.co/auth/v1/oauth/clients/register"`
+   - `scopes_supported`: `["openid", "profile", "email", "offline_access"]`
+3. Clients that also probe `/.well-known/oauth-authorization-server`, `/.well-known/oauth-authorization-server/mcp`, or `/.well-known/openid-configuration` on the Worker receive the proxied Supabase OIDC discovery metadata directly (including `authorization_endpoint`, `token_endpoint`, `jwks_uri`, and `registration_endpoint`).
+4. Client dynamically registers with Supabase Auth, completes Authorization Code + PKCE with Google sign-in and consent, and sends the resulting Supabase JWT (`ES256`/`RS256`, `typ: 'JWT'` or `'at+jwt'`) as `Authorization: Bearer <access_token>`.
+5. Worker verifies JWT signature against cached Supabase JWKS (`/.well-known/jwks.json`), validates `iss`, `aud` (`authenticated` or configured resource URLs), `exp`, `nbf`, `sub`, and `client_id`/`azp` format, then pins ATAX owner scopes from `MCP_AUTH_OWNER_SCOPES` only when `sub === MCP_ATAX_OWNER_JWT_SUBJECT`.
 
-- `MCP_AUTH_AUTHORIZATION_SERVER`: HTTPS issuer discovery URL advertised to the client
-- `MCP_AUTH_ISSUER`: verified token `iss`
-- `MCP_AUTH_JWKS_URL`: HTTPS public signing keys (JSON Web Key Set)
-- `MCP_AUTH_AUDIENCE`: exact protected MCP resource URL
-- `MCP_ATAX_OWNER_JWT_SUBJECT`: the one verified owner `sub`
-- `MCP_AUTH_OWNER_SCOPES`: explicit ATAX permissions, excluding independent verifier authority unless separately justified
+### Connect Gemini or Claude
 
-The selected authorization server must actually support authorization-code flow with PKCE, appropriate client registration and audience-bound access tokens if the client requires them. **The ATAX Worker does not itself issue OAuth access tokens or perform dynamic client registration.** Therefore Option B cannot be certified merely by setting its issuer variables.
+1. Open custom remote MCP connector / extension settings in Gemini or Claude.
+2. Enter **only** the remote MCP URL:
+   `https://atax.dextro1n1laevo.workers.dev/mcp`
+3. When prompted to authenticate, sign in with the **owner's Google account** authorized in Supabase Auth and approve consent.
+4. Never paste Supabase secret keys, Cloudflare tokens, or GitHub PATs into the client.
 
-## Client setup
+## Secondary Path — Single-Owner Shared Bearer Token (Bootstrap / Headless CLI)
 
-For any Claude or Gemini build that supports custom remote MCP connectors, provide the HTTPS endpoint above. Use bearer configuration only where the client exposes a safe Authorization-header setting; otherwise use a separately configured standards-compliant OAuth provider. Check the client's current product/region availability and permitted connection methods before claiming compatibility. These steps are not evidence that Gemini or Claude has actually accepted this Worker.
+For automated scripts or clients without OAuth 2.1 UI flows, the Worker also retains support for a single-owner shared bearer token hashed via SHA-256 (`MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES` in `atax_private.mcp_server_settings`). Never store the plaintext bearer token in source, Wrangler `[vars]`, or logs.
 
-Once authorized, the client should run `initialize` → `tools/list` → `atax_context` and `atax_skill_get`. When it claims a task, use the returned fencing token for heartbeat and submissions. On expired/lost ownership, call `atax_task_handoff` with the old token, partial results and evidence, then discover another free socket through `atax_task_claim_next` or a goal-scoped claim. **Do not terminate the agent merely because the former task lease was lost.**
+## Using Multiple GitHub Accounts Over MCP
 
-## Production acceptance
+- Call `atax_provider_accounts_list` to see configured GitHub aliases (e.g., `PERSONAL`, `WORK`) without exposing tokens.
+- Pass `account: "<ALIAS>"` to GitHub and FMRL tools (`atax_github_repository_inspect`, `atax_github_repository_create`, `atax_github_workflow_dispatch`, `atax_github_workflow_runs`, `atax_github_check_runs`, `atax_github_file_get`, `atax_github_file_put`, `atax_github_pull_request_create`, `atax_fmrl_create_run_dispose`, `atax_fmrl_get_status`).
+- When multiple GitHub accounts are registered, omitting `account` fails closed (`Specify an account alias when multiple accounts are configured`).
+- For FMRL CI, `atax_fmrl_create_run_dispose` returns `dispatched_account`; pass the same `account` (and optionally `dispatched_account`) to `atax_fmrl_get_status` to prevent cross-account polling mismatches.
 
-1. Verify `GET /health` and `POST /mcp` negative-auth behavior; these are not proof of live owner access.
-2. Verify the Worker has all required secret binding **names**, never print values.
-3. Complete an authenticated owner `initialize`, `tools/list`, `atax_context`, and `atax_skill_get`.
-4. Exercise an isolated real ledger task claim, heartbeat and result submission, with independently authorized verification; test denial of a stale token and successful append-only handoff followed by another claim.
-5. Verify direct GitHub and Supabase connectors still work independently of the Worker.
-6. Verify actual native Claude/Gemini connection for each client separately; classify untested clients as unverified.
+## Post-Deployment Verification Checklist
 
-The Worker, scripts and account configuration must remain independent of Luth. No credential contents belong in public GitHub, logs, prompts, issues or GitHub Actions artifacts.
+1. `GET /health` -> `200` with `"databaseTransport": "supabase-data-api"`.
+2. `GET /.well-known/oauth-protected-resource` -> `200` with `authorization_servers` and `registration_endpoint` ending in `/auth/v1/oauth/clients/register`.
+3. `GET /.well-known/oauth-authorization-server` -> `200` with Supabase OIDC metadata (`token_endpoint`, `jwks_uri`, `registration_endpoint`).
+4. `POST /mcp` without token -> `401` with `WWW-Authenticate` challenge pointing to `/.well-known/oauth-protected-resource/mcp`.
+5. Owner OAuth login -> `initialize` -> `tools/list` -> `atax_context` -> `atax_provider_accounts_list` -> scoped GitHub inspection.
+6. Verify unauthorized Google users receive zero owner tools (`atax_context`, `atax_provider_accounts_list`, GitHub, and FMRL tools are absent).

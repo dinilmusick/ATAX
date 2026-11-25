@@ -75,3 +75,20 @@ test('production Worker /health reports supabase-data-api when configured and un
   const cBody = await configured.json() as {databaseTransport?:string};
   assert.equal(cBody.databaseTransport,'supabase-data-api');
 });
+
+test('production Worker forwards OAuth discovery well-known paths to MCP handler instead of ASSETS', async()=>{
+  const realWorker = createDashboardWorker();
+  for (const path of [
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-protected-resource/mcp',
+    '/.well-known/oauth-authorization-server',
+    '/.well-known/oauth-authorization-server/mcp',
+    '/.well-known/openid-configuration',
+  ]) {
+    const res = await realWorker.fetch(new Request('https://atax.example' + path), {});
+    // Unconfigured env fails closed at MCP configLoader (503 JSON), never 500 static asset error
+    assert.equal(res.status, 503, path);
+    const body = await res.json() as { error?: string };
+    assert.equal(body.error, 'ATAX MCP not configured');
+  }
+});
