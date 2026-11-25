@@ -37,7 +37,7 @@ jobs:
           npm test
 
       - name: Independent live Cloudflare health, PostgreSQL transport, and fail-closed probe
-        if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'dinilmusick/ATAX')
+        if: github.event_name == 'push'
         env:
           HEALTH_URL: https://atax.dextro1n1laevo.workers.dev/health
           MCP_URL: https://atax.dextro1n1laevo.workers.dev/mcp
