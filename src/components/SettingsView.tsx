@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {CheckCircle2,Cloud,Database,Eye,EyeOff,GitBranch,KeyRound,Lock,RefreshCw,RotateCw,ShieldCheck,Trash2,Unlock} from 'lucide-react';
+import {CheckCircle2,Cloud,Database,Eye,EyeOff,GitBranch,KeyRound,Lock,RefreshCw,RotateCw,ShieldCheck,Trash2,Unlock,Power} from 'lucide-react';
 import type {ProviderAccountSummary,ProviderTestResult,ProviderType,SettingsStatusResponse} from '../types/substrate';
 
 interface SettingsViewProps {
