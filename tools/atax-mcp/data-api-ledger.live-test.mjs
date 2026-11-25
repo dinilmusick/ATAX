@@ -1,14 +1,14 @@
 // Runs only against the isolated local Supabase created by database-integration.yml.
 // No remote credentials or production effects. PostgreSQL canonical RPC contract tests.
 import assert from 'node:assert/strict';
-import { createLedgerDb, parseDataApiConfig } from './data-api-ledger.mjs';
+import { createLedgerDb } from './data-api-ledger.mjs';
 
 const connectionString = process.env.ATAX_SUPABASE_CONNECTION_URL;
 if (!connectionString || !connectionString.startsWith('postgresql://127.0.0.1:') && !connectionString.startsWith('postgresql://postgres:postgres@127.0.0.1:')) {
   throw Error('Disposable local PostgreSQL connection URI required');
 }
 
-const db = createLedgerDb(parseDataApiConfig({ATAX_SUPABASE_CONNECTION_URL:connectionString}));
+const db = createLedgerDb({connectionString,hostLabel:'127.0.0.1'});
 
 const overview = await db.rpc('goal_ledger_overview', { tags_in: null });
 assert.ok(overview !== undefined, 'migrated canonical goal overview must resolve');
