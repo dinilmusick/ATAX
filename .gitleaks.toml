@@ -85,3 +85,13 @@ id = "generic-api-key"
   regexTarget = "match"
   paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
   regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
