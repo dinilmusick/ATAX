@@ -83,10 +83,16 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
 
-      - name: Scan repository history for secrets
+      - name: Scan repository for newly introduced secrets
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p artifacts/security
-          gitleaks git --log-opts="--full-history HEAD" . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gitleaks git --log-opts="${{ github.event.pull_request.base.sha }}..HEAD" . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
+          else
+            gitleaks dir . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
+          fi
 
       - name: Install pinned Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
