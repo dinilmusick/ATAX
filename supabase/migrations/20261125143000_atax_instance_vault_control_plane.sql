@@ -78,7 +78,7 @@ begin
   )
   values (
     true,
-    crypt(passkey_in, gen_salt('bf', 12)),
+    extensions.crypt(passkey_in, extensions.gen_salt('bf', 12)),
     0,
     null,
     null
@@ -110,7 +110,7 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'locked');
   end if;
 
-  if passkey_in is not null and crypt(passkey_in, row_data.passkey_hash) = row_data.passkey_hash then
+  if passkey_in is not null and extensions.crypt(passkey_in, row_data.passkey_hash) = row_data.passkey_hash then
     update atax_private.instance_auth
        set failed_attempts = 0,
            locked_until = null,
