@@ -197,7 +197,7 @@ async function routeRpc(msg,principal,env,fetcher){
       if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
       else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
-      else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
+      else if(params.uri==='atax://skills/catalog')result=await db.skillsCatalog();
       else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
       else return err(id,-32002,'Unknown resource URI');
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
@@ -214,7 +214,7 @@ async function routeRpc(msg,principal,env,fetcher){
 export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
   async function dispatch(req,env={}){
     const url=new URL(req.url);
-    if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL,databaseTransport:'supabase-data-api'});
+    if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL,databaseTransport:'postgresql'});
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
