@@ -17,7 +17,7 @@ type FakeState = {
 function makeFixture() {
   const state: FakeState = {
     passkeyConfigured: true,
-    validPasskey: 'correct-passphrase-for-tests-2026',
+    validPasskey: 'right-passphrase',
     sessionValid: false,
     revoked: false,
     createdSessionHash: null,
@@ -113,11 +113,11 @@ test('valid passkey creates durable opaque cookie session; plaintext passkey nev
   const {controller,state} = makeFixture();
   const result=await controller.unlock(
     req('https://atax.example/api/settings/auth/unlock',{method:'POST',headers:{origin:'https://atax.example'}}),
-    'correct-passphrase-for-tests-2026'
+    'right-passphrase'
   );
   assert.equal(result.status,200);
   assert.deepEqual(result.body.ok,true);
-  assert.equal(JSON.stringify(result.body).includes('correct-passphrase-for-tests-2026'),false);
+  assert.equal(JSON.stringify(result.body).includes('right-passphrase'),false);
   const cookie=result.headers.get('set-cookie');
   assert.ok(cookie);
   const parsed=parseCookies(new Headers({cookie:cookie!.split(';')[0]}));
@@ -142,7 +142,7 @@ test('wrong passkey is rejected and never issues a session', async () => {
 
 test('expired or revoked session is denied; logout revokes it server-side', async () => {
   const {controller,state}=makeFixture();
-  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'correct-passphrase-for-tests-2026');
+  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'right-passphrase');
   const cookie=unlock.headers.get('set-cookie')!.split(';')[0];
   const list=await controller.listProviders(req('https://atax.example/api/settings/providers',{headers:{cookie}}));
   assert.equal(list.status,200);
@@ -170,7 +170,7 @@ test('cross-origin mutation is rejected before credential persistence', async ()
 
 test('provider mutations never accept a browser owner subject', async () => {
   const {controller,state}=makeFixture();
-  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'correct-passphrase-for-tests-2026');
+  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'right-passphrase');
   const cookie=unlock.headers.get('set-cookie')!.split(';')[0];
   const result=await controller.upsertProvider(
     req('https://atax.example/api/settings/providers',{method:'POST',headers:{origin:'https://atax.example',cookie}}),
