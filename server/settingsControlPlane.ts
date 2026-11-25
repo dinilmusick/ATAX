@@ -164,8 +164,11 @@ export function createSettingsControlPlane(
       headers.set('Set-Cookie',cookieHeader(rawToken,SETTINGS_SESSION_TTL_SECONDS));
       return {body:{ok:true,authenticated:true,expiresAt},headers,status:200};
     }catch(err){
-      const message=err instanceof Error?err.message:'Backend unavailable.';
-      return {body:{error:message},headers:new Headers(),status:message.includes('not configured')?503:502};
+      if(err instanceof VaultError) {
+        return {body:{error:err.message},headers:new Headers(),status:err.statusCode};
+      }
+      const status = typeof (err as {status?:unknown})?.status === 'number' && (err as {status:number}).status === 503 ? 503 : 502;
+      return {body:{error:'Supabase backend unavailable.'},headers:new Headers(),status};
     }
   }
 
@@ -182,8 +185,24 @@ export function createSettingsControlPlane(
   }
 
   async function requireSession(request: Request): Promise<{ok:true}|{ok:false;status:number;error:string}> {
-    if(!await authenticated(request)) return {ok:false,status:401,error:'Instance authentication required.'};
-    return {ok:true};
+    let connection: Awaited<ReturnType<LedgerFactory>>;
+    try {
+      connection = await db();
+    } catch (err) {
+      const status = err instanceof VaultError ? err.statusCode : 503;
+      return {ok:false,status,error:'Supabase backend unavailable.'};
+    }
+
+    const hash = await sessionHashFromRequest(request);
+    if (!hash) return {ok:false,status:401,error:'Instance authentication required.'};
+
+    try {
+      const valid = Boolean(await connection.rpc('atax_mcp_validate_instance_session_v1',{session_hash_in:hash}));
+      if (!valid) return {ok:false,status:401,error:'Instance authentication required.'};
+      return {ok:true};
+    } catch {
+      return {ok:false,status:503,error:'Supabase backend unavailable.'};
+    }
   }
 
   async function listProviders(request: Request) {
