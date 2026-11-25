@@ -46,6 +46,9 @@ export function sanitizeErrorMessage(raw) {
   return raw
     .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi,'[REDACTED_URI]')
     .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/gi,'Bearer [REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,'[REDACTED_JWT]')
+    .replace(/\batax_[A-Za-z0-9_-]{16,}\b/g,'[REDACTED_TOKEN]')
+    .replace(/\b[a-f0-9]{64}\b/gi,'[REDACTED_HASH]')
     .replace(/https?:\/\/[^\s"'<>]+/gi,'[REDACTED_URL]')
     .replace(/[\r\n\t]+/g,' ')
     .trim().slice(0,300);
