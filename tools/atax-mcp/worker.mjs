@@ -130,14 +130,15 @@ async function authenticate(request,env, fetcher=fetch, jwksCache=null){
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
   // Phase 2: Accept RFC 9068 at+jwt tokens as well as standard Supabase OAuth 2.1 JWT access tokens (typ='JWT').
   // azp / client_id are validated when present; Supabase OAuth uses client_id and may omit azp.
-  if(!isObj(head)||!isObj(claims)||(head.typ!=='at+jwt'&&head.typ!=='JWT')||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string')return null;
+  if(!isObj(head)||!isObj(claims)||(head.typ!==undefined&&!/^(at\+)?jwt$/i.test(String(head.typ)))||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string')return null;
   if(claims.azp!==undefined&&(typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp)))return null;
   if(claims.client_id!==undefined&&(typeof claims.client_id!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.client_id)))return null;
   const now=Math.floor(Date.now()/1000);
+  const resourceUrl=new URL('/mcp',request.url).toString();
   // Phase 2: MCP_AUTH_AUDIENCE may be 'authenticated' (Supabase OAuth default), the MCP endpoint URL,
-  // or a space/comma-separated list of accepted audiences.
-  if(claims.iss!==env.MCP_AUTH_ISSUER||!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)||!Number.isFinite(claims.exp)||claims.exp<=now||
-     (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now))||
+  // or a space/comma-separated list of accepted audiences. Also accept the RFC 8707 resource URL.
+  if(claims.iss!==env.MCP_AUTH_ISSUER||(!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)&&!audienceIncludes(claims.aud,resourceUrl))||!Number.isFinite(claims.exp)||claims.exp<=now||
+     (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now+30))||
      typeof claims.sub!=='string'|| !/^[\w.@:-]{3,120}$/.test(claims.sub))return null;
   const jwksUrl=new URL(env.MCP_AUTH_JWKS_URL);
   if(jwksUrl.protocol!=='https:'||!jwksUrl.hostname||jwksUrl.username||jwksUrl.password)return null;
@@ -218,8 +219,8 @@ async function routeRpc(msg,principal,env,fetcher){
   const params=msg.params??{};
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
-    if(params.protocolVersion&&!SUPPORTED.has(params.protocolVersion))return err(id,-32602,'Unsupported MCP protocol version');
-    return ok(id,{protocolVersion:params.protocolVersion||PROTOCOL,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. Heartbeat and check claim every 30-60 seconds; leases expire after at most 120 seconds. On lost claim, stop writing the old socket, call atax_task_handoff with the old token and a partial-work note, then call atax_task_claim_next or atax_goal_claim_task to find another free socket. Do NOT exit solely because the prior lease was lost. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
+    const negotiated=typeof params.protocolVersion==='string'&&SUPPORTED.has(params.protocolVersion)?params.protocolVersion:PROTOCOL;
+    return ok(id,{protocolVersion:negotiated,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. Heartbeat and check claim every 30-60 seconds; leases expire after at most 120 seconds. On lost claim, stop writing the old socket, call atax_task_handoff with the old token and a partial-work note, then call atax_task_claim_next or atax_goal_claim_task to find another free socket. Do NOT exit solely because the prior lease was lost. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
