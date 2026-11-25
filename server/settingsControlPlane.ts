@@ -167,8 +167,7 @@ export function createSettingsControlPlane(
       if(err instanceof VaultError) {
         return {body:{error:err.message},headers:new Headers(),status:err.statusCode};
       }
-      const status = typeof (err as {status?:unknown})?.status === 'number' && (err as {status:number}).status === 503 ? 503 : 502;
-      return {body:{error:'Supabase backend unavailable.'},headers:new Headers(),status};
+      return {body:{error:'Supabase backend unavailable.'},headers:new Headers(),status:503};
     }
   }
 
