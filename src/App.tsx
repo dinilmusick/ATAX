@@ -30,12 +30,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('visions-goals');
   const [refreshTick, setRefreshTick] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [operatorSession, setOperatorSession] = useState<{
-    token: string;
-    subject: string;
-    expiresAt: number;
-  } | null>(null);
-
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     setRefreshTick((t) => t + 1);
@@ -120,8 +114,6 @@ export default function App() {
         )}
         {activeTab === 'settings' && (
           <SettingsView
-            session={operatorSession}
-            onSessionChange={setOperatorSession}
             refreshTick={refreshTick}
             onLoadingChange={handleLoadingChange}
           />
