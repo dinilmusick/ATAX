@@ -70,7 +70,7 @@ id = "generic-api-key"
   condition = "AND"
   regexTarget = "match"
   paths = ['''tests/e2e-data-api/mock-server\.mjs$''']
-  regexes = ['''atax_5426bb43a95f34297740e50804035fc67db24be2be32098d']
+  regexes = ['''atax_5426bb43a95f34297740e50804035fc67db24be2be32098d''']
 
   [[rules.allowlists]]
   description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
