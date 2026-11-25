@@ -225,7 +225,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
       if(!res.ok) throw new Error(data.error||'Provider connection test failed.');
       setTestResults(prev=>({...prev,[key]:data}));
     }catch(err){
-      setTestResults(prev=>({...prev,[key],ok:false,provider:account.provider,alias:account.alias,statusCode:500,summary:err instanceof Error?err.message:'Provider test failed.',checkedAt:new Date().toISOString()}));
+      setTestResults(prev=>({...prev,[key]:{ok:false,provider:account.provider,alias:account.alias,statusCode:500,summary:err instanceof Error?err.message:'Provider test failed.',checkedAt:new Date().toISOString()}}));
     }finally{setBusyKey(null);}
   };
 
