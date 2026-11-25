@@ -115,7 +115,7 @@ test('PostgreSQL runtime configuration rejects legacy HTTP variables and unsafe 
 });
 
 test('error sanitization removes connection credentials, bearer tokens, URLs, and JWTs', () => {
-  const jwt='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.supersecret.signature';
+  const jwt='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.supersecretpayloadlong.signaturelong';
   const raw=[
     'postgresql://user:password@db.vcaerawuwffziufvpbvw.supabase.co/postgres',
     'Bearer super-secret-bearer',
