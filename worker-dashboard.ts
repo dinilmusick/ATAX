@@ -1,5 +1,6 @@
 import { createSettingsControlPlane, dispatchSettingsRequest, jsonHeaders } from './server/settingsControlPlane.ts';
 import { createSubstrateService } from './server/supabaseSubstrate.ts';
+import { handleConsentApi, renderConsentPage } from './server/oauthConsent.ts';
 import { createHandler as createMcpHandler } from './tools/atax-mcp/worker.mjs';
 
 function json(value: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
@@ -61,6 +62,15 @@ export function createDashboardWorker(
           databaseTransport: hasDataApiConfig ? 'supabase-data-api' : 'unconfigured',
           settings: { routes: true, authentication: 'instance-passkey' },
         });
+      }
+
+      if (url.pathname === '/oauth/consent') {
+        return renderConsentPage(env);
+      }
+
+      if (url.pathname === '/api/oauth/consent') {
+        const result = await handleConsentApi(request, env);
+        return json(result.body, result.status);
       }
 
       if (url.pathname.startsWith('/api/settings/')) {
