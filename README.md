@@ -18,6 +18,116 @@ Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Arch
 
 **Dashboard & Environment Configuration:** [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend Data API configuration](docs/ENVIRONMENT_CONFIGURATION.md) · [blank `.env.example`](.env.example). Sensitive Supabase and provider Vault keys remain strictly server-side (`ATAX_SUPABASE_URL` + `ATAX_SUPABASE_SECRET_KEY`). For owner setup, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
 
+## Connecting Claude & Gemini to ATAX Remote MCP
+
+This section documents the complete, repeatable setup for connecting **Claude** (claude.ai / Claude Desktop / Cowork) and **Gemini** to the ATAX remote MCP server (`https://<your-worker>.workers.dev/mcp`) using **Supabase OAuth 2.1 + Google Sign-In**.
+
+### Architecture overview
+
+1. **Cloudflare Worker (`worker-dashboard.ts` + `tools/atax-mcp/worker.mjs`)** serves `/mcp`, OAuth discovery (`/.well-known/oauth-protected-resource*`, `/.well-known/oauth-authorization-server*`, `/.well-known/openid-configuration`), the consent UI (`/oauth/consent`), and the server-side consent proxy (`/api/oauth/consent` in `server/oauthConsent.ts`).
+2. **Supabase Auth (OAuth 2.1 Server)** handles Dynamic Client Registration (RFC 7591), authorization codes with PKCE, and JWT issuance (ES256).
+3. **Google Cloud OAuth 2.0** authenticates the user and redirects back to Supabase.
+4. **Single-tenant ownership** is enforced in `atax_private.mcp_server_settings` via `MCP_ATAX_OWNER_JWT_SUBJECT` (your Supabase Auth `user.id` UUID).
+
+### Step 1: Cloudflare Worker & Secrets
+
+Ensure `wrangler.toml` routes MCP and OAuth discovery/consent paths to the Worker before static assets:
+
+```toml
+run_worker_first = ["/api/*", "/health", "/mcp", "/socket", "/.well-known/*", "/oauth/consent"]
+```
+
+Set the two server-side secrets (never put these in `[vars]` or frontend code):
+
+```bash
+npx wrangler secret put ATAX_SUPABASE_URL
+npx wrangler secret put ATAX_SUPABASE_SECRET_KEY
+```
+
+Deploy with `npm run build && npx wrangler deploy --config wrangler.toml`.
+
+### Step 2: Google Cloud Console OAuth 2.0 Setup
+
+1. Open [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials) and select (or create) your **OAuth 2.0 Client ID** (Web application).
+2. Under **Authorized redirect URIs**, add your Supabase Auth callback URL:
+   ```text
+   https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1/callback
+   ```
+   *(For this deployment: `https://vcaerawuwffziufvpbvw.supabase.co/auth/v1/callback`.)*
+3. Click **Save** (takes ~30–60 seconds to propagate).
+4. Under **OAuth consent screen → Audience**:
+   - In **Testing** mode, add every Google email address you want to allow under **Test users** (up to 100).
+   - Or click **Publish App** (**In production**) so any Google account can authenticate without maintaining a test-user list. *(Note: only the UUID pinned in Step 5 will be granted ATAX tool/vault access.)*
+
+### Step 3: Supabase Auth & OAuth 2.1 Server Configuration
+
+In **Supabase Dashboard**:
+
+1. **Authentication → Providers → Google**:
+   - Enable **Google** and paste the **Client ID** and **Client Secret** from Step 2.
+2. **Authentication → URL Configuration**:
+   - Set **Site URL** to your deployed Worker origin (not `http://localhost:3000`):
+     ```text
+     https://<your-worker>.workers.dev
+     ```
+   - Under **Redirect URLs**, add:
+     ```text
+     https://<your-worker>.workers.dev/oauth/consent
+     ```
+   - Click **Save**.
+3. **Authentication → OAuth Server**:
+   - Enable **Supabase OAuth Server** and **Dynamic Client Registration**.
+   - Set **Authorization Path** to:
+     ```text
+     /oauth/consent
+     ```
+   - Verify **Preview Authorization URL** reads `https://<your-worker>.workers.dev/oauth/consent` and click **Save**.
+4. Confirm `atax_private.mcp_server_settings` has the OAuth issuer/JWKS/audience fields configured:
+   - `MCP_AUTH_AUTHORIZATION_SERVER`: `https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1`
+   - `MCP_AUTH_ISSUER`: `https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1`
+   - `MCP_AUTH_JWKS_URL`: `https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json`
+   - `MCP_AUTH_AUDIENCE`: `authenticated`
+
+### Step 4: Connect Claude or Gemini
+
+1. **Claude** (`claude.ai` / Claude Desktop):
+   - Go to **Customize → Connectors → + Add → Add custom connector**.
+   - Enter Name (e.g. `ATAX`) and Remote MCP Server URL:
+     ```text
+     https://<your-worker>.workers.dev/mcp
+     ```
+   - Click **Continue** → **Add**, then click **Connect**.
+2. **Gemini**:
+   - Add a remote MCP server pointing to `https://<your-worker>.workers.dev/mcp` with OAuth 2.1 discovery enabled.
+3. Your browser will open `https://<your-worker>.workers.dev/oauth/consent?authorization_id=...`:
+   - Click **Continue with Google** and sign in.
+   - Click **Authorize** to approve the MCP client and redirect back to Claude/Gemini.
+
+### Step 5: Promote Your OAuth User as the Single-Tenant Owner
+
+By default, authenticated OAuth users see an empty tool list until their Supabase Auth `user.id` is pinned as the owner.
+
+1. In **Supabase Dashboard → Authentication → Users**, copy the **User UID** (UUID) of the Google account you just signed in with.
+2. Open **Supabase Dashboard → SQL Editor** and run (replacing the UUID, **without** angle brackets `< >`):
+
+```sql
+UPDATE atax_private.mcp_server_settings
+SET settings = settings || jsonb_build_object(
+  'MCP_ATAX_OWNER_JWT_SUBJECT', '0154efd9-c589-4cf2-96e5-9ec6728d17f0',
+  'MCP_AUTH_OWNER_SCOPES', 'atax:read atax:write atax:verify atax:github:read atax:github:create atax:cloudflare:read atax:fmrl:execute'
+)
+WHERE id = true;
+```
+
+3. Refresh or reconnect the connector in Claude/Gemini. All ATAX tools (`atax_context`, `atax_goal_overview`, `atax_provider_accounts_list`, etc.) will now appear.
+
+### Troubleshooting
+
+- **`Error 400: redirect_uri_mismatch` on Google login**: `https://<PROJECT_REF>.supabase.co/auth/v1/callback` is missing from **Authorized redirect URIs** in Google Cloud Console, or the user email is not in **Test users** while the app is in Testing mode.
+- **Browser redirects to `http://localhost:3000/oauth/consent`**: **Site URL** in Supabase **Authentication → URL Configuration** is still `http://localhost:3000`.
+- **Connected with 0 tools**: Check `MCP_ATAX_OWNER_JWT_SUBJECT` in `atax_private.mcp_server_settings` — ensure it matches the exact UUID in **Authentication → Users** with no `< >` brackets.
+- **Inspecting live Worker errors**: Run `npx wrangler tail --config wrangler.toml --format pretty` while clicking **Connect**.
+
 ## Resume or create work
 
 For an unfinished goal, ask a new chat to **“Start finishing an unfinished goal.”** The Universal Task Router loads the unfinished-goal list and resumes by readable goal key.
