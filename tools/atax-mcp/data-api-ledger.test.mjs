@@ -43,7 +43,7 @@ test('RPC dispatch is allowlisted and arguments are bounded', () => {
   assert.ok(CANONICAL_RPC_ALLOWLIST.has('atax_goal_claim_safe'));
   assert.throws(() => assertAllowedRpc('drop_database'));
   assert.equal(validateRpcParams({goal_key_in:'abc',priority_in:0.5}),JSON.stringify({goal_key_in:'abc',priority_in:0.5}));
-  assert.throws(() => validateRpcParams({__proto__:{bad:true}}));
+  assert.throws(() => validateRpcParams(JSON.parse('{"__proto__":{"bad":true}}')));
   assert.throws(() => validateRpcParams(Object.fromEntries(Array.from({length:41},(_,i)=>['x'+i,i]))));
 });
 
