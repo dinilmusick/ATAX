@@ -1,4 +1,4 @@
--- Rollback-only test of the exact 2-minute stale-heartbeat threshold.
+-- Rollback-only test of the exact 5-minute stale-heartbeat threshold.
 begin;
 do $test$
 declare
@@ -13,7 +13,7 @@ begin
   values ('Fixture recovery-threshold ' || replace(gen_random_uuid()::text,'-',''),'recovery-threshold-orchestrator','ready')
   returning id into fixture_goal_id;
   select * into registered from public.task_ledger_register(
-    'recovery-threshold-test','Recovery Threshold Test','2-minute threshold leaf',
+    'recovery-threshold-test','Recovery Threshold Test','5-minute threshold leaf',
     'Disposable integration-test task',array['recovery-threshold']::text[],
     'recovery-threshold-session','worker',3::smallint,'Testing heartbeat-based recovery','{}'::jsonb,null
   );
@@ -27,7 +27,7 @@ begin
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '1 minute 59 seconds',
+  set heartbeat_at=now()-interval '4 minutes 59 seconds',
       claim_expires_at=now()-interval '1 minute'
   where id=first_claim.id;
 
@@ -35,11 +35,11 @@ begin
     'recovery-threshold-early','Early Worker','worker',array['recovery-threshold']::text[],900
   );
   if early_claim.id is not null then
-    raise exception 'Expired lease incorrectly allowed reassignment before two minutes';
+    raise exception 'Expired lease incorrectly allowed reassignment before five minutes';
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '2 minutes 1 second',
+  set heartbeat_at=now()-interval '5 minutes 1 second',
       claim_expires_at=now()+interval '15 minutes'
   where id=first_claim.id;
 
@@ -56,7 +56,7 @@ begin
     'recovery-threshold-new','Recovery Worker','worker',array['recovery-threshold']::text[],900
   );
   if recovered.id is distinct from first_claim.id then
-    raise exception 'Stale heartbeat did not allow reassignment after two minutes';
+    raise exception 'Stale heartbeat did not allow reassignment after five minutes';
   end if;
   if recovered.claimed_by_agent_id<>'recovery-threshold-new' then
     raise exception 'New worker did not receive ownership';
@@ -64,8 +64,8 @@ begin
   if recovered.claim_token=first_claim.claim_token then
     raise exception 'Recovery did not rotate the claim token';
   end if;
-  if recovered.claim_expires_at>now()+interval '2 minutes 2 seconds' then
-    raise exception 'Recovered claim lease exceeds two minutes';
+  if recovered.claim_expires_at>now()+interval '5 minutes 2 seconds' then
+    raise exception 'Recovered claim lease exceeds five minutes';
   end if;
   if not exists(
     select 1 from public.task_events e
@@ -76,7 +76,7 @@ begin
     raise exception 'Recovery event did not preserve previous worker evidence';
   end if;
 
-  raise notice 'PASS: both stale heartbeat and expired lease required for atomic recovery';
+  raise notice 'PASS: both stale heartbeat and expired lease required for atomic five-minute recovery';
 end;
 $test$;
 rollback;
