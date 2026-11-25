@@ -393,7 +393,7 @@ export function createVaultService(
     try {
       const res = await fetcher(probeUrl, {
         method: 'GET',
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${match.token}`,

@@ -92,7 +92,7 @@ async function resolveJwk(jwksUrl, head, fetcher, jwksCache){
     const hit=findMatchingJwk(cached.jwks,head);
     if(hit)return hit;
   }
-  const response=await fetcher(cacheKey,{redirect:'error',headers:{accept:'application/json'}});
+  const response=await fetcher(cacheKey,{redirect:'manual',headers:{accept:'application/json'}});
   if(!response.ok)return null;
   const jwks=await response.json();
   if(jwksCache && Array.isArray(jwks?.keys)){
@@ -130,29 +130,31 @@ async function authenticate(request,env, fetcher=fetch, jwksCache=null){
   try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
   // Phase 2: Accept RFC 9068 at+jwt tokens as well as standard Supabase OAuth 2.1 JWT access tokens (typ='JWT').
   // azp / client_id are validated when present; Supabase OAuth uses client_id and may omit azp.
-  if(!isObj(head)||!isObj(claims)||(head.typ!==undefined&&!/^(at\+)?jwt$/i.test(String(head.typ)))||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string')return null;
-  if(claims.azp!==undefined&&(typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp)))return null;
-  if(claims.client_id!==undefined&&(typeof claims.client_id!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.client_id)))return null;
+  if(!isObj(head)||!isObj(claims)||(head.typ!==undefined&&!/^(at\+)?jwt$/i.test(String(head.typ)))||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'){console.warn('[mcp:auth] bad_header',{typ:head?.typ,alg:head?.alg,hasKid:typeof head?.kid});return null;}
+  if(claims.azp!==undefined&&(typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp))){console.warn('[mcp:auth] bad_azp');return null;}
+  if(claims.client_id!==undefined&&(typeof claims.client_id!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.client_id))){console.warn('[mcp:auth] bad_client_id');return null;}
   const now=Math.floor(Date.now()/1000);
   const resourceUrl=new URL('/mcp',request.url).toString();
   // Phase 2: MCP_AUTH_AUDIENCE may be 'authenticated' (Supabase OAuth default), the MCP endpoint URL,
   // or a space/comma-separated list of accepted audiences. Also accept the RFC 8707 resource URL.
-  if(claims.iss!==env.MCP_AUTH_ISSUER||(!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)&&!audienceIncludes(claims.aud,resourceUrl))||!Number.isFinite(claims.exp)||claims.exp<=now||
-     (claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now+30))||
-     typeof claims.sub!=='string'|| !/^[\w.@:-]{3,120}$/.test(claims.sub))return null;
+  if(claims.iss!==env.MCP_AUTH_ISSUER){console.warn('[mcp:auth] iss_mismatch',{iss:claims.iss,expected:env.MCP_AUTH_ISSUER});return null;}
+  if(!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)&&!audienceIncludes(claims.aud,resourceUrl)){console.warn('[mcp:auth] aud_mismatch',{aud:claims.aud,expected:env.MCP_AUTH_AUDIENCE,resourceUrl});return null;}
+  if(!Number.isFinite(claims.exp)||claims.exp<=now){console.warn('[mcp:auth] expired');return null;}
+  if(claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now+30)){console.warn('[mcp:auth] nbf_future');return null;}
+  if(typeof claims.sub!=='string'||!/^[\w.@:-]{3,120}$/.test(claims.sub)){console.warn('[mcp:auth] bad_sub');return null;}
   const jwksUrl=new URL(env.MCP_AUTH_JWKS_URL);
   if(jwksUrl.protocol!=='https:'||!jwksUrl.hostname||jwksUrl.username||jwksUrl.password)return null;
   const issuer=new URL(env.MCP_AUTH_ISSUER);if(issuer.protocol!=='https:')return null;
   const jwk=await resolveJwk(jwksUrl,head,fetcher,jwksCache);
-  if(!jwk)return null;
+  if(!jwk){console.warn('[mcp:auth] jwk_not_found',{kid:head.kid,alg:head.alg});return null;}
   try{
     const algorithm=head.alg==='RS256'?{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'}:
       head.alg==='EdDSA'?{name:'Ed25519'}:{name:'ECDSA',namedCurve:'P-256'};
     const verifyParams=head.alg==='ES256'?{name:'ECDSA',hash:'SHA-256'}:algorithm;
     const key=await crypto.subtle.importKey('jwk',jwk,algorithm,false,['verify']);
     const valid=await crypto.subtle.verify(verifyParams,key,bytesFromB64Url(parts[2]),encoder.encode(parts[0]+'.'+parts[1]));
-    if(!valid)return null;
-  }catch{return null;}
+    if(!valid){console.warn('[mcp:auth] sig_invalid',{kid:head.kid,alg:head.alg});return null;}
+  }catch(e){console.warn('[mcp:auth] verify_err',e instanceof Error?e.message:'err');return null;}
   const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
   // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
   // Only a pinned OAuth owner subject may receive capabilities defined by server policy.
@@ -253,7 +255,7 @@ async function routeRpc(msg,principal,env,fetcher){
   }
   return err(id,-32601,'Method not found');
 }
-export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
+export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRuntimeConfig){
   const jwksCache=new Map();
   async function dispatch(req,env={}){
     const url=new URL(req.url);
@@ -333,7 +335,7 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, HEAD, OPTIONS'}});
     if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET, HEAD'});
     if(!env.__ledgerDb||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
-    let principal;try{principal=await authenticate(req,env,fetcher,jwksCache);}catch{return json({error:'Authentication unavailable'},503);}
+    let principal;try{principal=await authenticate(req,env,fetcher,jwksCache);}catch(e){console.error('[mcp:auth:exception]',e instanceof Error?e.message:String(e));return json({error:'Authentication unavailable'},503);}
     if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
     if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
     if(req.method==='DELETE')return json({error:'No sessions to terminate'},405,{allow:'POST'});
@@ -356,6 +358,7 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
       catch(err){console.error('[worker:configLoader]', err);return json({error:'ATAX MCP not configured'},503);}
     }
     const response=await dispatch(req,env);
+    console.log('[mcp:req]',req.method,path,response.status);
     const origin=req.headers.get('origin');
     if(!origin||!allowedOrigin(req,env))return response;
     const headers=new Headers(response.headers);

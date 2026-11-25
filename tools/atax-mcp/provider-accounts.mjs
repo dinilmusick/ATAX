@@ -51,7 +51,7 @@ function safeAccounts(env,principal){
   }))};
 }
 async function providerGet(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'error',headers:{
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
     authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'
   }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');

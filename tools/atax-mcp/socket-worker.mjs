@@ -43,7 +43,7 @@ export async function verifySocketJwt(request,env,fetcher=fetch){
   const jwksUrl=strictUrl(env.SOCKET_AUTH_JWKS_URL);
   if(new URL(jwksUrl).origin!==new URL(strictUrl(env.SOCKET_AUTH_ISSUER)).origin)
     throw Error('JWKS issuer origin mismatch');
-  const response=await fetcher(jwksUrl,{redirect:'error',headers:{accept:'application/json'}});
+  const response=await fetcher(jwksUrl,{redirect:'manual',headers:{accept:'application/json'}});
   if(!response.ok)return null;
   const raw=await readBoundedText(response,32768);
   if(raw===null)return null;

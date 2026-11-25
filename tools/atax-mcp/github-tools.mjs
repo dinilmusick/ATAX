@@ -92,7 +92,7 @@ async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=
   const headers={'accept':'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'atax-mcp-control-plane'};
   if (!anonymous) headers.authorization=`Bearer ${token}`;
   if (body!==undefined) headers['content-type']='application/json';
-  const res=await fetcher(url,{method,headers,redirect:'error',...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetcher(url,{method,headers,redirect:'manual',...(body===undefined?{}:{body:JSON.stringify(body)})});
   if (!res.ok) return {status:res.status,ok:false};
   if (res.status===204) return {status:204,ok:true,data:null};
   let data;
