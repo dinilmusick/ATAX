@@ -257,7 +257,9 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
   async function dispatch(req,env={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL,databaseTransport:'supabase-data-api'});
-    if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET'){
+    // Claude/Gemini connector discovery: HEAD /mcp → 200 (server reachability probe)
+    if(url.pathname==='/mcp'&&req.method==='HEAD')return new Response(null,{status:200,headers:{...safeHeaders,'allow':'POST, GET, HEAD, OPTIONS'}});
+    if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&(req.method==='GET'||req.method==='HEAD')){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
       // Phase 2: Supabase Auth serves as the independent authorization server.
@@ -286,14 +288,16 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
           }
         }catch{/* invalid server URL — omit registration_endpoint */}
       }
+      if(req.method==='HEAD')return new Response(null,{status:200,headers:safeHeaders});
       return json(metadata);
     }
     // Phase 2: MCP clients may check /.well-known/oauth-authorization-server (or with /mcp suffix)
     // or /.well-known/openid-configuration on the resource server URL. Proxy the upstream
     // authorization server discovery document preserving the issuer path (e.g. /auth/v1).
-    if((url.pathname==='/.well-known/oauth-authorization-server'||url.pathname==='/.well-known/oauth-authorization-server/mcp'||url.pathname==='/.well-known/openid-configuration')&&req.method==='GET'){
+    if((url.pathname==='/.well-known/oauth-authorization-server'||url.pathname==='/.well-known/oauth-authorization-server/mcp'||url.pathname==='/.well-known/openid-configuration')&&(req.method==='GET'||req.method==='HEAD')){
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
       if(!server)return json({error:'Authorization server not configured'},404);
+      if(req.method==='HEAD')return new Response(null,{status:200,headers:safeHeaders});
       try{
         const issuerUrl=new URL(server);
         if(issuerUrl.protocol!=='https:')return json({error:'Authorization server must be HTTPS'},400);
@@ -325,8 +329,8 @@ export function createHandler(fetcher=fetch,configLoader=loadMcpRuntimeConfig){
     }
     if(url.pathname!=='/mcp')return json({error:'Not found'},404);
     if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
-    if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, OPTIONS'}});
-    if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET'});
+    if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, HEAD, OPTIONS'}});
+    if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET, HEAD'});
     if(!env.__ledgerDb||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
     let principal;try{principal=await authenticate(req,env,fetcher,jwksCache);}catch{return json({error:'Authentication unavailable'},503);}
     if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
