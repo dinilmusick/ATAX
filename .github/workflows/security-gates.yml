@@ -88,11 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/security
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            gitleaks git --log-opts="${{ github.event.pull_request.base.sha }}..HEAD" . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
-          else
-            gitleaks dir . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
-          fi
+          gitleaks dir . --config .gitleaks.toml --redact --exit-code 1 --report-format sarif --report-path artifacts/security/gitleaks.sarif
 
       - name: Install pinned Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
