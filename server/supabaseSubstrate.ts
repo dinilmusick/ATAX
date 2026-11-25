@@ -265,7 +265,8 @@ function createDataApiClient(env: Record<string,string|undefined>){
 }
 
 export function createSubstrateService(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
+  _fetcher?: typeof fetch
 ) {
   function resolveApi(): ReturnType<typeof createDataApiClient> {
     return createDataApiClient(env);
