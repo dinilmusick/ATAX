@@ -17,9 +17,11 @@ import {
   validateRpcParams,
   createLedgerDb,
   openLedger,
+  openControlPlaneLedger,
   mapPostgrestError,
   sanitizeErrorMessage,
   CANONICAL_RPC_ALLOWLIST,
+  INSTANCE_CONTROL_PLANE_RPCS,
   ALLOWED_RPCS,
   PARAM_KEY_REGEX,
   LedgerError,
@@ -261,6 +263,27 @@ test('Allowlist 2.2: All 35 canonical ATAX functions are allowed without excepti
     assert.ok(CANONICAL_RPC_ALLOWLIST.has(name), `Missing canonical function: ${name}`);
     assert.doesNotThrow(() => assertAllowedRpc(name), `Unexpected rejection of canonical function: ${name}`);
   }
+});
+
+test('Allowlist 2.4: openLedger blocks instance-auth/vault RPCs while openControlPlaneLedger permits them', async () => {
+  const calls = [];
+  const mockFetcher = async (url) => {
+    calls.push(url);
+    return new Response(JSON.stringify({ passkeyConfigured: false }), { status: 200 });
+  };
+  const mcpDb = await openLedger(VALID_ENV, mockFetcher);
+  for (const fn of INSTANCE_CONTROL_PLANE_RPCS) {
+    await assert.rejects(
+      () => mcpDb.rpc(fn, {}),
+      err => err instanceof LedgerError && err.code === 'RPC_NOT_ALLOWED' && err.status === 400
+    );
+  }
+  assert.equal(calls.length, 0);
+
+  const cpDb = await openControlPlaneLedger(VALID_ENV, mockFetcher);
+  const res = await cpDb.rpc('atax_mcp_instance_auth_status_v1', {});
+  assert.deepEqual(res, { passkeyConfigured: false });
+  assert.equal(calls.length, 1);
 });
 
 test('Allowlist 2.3: Arbitrary, unlisted, and malicious functions are rejected with RPC_NOT_ALLOWED (400)', () => {

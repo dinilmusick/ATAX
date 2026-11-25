@@ -8,7 +8,9 @@
     "start": "node server.ts",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test worker-dashboard.test.ts server/*.test.ts tools/atax-mcp/*.test.mjs",
+    "test:settings": "node --import tsx --test server/settingsControlPlane.test.ts server/vaultAndAuth.test.ts"
   },
   "dependencies": {
     "@types/express": "^5.0.6",

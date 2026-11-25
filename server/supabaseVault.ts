@@ -1,3 +1,11 @@
+import {
+  LedgerError,
+  openControlPlaneLedger,
+  parseDataApiConfig,
+  sanitizeErrorMessage,
+  type LedgerDb,
+} from '../tools/atax-mcp/data-api-ledger.mjs';
+
 export type ProviderType = 'github' | 'cloudflare' | 'vercel';
 
 export interface ProviderAccountSummary {
@@ -12,6 +20,7 @@ export interface ProviderAccountSummary {
 
 export interface ConnectionInspection {
   configured: boolean;
+  reachable?: boolean;
   hostLabel: string | null;
   error: string | null;
   baseUrl: string | null;
@@ -19,21 +28,19 @@ export interface ConnectionInspection {
 }
 
 export interface UpsertSecretInput {
-  ownerSubject: string;
+  ownerSubject?: string;
   provider: string;
   alias: string;
   credential: string;
-  actorSubject: string;
+  actorSubject?: string;
   accountId?: string | null;
   enabled?: boolean;
 }
 
 export interface ValidatedUpsertInput {
-  ownerSubject: string;
   provider: ProviderType;
   alias: string;
   credential: string;
-  actorSubject: string;
   accountId: string | null;
   enabled: boolean;
 }
@@ -49,7 +56,6 @@ export interface ProviderTestResult {
 
 export class VaultError extends Error {
   readonly statusCode: number;
-
   constructor(message: string, statusCode = 400) {
     super(message);
     this.name = 'VaultError';
@@ -57,46 +63,37 @@ export class VaultError extends Error {
   }
 }
 
-const VALID_PROVIDERS = new Set<ProviderType>(['github', 'cloudflare', 'vercel']);
+const VALID_PROVIDERS = new Set<ProviderType>(['github', 'cloudflare']);
 const ALIAS_REGEX = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ACCOUNT_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SUBJECT_REGEX = /^[\w.@:-]{3,200}$/;
-const SECRET_KEY_REGEX = /^[A-Za-z0-9._\-+/=]{20,8192}$/;
 
 export function sanitizeVaultMessage(
   rawMessage: string,
-  apiKey?: string | null,
-  baseUrl?: string | null
+  secretKeyOrHost?: string | null,
+  extraUrlOrSecret?: string | null
 ): string {
-  if (typeof rawMessage !== 'string' || !rawMessage.trim()) {
-    return '';
-  }
+  if (typeof rawMessage !== 'string' || !rawMessage.trim()) return '';
   let sanitized = rawMessage;
-  if (apiKey) {
-    sanitized = sanitized.split(apiKey).join('[REDACTED]');
-  }
-  if (baseUrl) {
-    sanitized = sanitized.split(baseUrl).join('[REDACTED]');
-  }
-  return sanitized
-    .replace(/https?:\/\/[^\s"'<>]+/gi, '[REDACTED_URL]')
-    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, '[REDACTED_URI]')
-    .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/gi, 'Bearer [REDACTED]')
-    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, '[REDACTED_JWT]')
-    .replace(/[\r\n\t]+/g, ' ')
-    .trim()
-    .slice(0, 300);
+  if (secretKeyOrHost) sanitized = sanitized.split(secretKeyOrHost).join('[REDACTED]');
+  if (extraUrlOrSecret) sanitized = sanitized.split(extraUrlOrSecret).join('[REDACTED]');
+  return sanitizeErrorMessage(sanitized);
 }
 
 export function inspectSupabaseConnection(
   env: Record<string, string | undefined> = process.env
 ): ConnectionInspection {
-  const urlRaw = (env.ATAX_SUPABASE_URL || '').trim();
-  const keyRaw = (env.ATAX_SUPABASE_SECRET_KEY || '').trim();
+  const urlRaw = typeof (env.ATAX_SUPABASE_URL || env.SUPABASE_URL) === 'string'
+    ? String(env.ATAX_SUPABASE_URL || env.SUPABASE_URL).trim()
+    : '';
+  const keyRaw = typeof (env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY) === 'string'
+    ? String(env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY).trim()
+    : '';
 
   if (!urlRaw && !keyRaw) {
     return {
       configured: false,
+      reachable: false,
       hostLabel: null,
       error: null,
       baseUrl: null,
@@ -104,142 +101,45 @@ export function inspectSupabaseConnection(
     };
   }
 
-  if (!urlRaw || !keyRaw) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'Both ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY are required.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  if (urlRaw.length > 2048) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL exceeds maximum length.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  let parsed: URL;
   try {
-    parsed = new URL(urlRaw);
-  } catch {
+    const cfg = parseDataApiConfig(env);
+    return {
+      configured: true,
+      reachable: undefined,
+      hostLabel: new URL(cfg.baseUrl).hostname,
+      error: null,
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+    };
+  } catch (err) {
     return {
       configured: false,
+      reachable: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must be a valid HTTPS Supabase URL.',
+      error: err instanceof Error ? err.message : 'Supabase Data API configuration is invalid.',
       baseUrl: null,
       apiKey: null,
     };
   }
-
-  if (parsed.protocol !== 'https:') {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must use https://.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  const hostname = parsed.hostname;
-  if (
-    !hostname ||
-    !(hostname.endsWith('.supabase.co') || hostname.endsWith('.supabase.com')) ||
-    hostname.includes('..') ||
-    hostname.startsWith('.')
-  ) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must use a canonical .supabase.co or .supabase.com hostname.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  if (parsed.username || parsed.password) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must not contain user credentials.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  if (parsed.search || parsed.hash) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must not contain query parameters or hash.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  if (parsed.pathname !== '' && parsed.pathname !== '/') {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_URL must not include a subpath.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  if (!SECRET_KEY_REGEX.test(keyRaw)) {
-    return {
-      configured: false,
-      hostLabel: null,
-      error: 'ATAX_SUPABASE_SECRET_KEY must be 20-8192 valid token characters.',
-      baseUrl: null,
-      apiKey: null,
-    };
-  }
-
-  return {
-    configured: true,
-    hostLabel: hostname,
-    error: null,
-    baseUrl: parsed.origin,
-    apiKey: keyRaw,
-  };
 }
 
 export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsertInput {
   const providerRaw = typeof input.provider === 'string' ? input.provider.trim().toLowerCase() : '';
-  if (!VALID_PROVIDERS.has(providerRaw as ProviderType)) {
-    throw new VaultError('Unsupported provider. Choose github, cloudflare, or vercel.', 400);
+  if (providerRaw === 'vercel') {
+    throw new VaultError('Vercel provider adapter is not implemented.', 501);
   }
-  const provider = providerRaw as ProviderType;
+  if (!VALID_PROVIDERS.has(providerRaw as ProviderType)) {
+    throw new VaultError('Unsupported provider. Choose github or cloudflare.', 400);
+  }
 
   const alias = typeof input.alias === 'string' ? input.alias.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
-    throw new VaultError(
-      'Alias must start with A-Z and contain 1-48 uppercase letters, digits, or underscores.',
-      400
-    );
+    throw new VaultError('Alias must start with A-Z and contain 1-48 uppercase letters, digits, or underscores.', 400);
   }
 
   const credential = typeof input.credential === 'string' ? input.credential.trim() : '';
   if (credential.length < 16 || credential.length > 8192) {
     throw new VaultError('Secret token must be between 16 and 8192 characters.', 400);
-  }
-
-  const ownerSubject = typeof input.ownerSubject === 'string' ? input.ownerSubject.trim() : '';
-  if (!SUBJECT_REGEX.test(ownerSubject)) {
-    throw new VaultError('Owner subject must be 3-200 characters (letters, digits, ., _, @, :, -).', 400);
-  }
-
-  const actorSubject = typeof input.actorSubject === 'string' ? input.actorSubject.trim() : '';
-  if (!SUBJECT_REGEX.test(actorSubject)) {
-    throw new VaultError('Actor subject is invalid.', 400);
   }
 
   let accountId: string | null = null;
@@ -252,11 +152,9 @@ export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsert
   }
 
   return {
-    ownerSubject,
-    provider,
+    provider: providerRaw as ProviderType,
     alias,
     credential,
-    actorSubject,
     accountId,
     enabled: input.enabled !== false,
   };
@@ -267,6 +165,9 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
   alias: string;
 } {
   const provider = typeof providerRaw === 'string' ? providerRaw.trim().toLowerCase() : '';
+  if (provider === 'vercel') {
+    throw new VaultError('Vercel provider adapter is not implemented.', 501);
+  }
   if (!VALID_PROVIDERS.has(provider as ProviderType)) {
     throw new VaultError('Unsupported provider.', 400);
   }
@@ -277,99 +178,64 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
   return { provider: provider as ProviderType, alias };
 }
 
+export type VaultLedgerOpener = (
+  bootstrapEnv?: Record<string, string | undefined>,
+  fetcher?: typeof fetch
+) => Promise<Pick<LedgerDb, 'rpc'>>;
+
 export function createVaultService(
   env: Record<string, string | undefined> = process.env,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  ledgerOpener: VaultLedgerOpener = openControlPlaneLedger
 ) {
-  function requireDataApiConfig(): { baseUrl: string; apiKey: string } {
+  async function open() {
     const inspection = inspectSupabaseConnection(env);
-    if (!inspection.configured || !inspection.baseUrl || !inspection.apiKey) {
+    if (!inspection.configured) {
+      throw new VaultError(inspection.error || 'Supabase backend is not configured.', 503);
+    }
+    let db: Awaited<ReturnType<typeof ledgerOpener>>;
+    try {
+      db = await ledgerOpener(env, fetcher);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Supabase Data API backend is unavailable.';
       throw new VaultError(
-        inspection.error ||
-          'Supabase backend is not configured. Set ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
+        sanitizeVaultMessage(message, inspection.hostLabel) || 'Supabase Data API backend is unavailable.',
         503
       );
     }
-    return { baseUrl: inspection.baseUrl, apiKey: inspection.apiKey };
-  }
-
-  async function callRpc(name: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    const { baseUrl, apiKey } = requireDataApiConfig();
-    let res: Response;
-    try {
-      res = await fetcher(`${baseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
-        method: 'POST',
-        headers: {
-          apikey: apiKey,
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(params),
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'Supabase Data API request failed.';
-      const safeMsg = sanitizeVaultMessage(rawMsg, apiKey, baseUrl);
-      throw new VaultError(
-        safeMsg ? `Supabase Data API request failed: ${safeMsg}` : 'Supabase Data API request failed.',
-        502
-      );
-    }
-
-    if (res.status === 204) {
-      return null;
-    }
-
-    const text = await res.text().catch(() => '');
-    if (!res.ok) {
-      let parsedBody: Record<string, unknown> | null = null;
-      if (text) {
+    return {
+      async rpc(name: string, params: Record<string, unknown> = {}) {
         try {
-          const candidate = JSON.parse(text);
-          if (candidate && typeof candidate === 'object') {
-            parsedBody = candidate as Record<string, unknown>;
+          return await db.rpc(name, params);
+        } catch (err) {
+          if (err instanceof LedgerError) {
+            const status = err.status >= 500 ? 502 : err.status;
+            throw new VaultError(
+              sanitizeVaultMessage(err.message, inspection.hostLabel) || 'Canonical vault operation failed.',
+              status
+            );
           }
-        } catch {
-          parsedBody = null;
+          throw err;
         }
-      }
-      const rawMessage =
-        typeof parsedBody?.message === 'string' && parsedBody.message ? parsedBody.message : text;
-      const pgCode = typeof parsedBody?.code === 'string' ? parsedBody.code : '';
-      const sanitized = sanitizeVaultMessage(rawMessage, apiKey, baseUrl);
-
-      if (res.status === 400 && (pgCode === 'P0001' || sanitized)) {
-        throw new VaultError(sanitized || 'Vault operation rejected.', 400);
-      }
-      if (res.status === 409 || pgCode === '23505') {
-        throw new VaultError(sanitized || 'Duplicate Vault record.', 409);
-      }
-      throw new VaultError(
-        sanitized
-          ? `Supabase Data API error (HTTP ${res.status}): ${sanitized}`
-          : `Supabase Data API error (HTTP ${res.status}).`,
-        502
-      );
-    }
-
-    if (!text || !text.trim()) {
-      return null;
-    }
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new VaultError('Invalid JSON response from Supabase Data API.', 502);
-    }
+      },
+    };
   }
 
-  async function listAccounts(ownerSubject: string): Promise<ProviderAccountSummary[]> {
-    if (!SUBJECT_REGEX.test(ownerSubject)) {
-      throw new VaultError('Invalid owner subject.', 400);
+  async function ownerSubject(db: Awaited<ReturnType<typeof open>>, supplied?: string): Promise<string> {
+    const owner = String(await db.rpc('atax_mcp_instance_owner_subject_v1', {}));
+    if (!SUBJECT_REGEX.test(owner)) {
+      throw new VaultError('ATAX instance owner is not configured.', 503);
     }
-    const raw = await callRpc('atax_mcp_provider_summary_v1', {
-      owner_subject_in: ownerSubject,
-    });
+    if (supplied && supplied !== owner) {
+      throw new VaultError('ATAX provider owner authorization failed.', 403);
+    }
+    return owner;
+  }
+
+  async function listAccounts(suppliedOwner?: string): Promise<ProviderAccountSummary[]> {
+    const db = await open();
+    const owner = await ownerSubject(db, suppliedOwner);
+    const raw = await db.rpc('atax_mcp_provider_summary_v1', { owner_subject_in: owner });
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
@@ -384,28 +250,6 @@ export function createVaultService(
       }));
   }
 
-  async function ensureOwnerPolicy(ownerSubject: string, actorSubject: string): Promise<void> {
-    try {
-      const cfg = (await callRpc('atax_mcp_runtime_config_v1', {})) as
-        | { settings?: Record<string, unknown> }
-        | null;
-      const existingSettings =
-        cfg && cfg.settings && typeof cfg.settings === 'object' && !Array.isArray(cfg.settings)
-          ? { ...cfg.settings }
-          : {};
-
-      if (!existingSettings.MCP_OWNER_SUBJECT || existingSettings.MCP_OWNER_SUBJECT !== ownerSubject) {
-        existingSettings.MCP_OWNER_SUBJECT = ownerSubject;
-        await callRpc('atax_mcp_set_settings_v1', {
-          settings_in: existingSettings,
-          actor_subject_in: actorSubject,
-        });
-      }
-    } catch {
-      // Non-fatal if caller role has upsert grants without settings admin grant
-    }
-  }
-
   async function upsertSecret(input: UpsertSecretInput): Promise<{
     id: string;
     provider: ProviderType;
@@ -414,25 +258,25 @@ export function createVaultService(
     enabled: boolean;
   }> {
     const valid = validateProviderInput(input);
-    requireDataApiConfig();
-
-    await ensureOwnerPolicy(valid.ownerSubject, valid.actorSubject);
-
-    const idRaw = await callRpc('atax_mcp_upsert_provider_v1', {
-      owner_subject_in: valid.ownerSubject,
+    const db = await open();
+    const owner = await ownerSubject(db, input.ownerSubject);
+    const actor = input.actorSubject || owner;
+    if (actor !== owner) {
+      throw new VaultError('ATAX provider actor authorization failed.', 403);
+    }
+    const idRaw = await db.rpc('atax_mcp_upsert_provider_v1', {
+      owner_subject_in: owner,
       provider_in: valid.provider,
       alias_in: valid.alias,
       credential_in: valid.credential,
-      actor_subject_in: valid.actorSubject,
+      actor_subject_in: owner,
       account_id_in: valid.accountId,
       enabled_in: valid.enabled,
     });
-
     const id = typeof idRaw === 'string' ? idRaw : idRaw ? String(idRaw) : '';
     if (!id) {
       throw new VaultError('Supabase Vault did not return a credential reference.', 502);
     }
-
     return {
       id,
       provider: valid.provider,
@@ -443,70 +287,73 @@ export function createVaultService(
   }
 
   async function setAccountEnabled(
-    ownerSubject: string,
+    suppliedOwner: string | undefined,
     providerRaw: string,
     aliasRaw: string,
     enabled: boolean,
-    actorSubject: string
+    suppliedActor?: string
   ): Promise<void> {
-    if (!SUBJECT_REGEX.test(ownerSubject) || !SUBJECT_REGEX.test(actorSubject)) {
-      throw new VaultError('Invalid subject.', 400);
-    }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    await callRpc('atax_mcp_set_provider_enabled_v1', {
-      owner_subject_in: ownerSubject,
+    const db = await open();
+    const owner = await ownerSubject(db, suppliedOwner);
+    if (suppliedActor && suppliedActor !== owner) {
+      throw new VaultError('ATAX provider actor authorization failed.', 403);
+    }
+    await db.rpc('atax_mcp_set_provider_enabled_v1', {
+      owner_subject_in: owner,
       provider_in: provider,
       alias_in: alias,
       enabled_in: Boolean(enabled),
-      actor_subject_in: actorSubject,
+      actor_subject_in: owner,
     });
   }
 
   async function deleteAccount(
-    ownerSubject: string,
+    suppliedOwner: string | undefined,
     providerRaw: string,
     aliasRaw: string,
-    actorSubject: string
+    suppliedActor?: string
   ): Promise<void> {
-    if (!SUBJECT_REGEX.test(ownerSubject) || !SUBJECT_REGEX.test(actorSubject)) {
-      throw new VaultError('Invalid subject.', 400);
-    }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    await callRpc('atax_mcp_delete_provider_v1', {
-      owner_subject_in: ownerSubject,
+    const db = await open();
+    const owner = await ownerSubject(db, suppliedOwner);
+    if (suppliedActor && suppliedActor !== owner) {
+      throw new VaultError('ATAX provider actor authorization failed.', 403);
+    }
+    await db.rpc('atax_mcp_delete_provider_v1', {
+      owner_subject_in: owner,
       provider_in: provider,
       alias_in: alias,
-      actor_subject_in: actorSubject,
+      actor_subject_in: owner,
     });
   }
 
   async function testAccountConnection(
-    ownerSubject: string,
+    suppliedOwner: string | undefined,
     providerRaw: string,
     aliasRaw: string
   ): Promise<ProviderTestResult> {
-    if (!SUBJECT_REGEX.test(ownerSubject)) {
-      throw new VaultError('Invalid owner subject.', 400);
-    }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    const cfg = (await callRpc('atax_mcp_runtime_config_v1', {})) as
+    const db = await open();
+    const owner = await ownerSubject(db, suppliedOwner);
+    const cfg = (await db.rpc('atax_mcp_runtime_config_v1', {})) as
       | {
           settings?: Record<string, unknown>;
           accounts?: Array<{ provider: string; alias: string; token: string }>;
         }
-      | null;
+      | undefined;
 
     const configuredOwner =
       typeof cfg?.settings?.MCP_OWNER_SUBJECT === 'string'
         ? cfg.settings.MCP_OWNER_SUBJECT
         : null;
-    if (configuredOwner && configuredOwner !== ownerSubject) {
+    if (configuredOwner && configuredOwner !== owner) {
       return {
         ok: false,
         provider,
         alias,
         statusCode: 403,
-        summary: 'Configured Vault owner does not match the active operator session.',
+        summary: 'Configured Vault owner does not match the instance owner.',
         checkedAt: new Date().toISOString(),
       };
     }
@@ -529,12 +376,11 @@ export function createVaultService(
     const probeUrl =
       provider === 'github'
         ? 'https://api.github.com/user'
-        : provider === 'cloudflare'
-        ? 'https://api.cloudflare.com/client/v4/user/tokens/verify'
-        : 'https://api.vercel.com/v2/user';
+        : 'https://api.cloudflare.com/client/v4/user/tokens/verify';
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
+    let result: ProviderTestResult;
     try {
       const res = await fetcher(probeUrl, {
         method: 'GET',
@@ -548,7 +394,7 @@ export function createVaultService(
       });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        return {
+        result = {
           ok: false,
           provider,
           alias,
@@ -556,36 +402,38 @@ export function createVaultService(
           summary: `Provider rejected credential (HTTP ${res.status}).`,
           checkedAt: new Date().toISOString(),
         };
-      }
-
-      let identitySummary = 'Token verified';
-      if (provider === 'github' && typeof data.login === 'string') {
-        identitySummary = `Verified GitHub account @${data.login}`;
+      } else if (provider === 'github' && typeof data.login === 'string') {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified GitHub account @${data.login}`,
+          checkedAt: new Date().toISOString(),
+        };
       } else if (provider === 'cloudflare') {
         const resultObj = data.result as Record<string, unknown> | undefined;
         const cfStatus = typeof resultObj?.status === 'string' ? resultObj.status : 'active';
-        identitySummary = `Cloudflare token status: ${cfStatus}`;
-      } else if (provider === 'vercel') {
-        const userObj = data.user as Record<string, unknown> | undefined;
-        const handle =
-          typeof userObj?.username === 'string'
-            ? userObj.username
-            : typeof userObj?.email === 'string'
-            ? userObj.email
-            : 'verified';
-        identitySummary = `Verified Vercel account ${handle}`;
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Cloudflare token status: ${cfStatus}`,
+          checkedAt: new Date().toISOString(),
+        };
+      } else {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: 'Token verified',
+          checkedAt: new Date().toISOString(),
+        };
       }
-
-      return {
-        ok: true,
-        provider,
-        alias,
-        statusCode: res.status,
-        summary: identitySummary,
-        checkedAt: new Date().toISOString(),
-      };
     } catch {
-      return {
+      result = {
         ok: false,
         provider,
         alias,
@@ -596,6 +444,19 @@ export function createVaultService(
     } finally {
       clearTimeout(timer);
     }
+
+    try {
+      await db.rpc('atax_mcp_audit_provider_test_v1', {
+        provider_in: provider,
+        alias_in: alias,
+        ok_in: result.ok,
+        status_code_in: result.statusCode,
+        actor_subject_in: owner,
+      });
+    } catch {
+      // Audit failure must not turn a verified provider response into a secret-bearing error.
+    }
+    return result;
   }
 
   return {

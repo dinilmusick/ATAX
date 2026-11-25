@@ -70,6 +70,30 @@ export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
 
 export const ALLOWED_RPCS = CANONICAL_RPC_ALLOWLIST;
 
+/**
+ * Additional canonical RPCs restricted to the server-side instance Settings/Vault control plane.
+ * Never exposed to MCP tool callers through openLedger().
+ */
+export const INSTANCE_CONTROL_PLANE_RPCS = Object.freeze(new Set([
+  'atax_mcp_instance_auth_status_v1',
+  'atax_mcp_verify_instance_passkey_v1',
+  'atax_mcp_create_instance_session_v1',
+  'atax_mcp_validate_instance_session_v1',
+  'atax_mcp_revoke_instance_session_v1',
+  'atax_mcp_instance_owner_subject_v1',
+  'atax_mcp_provider_summary_v1',
+  'atax_mcp_upsert_provider_v1',
+  'atax_mcp_set_provider_enabled_v1',
+  'atax_mcp_delete_provider_v1',
+  'atax_mcp_audit_provider_test_v1',
+  'atax_mcp_set_settings_v1',
+]));
+
+export const CONTROL_PLANE_RPC_ALLOWLIST = Object.freeze(new Set([
+  ...CANONICAL_RPC_ALLOWLIST,
+  ...INSTANCE_CONTROL_PLANE_RPCS,
+]));
+
 export class LedgerError extends Error {
   constructor(message, code = 'LEDGER_ERROR', status = 500, rpcName = null) {
     super(message);
@@ -81,11 +105,12 @@ export class LedgerError extends Error {
 }
 
 /**
- * Asserts that an RPC function name is included in the canonical allowlist.
+ * Asserts that an RPC function name is included in the allowlist.
  * @param {string} name
+ * @param {Set<string>} [allowlist=CANONICAL_RPC_ALLOWLIST]
  */
-export function assertAllowedRpc(name) {
-  if (typeof name !== 'string' || !CANONICAL_RPC_ALLOWLIST.has(name)) {
+export function assertAllowedRpc(name, allowlist = CANONICAL_RPC_ALLOWLIST) {
+  if (typeof name !== 'string' || !allowlist.has(name)) {
     throw new LedgerError(
       `Invalid canonical RPC: ${typeof name === 'string' ? name.slice(0, 64) : 'unknown'}`,
       'RPC_NOT_ALLOWED',
@@ -385,7 +410,7 @@ export async function mapPostgrestError(response, rpcName = null, apiKey = null,
  * @param {{ baseUrl: string, apiKey: string, url?: string, key?: string }} config
  * @param {typeof fetch} [fetcher=fetch]
  */
-export function createLedgerDb(config, fetcher = fetch) {
+export function createLedgerDb(config, fetcher = fetch, allowlist = CANONICAL_RPC_ALLOWLIST) {
   const baseUrl = config.baseUrl || config.url;
   const apiKey = config.apiKey || config.key;
 
@@ -400,7 +425,7 @@ export function createLedgerDb(config, fetcher = fetch) {
    * @returns {Promise<any>} Parsed result
    */
   async function rpc(name, params = {}) {
-    assertAllowedRpc(name);
+    assertAllowedRpc(name, allowlist);
     const bodyString = validateRpcParams(params);
 
     const endpoint = `${baseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`;
@@ -524,7 +549,12 @@ export function createLedgerDb(config, fetcher = fetch) {
     }
   }
 
-  return { rpc, skills, skill, request };
+  async function ping() {
+    await rpc('atax_mcp_runtime_config_v1', {});
+    return true;
+  }
+
+  return { rpc, skills, skill, request, ping };
 }
 
 /**
@@ -534,5 +564,16 @@ export function createLedgerDb(config, fetcher = fetch) {
  */
 export async function openLedger(bootstrapEnv, fetcher = fetch) {
   const config = parseDataApiConfig(bootstrapEnv);
-  return createLedgerDb(config, fetcher);
+  return createLedgerDb(config, fetcher, CANONICAL_RPC_ALLOWLIST);
+}
+
+/**
+ * Opens the server-only Data API client permitted to execute singleton instance-auth
+ * and Vault control-plane RPCs in addition to the canonical ledger RPCs.
+ * @param {Record<string, any>} bootstrapEnv
+ * @param {typeof fetch} [fetcher=fetch]
+ */
+export async function openControlPlaneLedger(bootstrapEnv, fetcher = fetch) {
+  const config = parseDataApiConfig(bootstrapEnv);
+  return createLedgerDb(config, fetcher, CONTROL_PLANE_RPC_ALLOWLIST);
 }

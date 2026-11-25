@@ -1,21 +1,16 @@
+import { createSettingsControlPlane, dispatchSettingsRequest, jsonHeaders } from './server/settingsControlPlane.ts';
 import { createSubstrateService } from './server/supabaseSubstrate.ts';
 import { createHandler as createMcpHandler } from './tools/atax-mcp/worker.mjs';
 
-const jsonHeaders = {
-  'content-type': 'application/json; charset=utf-8',
-  'cache-control': 'no-store',
-  'x-content-type-options': 'nosniff',
-};
-
-function json(value, status = 200, extraHeaders = {}) {
+function json(value: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { ...jsonHeaders, ...extraHeaders },
+    headers: { ...jsonHeaders(), ...extraHeaders },
   });
 }
 
-async function substrateResponse(path, env) {
-  const service = createSubstrateService(env);
+async function substrateResponse(path: string, env: Record<string, unknown>) {
+  const service = createSubstrateService(env as Record<string, string | undefined>);
   try {
     if (path === '/api/substrate/systems') return json(await service.getSystemsGraph());
     if (path === '/api/substrate/visions-goals') return json(await service.getVisionsGoalsGraph());
@@ -24,47 +19,65 @@ async function substrateResponse(path, env) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Supabase substrate unavailable.';
     const status =
-      message.includes('ATAX_SUPABASE_CONNECTION_URL') || message.includes('ATAX_SUPABASE_URL')
+      message.includes('ATAX_SUPABASE_URL') || message.includes('ATAX_SUPABASE_SECRET_KEY')
         ? 503
         : 502;
     return json({ error: message }, status);
   }
 }
 
-const mcpHandler = createMcpHandler();
+type SettingsFactory = (env: Record<string, string | undefined>) => ReturnType<typeof createSettingsControlPlane>;
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+export function createDashboardWorker(
+  settingsFactory: SettingsFactory = (env) => createSettingsControlPlane(env)
+) {
+  const mcpHandler = createMcpHandler();
 
-    if (
-      url.pathname === '/mcp' ||
-      url.pathname === '/socket' ||
-      url.pathname === '/.well-known/oauth-protected-resource' ||
-      url.pathname === '/.well-known/oauth-protected-resource/mcp'
-    ) {
-      return mcpHandler(request, env, ctx);
-    }
+  return {
+    async fetch(request: Request, env: Record<string, unknown> = {}, ctx?: unknown) {
+      const url = new URL(request.url);
 
-    if (url.pathname === '/health') {
-      const hasDataApiConfig =
-        Boolean(env.ATAX_SUPABASE_URL || env.SUPABASE_URL) &&
-        Boolean(env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY);
-      return json({
-        service: 'atax',
-        version: '1.0.3',
-        status: 'ok',
-        transports: ['dashboard', 'mcp', 'socket'],
-        databaseTransport: hasDataApiConfig ? 'supabase-data-api' : 'unconfigured',
-      });
-    }
+      if (
+        url.pathname === '/mcp' ||
+        url.pathname === '/socket' ||
+        url.pathname === '/.well-known/oauth-protected-resource' ||
+        url.pathname === '/.well-known/oauth-protected-resource/mcp'
+      ) {
+        return mcpHandler(request, env, ctx);
+      }
 
-    if (url.pathname.startsWith('/api/')) {
-      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
-      return substrateResponse(url.pathname, env);
-    }
+      if (url.pathname === '/health') {
+        const hasDataApiConfig =
+          Boolean(env.ATAX_SUPABASE_URL || env.SUPABASE_URL) &&
+          Boolean(env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY);
+        return json({
+          service: 'atax',
+          version: '1.1.0',
+          status: 'ok',
+          transports: ['dashboard', 'mcp', 'socket'],
+          databaseTransport: hasDataApiConfig ? 'supabase-data-api' : 'unconfigured',
+          settings: { routes: true, authentication: 'instance-passkey' },
+        });
+      }
 
-    if (!env.ASSETS) return json({ error: 'Static asset binding unavailable' }, 500);
-    return env.ASSETS.fetch(request);
-  },
-};
+      if (url.pathname.startsWith('/api/settings/')) {
+        const controller = settingsFactory(env as Record<string, string | undefined>);
+        const result = await dispatchSettingsRequest(request, controller);
+        if (!result) return json({ error: 'Not found' }, 404);
+        const extraHeaders = result.headers ? Object.fromEntries(result.headers.entries()) : {};
+        return json(result.body, result.status, extraHeaders);
+      }
+
+      if (url.pathname.startsWith('/api/')) {
+        if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+        return substrateResponse(url.pathname, env);
+      }
+
+      const assets = env.ASSETS as { fetch: (req: Request) => Promise<Response> } | undefined;
+      if (!assets) return json({ error: 'Static asset binding unavailable' }, 500);
+      return assets.fetch(request);
+    },
+  };
+}
+
+export default createDashboardWorker();

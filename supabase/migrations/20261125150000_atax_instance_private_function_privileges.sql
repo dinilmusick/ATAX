@@ -1,0 +1,8 @@
+revoke all on function atax_private.instance_owner_subject_v1() from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.initialize_instance_passkey_v1(text) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.verify_instance_passkey_v1(text) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.create_instance_session_v1(text,timestamptz) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.validate_instance_session_v1(text) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.revoke_instance_session_v1(text) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.instance_auth_status_v1() from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
+revoke all on function atax_private.execute_mcp_rpc_v1(text,jsonb) from public,anon,authenticated,atax_mcp_config_admin,atax_mcp_maintainer,atax_socket_restricted;
