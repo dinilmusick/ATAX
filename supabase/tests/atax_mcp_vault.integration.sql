@@ -76,7 +76,7 @@ BEGIN
     'synthetic_admin','cf-work',true);
 
   SELECT public.atax_mcp_provider_summary_v1('synthetic_owner') INTO obj;
-  IF jsonb_array_length(obj)<>4 OR obj @> '[{"provider":"github","alias":"PRIMARY"},{"provider":"github","alias":"WORK"},{"provider":"cloudflare","alias":"PRIMARY"},{"provider":"cloudflare","alias":"WORK"}]'::jsonb=FALSE THEN
+  IF jsonb_array_length(obj)<>4 OR NOT (obj @> '[{"provider":"github","alias":"PRIMARY"},{"provider":"github","alias":"WORK"},{"provider":"cloudflare","alias":"PRIMARY"},{"provider":"cloudflare","alias":"WORK"}]'::jsonb) THEN
     RAISE EXCEPTION 'Provider multiplicity contract failed';
   END IF;
   IF obj::text LIKE '%synthetic-github-primary-123456%' OR obj::text LIKE '%token%' THEN
