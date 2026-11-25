@@ -29,27 +29,16 @@ for (const [name, app, mode] of apps) {
   try {
     stage = 'choice';
     await page.goto(app, { waitUntil: 'domcontentloaded', timeout: 40000 });
-    const emailChoice = page.getByRole('link', { name: /continue with email/i });
-    await emailChoice.waitFor({ state: 'visible', timeout: 40000 });
-    await page.getByRole('link', { name: /continue with google/i }).waitFor({ state: 'visible', timeout: 15000 });
+    await page.getByRole('button', { name: /continue with google/i }).waitFor({ state: 'visible', timeout: 40000 });
+    await page.locator('form input[type="email"]').waitFor({ state: 'visible', timeout: 40000 });
     const gateCopy = await page.locator('body').innerText();
     if (/SIGN IN TO WORKSPACE/i.test(gateCopy) || /^\s*OR\s*$/m.test(gateCopy)) {
       throw new Error('REDUNDANT_GATE_COPY');
     }
-    await emailChoice.click();
-    stage = 'hosted_email_form';
-    await page.locator('form input[type="email"]').waitFor({ state: 'visible', timeout: 40000 });
-    const emailFormCopy = await page.locator('body').innerText();
-    if (/SIGN IN TO WORKSPACE/i.test(emailFormCopy) || /^\s*OR\s*$/m.test(emailFormCopy)) {
-      throw new Error('REDUNDANT_EMAIL_COPY');
+    if (new URL(page.url()).origin !== new URL(app).origin) {
+      throw new Error('UNEXPECTED_AUTH_ORIGIN');
     }
-    if (new URL(page.url()).hostname !== 'luth.blueprint-ninjastudios.workers.dev') {
-      throw new Error('UNEXPECTED_IDENTITY_PROVIDER');
-    }
-    if (await page.getByRole('button', { name: /google/i }).count()) {
-      throw new Error('EMAIL_FORM_HAS_GOOGLE');
-    }
-    report.push(name + ': minimal gate, email-only form and no OR copy PASS');
+    report.push(name + ': inline email form, Google sign-in control and no redundant gate copy PASS');
     if (mode === 'register') {
       stage = 'register_form';
       await page.getByRole('button', { name: /create account/i }).first().click();
