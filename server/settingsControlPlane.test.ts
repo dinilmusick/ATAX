@@ -188,3 +188,17 @@ test('same control plane exposes only GitHub and Cloudflare as operational provi
   assert.deepEqual((await controller.status(req('https://atax.example/api/settings/status'))).status.providers,
     {github:true,cloudflare:true,vercel:false});
 });
+
+test('backend availability is reported as 503 rather than authentication required', async () => {
+  const controller = createSettingsControlPlane(
+    {ATAX_SUPABASE_CONNECTION_URL:'postgresql://u:p@db.vcaerawuwffziufvpbvw.supabase.co/postgres?sslmode=require'},
+    fetch,
+    async () => { throw new Error('connection refused'); },
+  );
+  const status = await controller.status(req('https://atax.example/api/settings/status'));
+  assert.equal(status.httpStatus,503);
+  assert.deepEqual(status.status.backend,{configured:true,reachable:false});
+  const providers = await controller.listProviders(req('https://atax.example/api/settings/providers'));
+  assert.equal(providers.status,503);
+  assert.equal((providers.body as {error?:string}).error,'Supabase backend unavailable.');
+});
