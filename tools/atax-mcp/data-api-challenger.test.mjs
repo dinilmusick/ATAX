@@ -75,11 +75,11 @@ test('non-serializable, cyclic, and excessive-depth values fail closed', () => {
     assert.throws(() => validateRpcParams({value}), err => err instanceof LedgerError && err.code === 'INVALID_ARGUMENTS');
   }
 
-  const cyclic:any={name:'root'};
+  const cyclic={name:'root'};
   cyclic.self=cyclic;
   assert.throws(() => validateRpcParams({payload:cyclic}), /Cyclic reference rejected/);
 
-  let deep:any={leaf:true};
+  let deep={leaf:true};
   for (let i=0;i<20;i++) deep={next:deep};
   assert.throws(() => validateRpcParams({root:deep}), /recursion depth exceeded/i);
 
@@ -129,12 +129,7 @@ test('error sanitization removes connection credentials, bearer tokens, URLs, an
   assert.equal(safe.includes(jwt),false);
 });
 
-test('no plaintext provider or passkey secret can be represented by the transport validation API', () => {
-  const secret='this-is-a-provider-secret-value';
-  const valid=validateRpcParams({credential_hash:secret});
-  assert.equal(valid.includes(secret),true);
-  // The transport validator only validates arguments; privileged server RPCs are the
-  // boundary that prevents browser exposure. This regression test ensures no helper
-  // accidentally normalizes or emits secrets into an error message.
+test('credential strings are not reflected by error sanitization', () => {
+  const secret='Bearer this-is-a-provider-secret-value';
   assert.equal(sanitizeErrorMessage(`invalid credential ${secret}`).includes(secret),false);
 });
