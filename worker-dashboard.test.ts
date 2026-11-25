@@ -45,3 +45,16 @@ test('production Worker settings routes are explicitly wired and never fall thro
   await assertRoute('/api/settings/providers/github/PRIMARY/enabled','PATCH',200,{enabled:false});
   await assertRoute('/api/settings/providers/github/PRIMARY','DELETE',200);
 });
+
+test('real Worker entrypoint returns semantic backend errors instead of generic 404/401', async()=>{
+  const worker = createDashboardWorker();
+  const status = await worker.fetch(new Request('https://atax.example/api/settings/status'),{});
+  assert.equal(status.status,503);
+  const statusBody = await status.json() as {backend?:unknown};
+  assert.ok(statusBody.backend);
+
+  const providers = await worker.fetch(new Request('https://atax.example/api/settings/providers'),{});
+  assert.equal(providers.status,503);
+  const providersBody = await providers.json() as {error?:string};
+  assert.equal(providersBody.error,'Supabase backend unavailable.');
+});
