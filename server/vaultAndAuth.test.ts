@@ -1,310 +1,190 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OperatorAuthStore, isSameOriginRequest } from './operatorAuth.ts';
 import {
-  VaultError,
-  createVaultService,
-  inspectSupabaseConnection,
-  sanitizeVaultMessage,
-  validateProviderInput,
-} from './supabaseVault.ts';
+  createSettingsControlPlane,
+  parseCookies,
+} from './settingsControlPlane.ts';
 
-test('OperatorAuthStore supports one-time claim, scrypt login, bearer verification, and revocation', () => {
-  const store = new OperatorAuthStore();
-  assert.equal(store.isClaimed(), false);
+type FakeState = {
+  passkeyConfigured: boolean;
+  validPasskey: string;
+  sessionValid: boolean;
+  revoked: boolean;
+  createdSessionHash: string | null;
+  providerCalls: Array<{name:string;params:Record<string,unknown>}>;
+};
 
-  const shortFail = store.claim('atax-owner', 'short');
-  assert.equal(shortFail.ok, false);
+function makeFixture() {
+  const state: FakeState = {
+    passkeyConfigured: true,
+    validPasskey: 'correct-passkey-123',
+    sessionValid: false,
+    revoked: false,
+    createdSessionHash: null,
+    providerCalls: [],
+  };
 
-  const claimed = store.claim('atax-owner', 'correct-horse-battery-staple');
-  assert.equal(claimed.ok, true);
-  if (!claimed.ok) return;
-  assert.equal(store.isClaimed(), true);
-
-  // Duplicate claim is rejected
-  const dup = store.claim('other-user', 'another-long-passphrase-123');
-  assert.equal(dup.ok, false);
-  if (!dup.ok) assert.equal(dup.status, 409);
-
-  // Wrong passphrase fails
-  const wrongLogin = store.login('wrong-passphrase-attempt');
-  assert.equal(wrongLogin.ok, false);
-
-  // Correct passphrase succeeds
-  const okLogin = store.login('correct-horse-battery-staple');
-  assert.equal(okLogin.ok, true);
-  if (!okLogin.ok) return;
-
-  const verified = store.verifyBearer(`Bearer ${okLogin.token}`);
-  assert.ok(verified);
-  assert.equal(verified.sub, 'atax-owner');
-
-  // Tampered token fails
-  assert.equal(store.verifyBearer(`Bearer ${okLogin.token}tamper`), null);
-
-  // Revocation invalidates token immediately
-  store.revokeBearer(`Bearer ${okLogin.token}`);
-  assert.equal(store.verifyBearer(`Bearer ${okLogin.token}`), null);
-});
-
-test('isSameOriginRequest enforces matching origin and host', () => {
-  assert.equal(
-    isSameOriginRequest({ origin: 'https://atax.example.com', host: 'atax.example.com' }),
-    true
-  );
-  assert.equal(
-    isSameOriginRequest({ origin: 'https://evil.example.com', host: 'atax.example.com' }),
-    false
-  );
-  assert.equal(isSameOriginRequest({ host: 'localhost:3000' }), true);
-});
-
-test('inspectSupabaseConnection validates ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY without leaking secrets', () => {
-  assert.equal(inspectSupabaseConnection({}).configured, false);
-  assert.equal(inspectSupabaseConnection({}).error, null);
-
-  const partial = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://abc.supabase.co',
-  });
-  assert.equal(partial.configured, false);
-  assert.ok(partial.error?.includes('ATAX_SUPABASE_SECRET_KEY'));
-
-  const insecureScheme = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'http://abc.supabase.co',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(insecureScheme.configured, false);
-  assert.ok(insecureScheme.error?.includes('https://'));
-
-  const badHost = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://evil.example.com',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(badHost.configured, false);
-  assert.ok(badHost.error?.includes('.supabase.co'));
-
-  const embeddedCreds = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://user:pass@abc.supabase.co',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(embeddedCreds.configured, false);
-  assert.ok(embeddedCreds.error?.includes('credentials'));
-
-  const badQuery = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://abc.supabase.co?foo=bar',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(badQuery.configured, false);
-
-  const badPath = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://abc.supabase.co/rest/v1',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(badPath.configured, false);
-
-  const badKey = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://abc.supabase.co',
-    ATAX_SUPABASE_SECRET_KEY: 'too-short-secret',
-  });
-  assert.equal(badKey.configured, false);
-  assert.equal(badKey.error?.includes('too-short-secret'), false);
-
-  const valid = inspectSupabaseConnection({
-    ATAX_SUPABASE_URL: 'https://abc.supabase.co/',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_0123456789abcdef',
-  });
-  assert.equal(valid.configured, true);
-  assert.equal(valid.hostLabel, 'abc.supabase.co');
-  assert.equal(valid.baseUrl, 'https://abc.supabase.co');
-  assert.equal(valid.hostLabel?.includes('sb_secret_mock_key_0123456789abcdef'), false);
-});
-
-test('validateProviderInput accepts github, cloudflare, and vercel and enforces strict formats', () => {
-  const gh = validateProviderInput({
-    ownerSubject: 'atax-operator',
-    provider: 'github',
-    alias: 'personal',
-    credential: 'ghp_1234567890abcdef123456',
-    actorSubject: 'atax-operator',
-    accountId: 'dinilmusick',
-  });
-  assert.equal(gh.provider, 'github');
-  assert.equal(gh.alias, 'PERSONAL');
-
-  const vc = validateProviderInput({
-    ownerSubject: 'atax-operator',
-    provider: 'vercel',
-    alias: 'TEAM_PROD',
-    credential: 'vercel_secret_token_123456',
-    actorSubject: 'atax-operator',
-  });
-  assert.equal(vc.provider, 'vercel');
-
-  assert.throws(() =>
-    validateProviderInput({
-      ownerSubject: 'atax-operator',
-      provider: 'aws',
-      alias: 'PROD',
-      credential: '12345678901234567',
-      actorSubject: 'atax-operator',
-    })
-  );
-
-  assert.throws(() =>
-    validateProviderInput({
-      ownerSubject: 'atax-operator',
-      provider: 'cloudflare',
-      alias: '1BAD',
-      credential: '12345678901234567',
-      actorSubject: 'atax-operator',
-    })
-  );
-});
-
-test('createVaultService calls canonical Supabase PostgREST RPCs without leaking secrets', async () => {
-  const secretKey = 'sb_secret_test_key_0123456789abcdef';
-  const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: unknown }> = [];
-  let ownerSubjectInSettings = 'old-owner';
-  let enabledState = true;
-
-  const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const headers = (init?.headers || {}) as Record<string, string>;
-    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
-    calls.push({ url, method: init?.method || 'GET', headers, body });
-
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_runtime_config_v1')) {
-      return Response.json({
-        settings: { MCP_OWNER_SUBJECT: ownerSubjectInSettings, OTHER_SETTING: 'keep' },
-        accounts: [
-          {
-            provider: 'github',
-            alias: 'PERSONAL',
-            token: 'ghp_super_secret_token_value',
-          },
-        ],
-      });
-    }
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_set_settings_v1')) {
-      assert.equal(typeof body.settings_in, 'object');
-      assert.equal(Array.isArray(body.settings_in), false);
-      ownerSubjectInSettings = body.settings_in.MCP_OWNER_SUBJECT;
-      return new Response(null, { status: 204 });
-    }
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_upsert_provider_v1')) {
-      return Response.json('11111111-1111-4111-8111-111111111111');
-    }
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_provider_summary_v1')) {
-      return Response.json([
-        {
-          id: '11111111-1111-4111-8111-111111111111',
-          provider: 'github',
-          alias: 'PERSONAL',
-          accountId: 'dinilmusick',
-          enabled: enabledState,
-          createdAt: '2026-11-23T00:00:00Z',
-          updatedAt: '2026-11-23T00:00:00Z',
-        },
-      ]);
-    }
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_set_provider_enabled_v1')) {
-      enabledState = Boolean(body.enabled_in);
-      return new Response(null, { status: 204 });
-    }
-    if (url.endsWith('/rest/v1/rpc/atax_mcp_delete_provider_v1')) {
-      if (body.alias_in === 'MISSING') {
-        return Response.json({ code: 'P0001', message: 'Provider account not found' }, { status: 400 });
+  const ledgerFactory = async () => ({
+    ping: async () => true,
+    rpc: async (name: string, params: Record<string,unknown> = {}) => {
+      state.providerCalls.push({name,params});
+      if (name === 'atax_mcp_instance_auth_status_v1') {
+        return {passkeyConfigured: state.passkeyConfigured};
       }
-      return new Response(null, { status: 204 });
-    }
-    if (url === 'https://api.github.com/user') {
-      return Response.json({ login: 'dinilmusick' });
-    }
-    return new Response('Not found', { status: 404 });
-  }) as typeof fetch;
-
-  const vault = createVaultService(
-    {
-      ATAX_SUPABASE_URL: 'https://abc.supabase.co',
-      ATAX_SUPABASE_SECRET_KEY: secretKey,
+      if (name === 'atax_mcp_verify_instance_passkey_v1') {
+        return params.passkey_in === state.validPasskey
+          ? {ok:true,reason:null}
+          : {ok:false,reason:'invalid'};
+      }
+      if (name === 'atax_mcp_create_instance_session_v1') {
+        state.createdSessionHash = String(params.session_hash_in);
+        state.sessionValid = true;
+        return null;
+      }
+      if (name === 'atax_mcp_validate_instance_session_v1') {
+        return state.sessionValid && !state.revoked;
+      }
+      if (name === 'atax_mcp_revoke_instance_session_v1') {
+        state.revoked = true;
+        state.sessionValid = false;
+        return null;
+      }
+      if (name === 'atax_mcp_instance_owner_subject_v1') return 'canonical-owner';
+      if (name === 'atax_mcp_provider_summary_v1') {
+        return [{
+          id:'a1',
+          provider:'github',
+          alias:'PRIMARY',
+          accountId:'dinilmusick',
+          enabled:true,
+          createdAt:'2026-11-25T00:00:00Z',
+          updatedAt:'2026-11-25T00:00:00Z',
+        }];
+      }
+      if (name === 'atax_mcp_upsert_provider_v1') return '11111111-1111-4111-8111-111111111111';
+      return null;
     },
-    fakeFetch
-  );
-
-  const saved = await vault.upsertSecret({
-    ownerSubject: 'atax-operator',
-    provider: 'github',
-    alias: 'PERSONAL',
-    credential: 'ghp_super_secret_token_value',
-    actorSubject: 'atax-operator',
-    accountId: 'dinilmusick',
   });
-  assert.equal(saved.alias, 'PERSONAL');
-  assert.equal(saved.id, '11111111-1111-4111-8111-111111111111');
-  assert.equal(ownerSubjectInSettings, 'atax-operator');
 
-  const upsertCall = calls.find((c) => c.url.endsWith('/rest/v1/rpc/atax_mcp_upsert_provider_v1'));
-  assert.ok(upsertCall);
-  assert.equal(upsertCall.headers.apikey, secretKey);
-  assert.equal(upsertCall.headers.Authorization, `Bearer ${secretKey}`);
+  const vaultFactory = () => ({
+    listAccounts: async () => [{
+      id:'a1',provider:'github',alias:'PRIMARY',accountId:'dinilmusick',
+      enabled:true,createdAt:'2026-11-25T00:00:00Z',updatedAt:'2026-11-25T00:00:00Z'
+    }],
+    upsertSecret: async (input: Record<string,unknown>) => {
+      state.providerCalls.push({name:'vault.upsertSecret',params:input});
+      return {id:'a1',provider:String(input.provider),alias:String(input.alias),
+        accountId:input.accountId ? String(input.accountId) : null,enabled:true};
+    },
+    setAccountEnabled: async (...args: unknown[]) => {
+      state.providerCalls.push({name:'vault.setAccountEnabled',params:{args:args as unknown as Record<string,unknown>}});
+    },
+    deleteAccount: async (...args: unknown[]) => {
+      state.providerCalls.push({name:'vault.deleteAccount',params:{args:args as unknown as Record<string,unknown>}});
+    },
+    testAccountConnection: async (...args: unknown[]) => {
+      state.providerCalls.push({name:'vault.testAccountConnection',params:{args:args as unknown as Record<string,unknown>}});
+      return {ok:true,provider:'github',alias:'PRIMARY',statusCode:200,
+        summary:'Verified GitHub account @dinilmusick',checkedAt:'2026-11-25T00:00:00Z'};
+    },
+  });
 
-  const list = await vault.listAccounts('atax-operator');
-  assert.equal(list.length, 1);
-  assert.equal('token' in (list[0] as unknown as Record<string, unknown>), false);
+  const env = {ATAX_SUPABASE_CONNECTION_URL:'postgresql://db-user:db-pass@db.vcaerawuwffziufvpbvw.supabase.co/postgres?sslmode=require'};
+  const controller = createSettingsControlPlane(env, fetch, ledgerFactory, vaultFactory);
+  return {controller,state};
+}
 
-  await vault.setAccountEnabled('atax-operator', 'github', 'PERSONAL', false, 'atax-operator');
-  assert.equal(enabledState, false);
+function req(url:string, init:RequestInit={}) {
+  return new Request(url, init);
+}
 
-  await vault.deleteAccount('atax-operator', 'github', 'PERSONAL', 'atax-operator');
-  await assert.rejects(
-    () => vault.deleteAccount('atax-operator', 'github', 'MISSING', 'atax-operator'),
-    (err: unknown) => err instanceof VaultError && err.statusCode === 400 && err.message === 'Provider account not found'
-  );
-
-  const probe = await vault.testAccountConnection('atax-operator', 'github', 'PERSONAL');
-  assert.equal(probe.ok, true);
-  assert.equal(probe.summary, 'Verified GitHub account @dinilmusick');
-  assert.equal(JSON.stringify(probe).includes('ghp_super_secret_token_value'), false);
+test('status is structured, backend-owned, and never exposes legacy env requirements', async () => {
+  const {controller} = makeFixture();
+  const result = await controller.status(req('https://atax.example/api/settings/status'));
+  assert.equal(result.httpStatus,200);
+  assert.deepEqual(result.status.backend,{configured:true,reachable:true});
+  assert.deepEqual(result.status.authentication,{required:true,authenticated:false});
+  assert.deepEqual(result.status.providers,{github:true,cloudflare:true,vercel:false});
+  assert.equal(JSON.stringify(result).includes('ATAX_SUPABASE_SECRET_KEY'),false);
+  assert.equal(JSON.stringify(result).includes('operatorClaimed'),false);
 });
 
-test('createVaultService scrubs secrets and URLs from upstream PostgREST errors', async () => {
-  const secretKey = 'sb_secret_leaky_key_0123456789abcdef';
-  const baseUrl = 'https://abc.supabase.co';
-  const fakeFetch = (async () =>
-    Response.json(
-      {
-        message: `Failure calling ${baseUrl} with key ${secretKey} Bearer secret_jwt_token postgresql://postgres:pw@db.abc.supabase.co/postgres`,
-      },
-      { status: 500 }
-    )) as typeof fetch;
-
-  const vault = createVaultService(
-    {
-      ATAX_SUPABASE_URL: baseUrl,
-      ATAX_SUPABASE_SECRET_KEY: secretKey,
-    },
-    fakeFetch
+test('valid passkey creates durable opaque cookie session; plaintext passkey never enters response', async () => {
+  const {controller,state} = makeFixture();
+  const result=await controller.unlock(
+    req('https://atax.example/api/settings/auth/unlock',{method:'POST',headers:{origin:'https://atax.example'}}),
+    'correct-passkey-123'
   );
+  assert.equal(result.status,200);
+  assert.deepEqual(result.body.ok,true);
+  assert.equal(JSON.stringify(result.body).includes('correct-passkey-123'),false);
+  const cookie=result.headers.get('set-cookie');
+  assert.ok(cookie);
+  const parsed=parseCookies(new Headers({cookie:cookie!.split(';')[0]}));
+  assert.match(parsed.atax_settings_session,/^[0-9a-f]{64}$/);
+  assert.equal(state.createdSessionHash?.length,64);
+  assert.notEqual(state.createdSessionHash,parsed.atax_settings_session);
+  assert.match(cookie!,/HttpOnly/);
+  assert.match(cookie!,/Secure/);
+  assert.match(cookie!,/SameSite=Strict/);
+});
 
-  await assert.rejects(
-    () => vault.listAccounts('atax-operator'),
-    (err: unknown) => {
-      assert.ok(err instanceof VaultError);
-      assert.equal(err.statusCode, 502);
-      assert.equal(err.message.includes(secretKey), false);
-      assert.equal(err.message.includes(baseUrl), false);
-      assert.equal(err.message.includes('postgresql://'), false);
-      assert.equal(err.message.includes('secret_jwt_token'), false);
-      return true;
-    }
+test('wrong passkey is rejected and never issues a session', async () => {
+  const {controller,state}=makeFixture();
+  const result=await controller.unlock(
+    req('https://atax.example/api/settings/auth/unlock',{method:'POST',headers:{origin:'https://atax.example'}}),
+    'wrong-passkey-123'
   );
+  assert.equal(result.status,401);
+  assert.equal(result.headers.get('set-cookie'),null);
+  assert.equal(state.createdSessionHash,null);
+});
 
-  const scrubbed = sanitizeVaultMessage(
-    `url=${baseUrl}/x key=${secretKey} Bearer abc.def.ghi`,
-    secretKey,
-    baseUrl
+test('expired or revoked session is denied; logout revokes it server-side', async () => {
+  const {controller,state}=makeFixture();
+  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'correct-passkey-123');
+  const cookie=unlock.headers.get('set-cookie')!.split(';')[0];
+  const list=await controller.listProviders(req('https://atax.example/api/settings/providers',{headers:{cookie}}));
+  assert.equal(list.status,200);
+  state.sessionValid=false;
+  const denied=await controller.listProviders(req('https://atax.example/api/settings/providers',{headers:{cookie}}));
+  assert.equal(denied.status,401);
+  state.sessionValid=true;
+  state.revoked=false;
+  const logout=await controller.logout(req('https://atax.example/api/settings/auth/logout',{method:'POST',headers:{cookie,origin:'https://atax.example'}}));
+  assert.equal(logout.status,200);
+  assert.equal(state.revoked,true);
+  const revoked=await controller.listProviders(req('https://atax.example/api/settings/providers',{headers:{cookie}}));
+  assert.equal(revoked.status,401);
+});
+
+test('cross-origin mutation is rejected before credential persistence', async () => {
+  const {controller,state}=makeFixture();
+  const result=await controller.upsertProvider(
+    req('https://atax.example/api/settings/providers',{method:'POST',headers:{origin:'https://evil.example'}}),
+    {provider:'github',alias:'WORK',credential:'ghp_secret_value_123456789',accountId:'org'}
   );
-  assert.equal(scrubbed.includes(secretKey), false);
-  assert.equal(scrubbed.includes(baseUrl), false);
-  assert.equal(scrubbed.includes('abc.def.ghi'), false);
+  assert.equal(result.status,403);
+  assert.equal(state.providerCalls.some(x=>x.name==='vault.upsertSecret'),false);
+});
+
+test('provider mutations never accept a browser owner subject', async () => {
+  const {controller,state}=makeFixture();
+  const unlock=await controller.unlock(req('https://atax.example/api/settings/auth/unlock',{method:'POST'}),'correct-passkey-123');
+  const cookie=unlock.headers.get('set-cookie')!.split(';')[0];
+  const result=await controller.upsertProvider(
+    req('https://atax.example/api/settings/providers',{method:'POST',headers:{origin:'https://atax.example',cookie}}),
+    {provider:'github',alias:'WORK',credential:'ghp_secret_value_123456789',accountId:'org',ownerSubject:'attacker',actorSubject:'attacker'}
+  );
+  assert.equal(result.status,201);
+  const call=state.providerCalls.find(x=>x.name==='vault.upsertSecret');
+  assert.ok(call);
+  assert.equal(call.params.ownerSubject,undefined);
+  assert.equal(call.params.actorSubject,undefined);
+});
+
+test('same control plane exposes only GitHub and Cloudflare as operational providers', async () => {
+  const {controller}=makeFixture();
+  assert.deepEqual((await controller.status(req('https://atax.example/api/settings/status'))).status.providers,
+    {github:true,cloudflare:true,vercel:false});
 });
