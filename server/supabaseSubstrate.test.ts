@@ -1,19 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSubstrateService } from './supabaseSubstrate.ts';
+import { createSubstrateService, STATIC_QUERIES } from './supabaseSubstrate.ts';
 
 function makeEnv() {
   return {
-    ATAX_SUPABASE_URL: 'https://vcaerawuwffziufvpbvw.supabase.co',
-    ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_1234567890abcdef',
+    ATAX_SUPABASE_CONNECTION_URL:
+      'postgresql://test-user:test-pass@db.vcaerawuwffziufvpbvw.supabase.co/postgres?sslmode=require',
   };
+}
+
+function makeLedgerFactory(mockFetcher: typeof fetch) {
+  return async () => ({
+    async query(sql: string) {
+      const entry = [...(STATIC_QUERIES as Map<string,string>).entries()].find(([, value]) => value === sql);
+      if (!entry) throw new Error('Unknown test SQL query');
+      const response = await mockFetcher(
+        `https://vcaerawuwffziufvpbvw.supabase.co/rest/v1/${entry[0]}`,
+      );
+      if (!response.ok) throw new Error(await response.text());
+      return (await response.json()) as Array<Record<string, unknown>>;
+    },
+    async rpc(name: string, _params: Record<string, unknown> = {}) {
+      const response = await mockFetcher(
+        `https://vcaerawuwffziufvpbvw.supabase.co/rest/v1/rpc/${name}`,
+      );
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json();
+    },
+    async ping() { return true; },
+  });
 }
 
 test('getSystemsGraph queries Data API tables and maps subsystems, functions, relationships, and wormholes', async () => {
   const mockFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const headers = (init?.headers || {}) as Record<string, string>;
-    assert.equal(headers.apikey, makeEnv().ATAX_SUPABASE_SECRET_KEY);
+    assert.equal(headers.apikey, makeEnv().ATAX_SUPABASE_CONNECTION_URL);
     assert.equal(headers.Authorization, `Bearer ${makeEnv().ATAX_SUPABASE_SECRET_KEY}`);
 
     if (url.includes('/rest/v1/universes?')) {
@@ -112,7 +134,7 @@ test('getSystemsGraph queries Data API tables and maps subsystems, functions, re
     return Response.json([]);
   }) as typeof fetch;
 
-  const svc = createSubstrateService(makeEnv(), mockFetcher);
+  const svc = createSubstrateService(makeEnv(), undefined, makeLedgerFactory(mockFetcher));
   const res = await svc.getSystemsGraph();
 
   assert.equal(res.universes.length, 1);
@@ -151,7 +173,7 @@ test('getSystemsGraph falls back to agent_context_overview() RPC when direct RES
     return new Response('permission denied', { status: 403 });
   }) as typeof fetch;
 
-  const svc = createSubstrateService(makeEnv(), mockFetcher);
+  const svc = createSubstrateService(makeEnv(), undefined, makeLedgerFactory(mockFetcher));
   const res = await svc.getSystemsGraph();
   assert.equal(res.systems.length, 1);
   assert.equal(res.systems[0].name, 'RPC System');
@@ -269,7 +291,7 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
     return Response.json([]);
   }) as typeof fetch;
 
-  const svc = createSubstrateService(makeEnv(), mockFetcher);
+  const svc = createSubstrateService(makeEnv(), undefined, makeLedgerFactory(mockFetcher));
   const res = await svc.getVisionsGoalsGraph();
 
   // Never select secret claim or verification tokens
@@ -327,7 +349,7 @@ test('getSkillsCatalog queries skills registry via Data API and falls back clean
     return Response.json([]);
   }) as typeof fetch;
 
-  const svc1 = createSubstrateService(makeEnv(), directFetch);
+  const svc1 = createSubstrateService(makeEnv(), undefined, makeLedgerFactory(directFetch));
   const directRes = await svc1.getSkillsCatalog();
   assert.equal(directRes.skills.length, 1);
   assert.deepEqual(directRes.categories, ['Coordination']);
@@ -342,19 +364,19 @@ test('getSkillsCatalog queries skills registry via Data API and falls back clean
     return new Response('permission denied', { status: 403 });
   }) as typeof fetch;
 
-  const svc2 = createSubstrateService(makeEnv(), rpcFetch);
+  const svc2 = createSubstrateService(makeEnv(), undefined, makeLedgerFactory(rpcFetch));
   const rpcRes = await svc2.getSkillsCatalog();
   assert.equal(rpcRes.skills.length, 1);
   assert.equal(rpcRes.skills[0].slug, 'fallback-skill');
 });
 
-test('createSubstrateService rejects unconfigured env with Data API instructions', async () => {
+test('createSubstrateService rejects unconfigured env with PostgreSQL connection URI error', async () => {
   const svc = createSubstrateService({});
   await assert.rejects(
     () => svc.getSystemsGraph(),
     (err: unknown) =>
       err instanceof Error &&
-      err.message.includes('ATAX_SUPABASE_URL') &&
+      err.message.includes('ATAX_SUPABASE_CONNECTION_URL') &&
       err.message.includes('ATAX_SUPABASE_SECRET_KEY')
   );
 });
