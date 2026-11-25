@@ -401,6 +401,8 @@ export function SettingsView({
 
   const activeProviderMeta = PROVIDERS.find((p) => p.id === activeProvider) || PROVIDERS[0];
   const providerAccounts = accounts.filter((a) => a.provider === activeProvider);
+  const requiredEnvVars =
+    status?.requiredEnvVars?.length ? status.requiredEnvVars : ['ATAX_SUPABASE_URL', 'ATAX_SUPABASE_SECRET_KEY'];
 
   return (
     <div className="space-y-4 pb-6">
@@ -411,8 +413,8 @@ export function SettingsView({
             Vault &amp; Environment Settings
           </h1>
           <p className="text-xs text-[#B9AA9D] mt-0.5 max-w-2xl">
-            Single-variable bootstrap configuration. Provider secrets for GitHub, Cloudflare, and
-            Vercel are encrypted in Supabase Vault and never exposed to the browser bundle.
+            Data API bootstrap configuration. Provider secrets for GitHub, Cloudflare, and Vercel
+            are encrypted in Supabase Vault and never exposed to the browser bundle.
           </p>
         </div>
 
@@ -447,7 +449,7 @@ export function SettingsView({
         </div>
       )}
 
-      {/* Single Environment Variable Contract Panel */}
+      {/* Runtime Environment Contract Panel */}
       <section
         aria-labelledby="env-contract-heading"
         className="border border-[#3F2E27] bg-[#1A110E] px-4 py-3.5 rounded-sm"
@@ -458,14 +460,25 @@ export function SettingsView({
               <Database className="w-3.5 h-3.5 text-[#DF6B3B]" />
               <span>RUNTIME ENVIRONMENT CONTRACT</span>
               <span aria-hidden="true">·</span>
-              <span>1 VARIABLE REQUIRED</span>
+              <span>
+                {requiredEnvVars.length}{' '}
+                {requiredEnvVars.length === 1 ? 'VARIABLE REQUIRED' : 'VARIABLES REQUIRED'}
+              </span>
             </div>
-            <h2 id="env-contract-heading" className="font-display text-base font-semibold text-[#F7F3EC]">
-              ATAX_SUPABASE_CONNECTION_URL
+            <h2
+              id="env-contract-heading"
+              className="font-display text-base font-semibold text-[#F7F3EC] flex flex-wrap items-center gap-2"
+            >
+              {requiredEnvVars.map((envVar, idx) => (
+                <React.Fragment key={envVar}>
+                  {idx > 0 && <span className="text-[#9C8A7C] font-mono text-sm">+</span>}
+                  <span className="font-mono">{envVar}</span>
+                </React.Fragment>
+              ))}
             </h2>
             <p className="text-xs text-[#B9AA9D] max-w-2xl">
-              Only this TLS PostgreSQL connection URI is needed to boot ATAX. All GitHub,
-              Cloudflare, and Vercel secrets live encrypted inside Supabase Vault.
+              These HTTPS Supabase Data API credentials are all that is needed to boot ATAX. All
+              GitHub, Cloudflare, and Vercel secrets live encrypted inside Supabase Vault.
             </p>
           </div>
 
@@ -652,8 +665,14 @@ export function SettingsView({
 
           {!status?.supabaseConfigured && (
             <div className="border border-[#8C5B23] bg-[#23190E] px-3.5 py-2 text-xs text-[#F2EBE1] rounded-sm">
-              Supabase backend awaiting <span className="font-mono text-[#E09F3E]">ATAX_SUPABASE_CONNECTION_URL</span>.
-              Set that single variable in your environment to encrypt and persist{' '}
+              Supabase backend awaiting{' '}
+              {requiredEnvVars.map((envVar, idx) => (
+                <React.Fragment key={envVar}>
+                  {idx > 0 && ' and '}
+                  <span className="font-mono text-[#E09F3E]">{envVar}</span>
+                </React.Fragment>
+              ))}
+              . Set these variables in your environment to encrypt and persist{' '}
               {activeProviderMeta.label} secrets to Supabase Vault.
             </div>
           )}
@@ -776,7 +795,7 @@ export function SettingsView({
                     ? 'Encrypting in Supabase Vault...'
                     : status?.supabaseConfigured
                     ? `Save ${activeProviderMeta.label} Secret`
-                    : `Save ${activeProviderMeta.label} Secret (Requires Supabase URL)`}
+                    : `Save ${activeProviderMeta.label} Secret (Requires Supabase Data API Config)`}
                 </button>
               </form>
             </section>

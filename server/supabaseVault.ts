@@ -1,5 +1,3 @@
-import postgres from 'postgres';
-
 export type ProviderType = 'github' | 'cloudflare' | 'vercel';
 
 export interface ProviderAccountSummary {
@@ -16,7 +14,8 @@ export interface ConnectionInspection {
   configured: boolean;
   hostLabel: string | null;
   error: string | null;
-  connectionUrl: string | null;
+  baseUrl: string | null;
+  apiKey: string | null;
 }
 
 export interface UpsertSecretInput {
@@ -48,127 +47,206 @@ export interface ProviderTestResult {
   checkedAt: string;
 }
 
-export interface SqlRunner {
-  unsafe: (query: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>>;
+export class VaultError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.name = 'VaultError';
+    this.statusCode = statusCode;
+  }
 }
 
 const VALID_PROVIDERS = new Set<ProviderType>(['github', 'cloudflare', 'vercel']);
 const ALIAS_REGEX = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ACCOUNT_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SUBJECT_REGEX = /^[\w.@:-]{3,200}$/;
+const SECRET_KEY_REGEX = /^[A-Za-z0-9._\-+/=]{20,8192}$/;
+
+export function sanitizeVaultMessage(
+  rawMessage: string,
+  apiKey?: string | null,
+  baseUrl?: string | null
+): string {
+  if (typeof rawMessage !== 'string' || !rawMessage.trim()) {
+    return '';
+  }
+  let sanitized = rawMessage;
+  if (apiKey) {
+    sanitized = sanitized.split(apiKey).join('[REDACTED]');
+  }
+  if (baseUrl) {
+    sanitized = sanitized.split(baseUrl).join('[REDACTED]');
+  }
+  return sanitized
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[REDACTED_URL]')
+    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, '[REDACTED_URI]')
+    .replace(/Bearer\s+[A-Za-z0-9._\-+/=]+/gi, 'Bearer [REDACTED]')
+    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, '[REDACTED_JWT]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
 
 export function inspectSupabaseConnection(
   env: Record<string, string | undefined> = process.env
 ): ConnectionInspection {
-  const raw = (env.ATAX_SUPABASE_CONNECTION_URL || '').trim();
-  if (!raw) {
+  const urlRaw = (env.ATAX_SUPABASE_URL || '').trim();
+  const keyRaw = (env.ATAX_SUPABASE_SECRET_KEY || '').trim();
+
+  if (!urlRaw && !keyRaw) {
     return {
       configured: false,
       hostLabel: null,
       error: null,
-      connectionUrl: null,
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  if (raw.length < 24 || raw.length > 8192) {
+  if (!urlRaw || !keyRaw) {
     return {
       configured: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_CONNECTION_URL has an invalid length.',
-      connectionUrl: null,
+      error: 'Both ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY are required.',
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  let url: URL;
+  if (urlRaw.length > 2048) {
+    return {
+      configured: false,
+      hostLabel: null,
+      error: 'ATAX_SUPABASE_URL exceeds maximum length.',
+      baseUrl: null,
+      apiKey: null,
+    };
+  }
+
+  let parsed: URL;
   try {
-    url = new URL(raw);
+    parsed = new URL(urlRaw);
   } catch {
     return {
       configured: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_CONNECTION_URL must be a valid PostgreSQL connection URI.',
-      connectionUrl: null,
+      error: 'ATAX_SUPABASE_URL must be a valid HTTPS Supabase URL.',
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
+  if (parsed.protocol !== 'https:') {
     return {
       configured: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_CONNECTION_URL must use postgres:// or postgresql:// with TLS.',
-      connectionUrl: null,
+      error: 'ATAX_SUPABASE_URL must use https://.',
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  if (!url.hostname || !url.username || !url.password || !url.pathname || url.pathname === '/') {
+  const hostname = parsed.hostname;
+  if (
+    !hostname ||
+    !(hostname.endsWith('.supabase.co') || hostname.endsWith('.supabase.com')) ||
+    hostname.includes('..') ||
+    hostname.startsWith('.')
+  ) {
     return {
       configured: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_CONNECTION_URL must include host, credentials, and database name.',
-      connectionUrl: null,
+      error: 'ATAX_SUPABASE_URL must use a canonical .supabase.co or .supabase.com hostname.',
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  const sslMode = url.searchParams.get('sslmode');
-  if (sslMode && !['require', 'verify-ca', 'verify-full'].includes(sslMode)) {
+  if (parsed.username || parsed.password) {
     return {
       configured: false,
       hostLabel: null,
-      error: 'ATAX_SUPABASE_CONNECTION_URL requires TLS (sslmode=require or verify-full).',
-      connectionUrl: null,
+      error: 'ATAX_SUPABASE_URL must not contain user credentials.',
+      baseUrl: null,
+      apiKey: null,
     };
   }
 
-  // Cloudflare Workers use the IPv4 shared Supavisor transaction pooler.
-  // Normalize a session-pooler URL supplied during initial deployment so the
-  // Worker does not depend on a manual secret rotation just to change ports.
-  if (url.hostname.endsWith('.pooler.supabase.com') && (url.port === '5432' || url.port === '')) {
-    url.port = '6543';
-    url.searchParams.set('sslmode', 'require');
+  if (parsed.search || parsed.hash) {
+    return {
+      configured: false,
+      hostLabel: null,
+      error: 'ATAX_SUPABASE_URL must not contain query parameters or hash.',
+      baseUrl: null,
+      apiKey: null,
+    };
+  }
+
+  if (parsed.pathname !== '' && parsed.pathname !== '/') {
+    return {
+      configured: false,
+      hostLabel: null,
+      error: 'ATAX_SUPABASE_URL must not include a subpath.',
+      baseUrl: null,
+      apiKey: null,
+    };
+  }
+
+  if (!SECRET_KEY_REGEX.test(keyRaw)) {
+    return {
+      configured: false,
+      hostLabel: null,
+      error: 'ATAX_SUPABASE_SECRET_KEY must be 20-8192 valid token characters.',
+      baseUrl: null,
+      apiKey: null,
+    };
   }
 
   return {
     configured: true,
-    hostLabel: url.hostname,
+    hostLabel: hostname,
     error: null,
-    connectionUrl: url.toString(),
+    baseUrl: parsed.origin,
+    apiKey: keyRaw,
   };
 }
 
 export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsertInput {
   const providerRaw = typeof input.provider === 'string' ? input.provider.trim().toLowerCase() : '';
   if (!VALID_PROVIDERS.has(providerRaw as ProviderType)) {
-    throw new Error('Unsupported provider. Choose github, cloudflare, or vercel.');
+    throw new VaultError('Unsupported provider. Choose github, cloudflare, or vercel.', 400);
   }
   const provider = providerRaw as ProviderType;
 
   const alias = typeof input.alias === 'string' ? input.alias.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
-    throw new Error(
-      'Alias must start with A-Z and contain 1-48 uppercase letters, digits, or underscores.'
+    throw new VaultError(
+      'Alias must start with A-Z and contain 1-48 uppercase letters, digits, or underscores.',
+      400
     );
   }
 
   const credential = typeof input.credential === 'string' ? input.credential.trim() : '';
   if (credential.length < 16 || credential.length > 8192) {
-    throw new Error('Secret token must be between 16 and 8192 characters.');
+    throw new VaultError('Secret token must be between 16 and 8192 characters.', 400);
   }
 
   const ownerSubject = typeof input.ownerSubject === 'string' ? input.ownerSubject.trim() : '';
   if (!SUBJECT_REGEX.test(ownerSubject)) {
-    throw new Error('Owner subject must be 3-200 characters (letters, digits, ., _, @, :, -).');
+    throw new VaultError('Owner subject must be 3-200 characters (letters, digits, ., _, @, :, -).', 400);
   }
 
   const actorSubject = typeof input.actorSubject === 'string' ? input.actorSubject.trim() : '';
   if (!SUBJECT_REGEX.test(actorSubject)) {
-    throw new Error('Actor subject is invalid.');
+    throw new VaultError('Actor subject is invalid.', 400);
   }
 
   let accountId: string | null = null;
   if (input.accountId !== undefined && input.accountId !== null && String(input.accountId).trim() !== '') {
     const trimmed = String(input.accountId).trim();
     if (!ACCOUNT_ID_REGEX.test(trimmed)) {
-      throw new Error('Account ID may only contain letters, digits, _ or - (max 128 chars).');
+      throw new VaultError('Account ID may only contain letters, digits, _ or - (max 128 chars).', 400);
     }
     accountId = trimmed;
   }
@@ -190,58 +268,108 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
 } {
   const provider = typeof providerRaw === 'string' ? providerRaw.trim().toLowerCase() : '';
   if (!VALID_PROVIDERS.has(provider as ProviderType)) {
-    throw new Error('Unsupported provider.');
+    throw new VaultError('Unsupported provider.', 400);
   }
   const alias = typeof aliasRaw === 'string' ? aliasRaw.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
-    throw new Error('Invalid account alias.');
+    throw new VaultError('Invalid account alias.', 400);
   }
   return { provider: provider as ProviderType, alias };
 }
 
-const pools = new Map<string, ReturnType<typeof postgres>>();
-
-export function getSqlRunner(connectionUrl: string): SqlRunner {
-  let sql = pools.get(connectionUrl);
-  if (!sql) {
-    sql = postgres(connectionUrl, {
-      ssl: 'require',
-      max: 1,
-      prepare: false,
-      connect_timeout: 8,
-      idle_timeout: 20,
-    });
-    pools.set(connectionUrl, sql);
-  }
-  return sql as unknown as SqlRunner;
-}
-
 export function createVaultService(
   env: Record<string, string | undefined> = process.env,
-  runnerFactory: (url: string) => SqlRunner = getSqlRunner,
   fetcher: typeof fetch = fetch
 ) {
-  function requireRunner(): SqlRunner {
+  function requireDataApiConfig(): { baseUrl: string; apiKey: string } {
     const inspection = inspectSupabaseConnection(env);
-    if (!inspection.configured || !inspection.connectionUrl) {
-      throw new Error(
+    if (!inspection.configured || !inspection.baseUrl || !inspection.apiKey) {
+      throw new VaultError(
         inspection.error ||
-          'Supabase backend is not configured. Set ATAX_SUPABASE_CONNECTION_URL in your environment.'
+          'Supabase backend is not configured. Set ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
+        503
       );
     }
-    return runnerFactory(inspection.connectionUrl);
+    return { baseUrl: inspection.baseUrl, apiKey: inspection.apiKey };
+  }
+
+  async function callRpc(name: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    const { baseUrl, apiKey } = requireDataApiConfig();
+    let res: Response;
+    try {
+      res = await fetcher(`${baseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
+        method: 'POST',
+        headers: {
+          apikey: apiKey,
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      const rawMsg = err instanceof Error ? err.message : 'Supabase Data API request failed.';
+      const safeMsg = sanitizeVaultMessage(rawMsg, apiKey, baseUrl);
+      throw new VaultError(
+        safeMsg ? `Supabase Data API request failed: ${safeMsg}` : 'Supabase Data API request failed.',
+        502
+      );
+    }
+
+    if (res.status === 204) {
+      return null;
+    }
+
+    const text = await res.text().catch(() => '');
+    if (!res.ok) {
+      let parsedBody: Record<string, unknown> | null = null;
+      if (text) {
+        try {
+          const candidate = JSON.parse(text);
+          if (candidate && typeof candidate === 'object') {
+            parsedBody = candidate as Record<string, unknown>;
+          }
+        } catch {
+          parsedBody = null;
+        }
+      }
+      const rawMessage =
+        typeof parsedBody?.message === 'string' && parsedBody.message ? parsedBody.message : text;
+      const pgCode = typeof parsedBody?.code === 'string' ? parsedBody.code : '';
+      const sanitized = sanitizeVaultMessage(rawMessage, apiKey, baseUrl);
+
+      if (res.status === 400 && (pgCode === 'P0001' || sanitized)) {
+        throw new VaultError(sanitized || 'Vault operation rejected.', 400);
+      }
+      if (res.status === 409 || pgCode === '23505') {
+        throw new VaultError(sanitized || 'Duplicate Vault record.', 409);
+      }
+      throw new VaultError(
+        sanitized
+          ? `Supabase Data API error (HTTP ${res.status}): ${sanitized}`
+          : `Supabase Data API error (HTTP ${res.status}).`,
+        502
+      );
+    }
+
+    if (!text || !text.trim()) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new VaultError('Invalid JSON response from Supabase Data API.', 502);
+    }
   }
 
   async function listAccounts(ownerSubject: string): Promise<ProviderAccountSummary[]> {
     if (!SUBJECT_REGEX.test(ownerSubject)) {
-      throw new Error('Invalid owner subject.');
+      throw new VaultError('Invalid owner subject.', 400);
     }
-    const sql = requireRunner();
-    const rows = await sql.unsafe(
-      'SELECT public.atax_mcp_provider_summary_v1($1) AS result',
-      [ownerSubject]
-    );
-    const raw = rows[0]?.result;
+    const raw = await callRpc('atax_mcp_provider_summary_v1', {
+      owner_subject_in: ownerSubject,
+    });
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
@@ -256,10 +384,11 @@ export function createVaultService(
       }));
   }
 
-  async function ensureOwnerPolicy(sql: SqlRunner, ownerSubject: string, actorSubject: string): Promise<void> {
+  async function ensureOwnerPolicy(ownerSubject: string, actorSubject: string): Promise<void> {
     try {
-      const cfgRows = await sql.unsafe('SELECT public.atax_mcp_runtime_config_v1() AS cfg', []);
-      const cfg = cfgRows[0]?.cfg as { settings?: Record<string, unknown> } | undefined;
+      const cfg = (await callRpc('atax_mcp_runtime_config_v1', {})) as
+        | { settings?: Record<string, unknown> }
+        | null;
       const existingSettings =
         cfg && cfg.settings && typeof cfg.settings === 'object' && !Array.isArray(cfg.settings)
           ? { ...cfg.settings }
@@ -267,10 +396,10 @@ export function createVaultService(
 
       if (!existingSettings.MCP_OWNER_SUBJECT || existingSettings.MCP_OWNER_SUBJECT !== ownerSubject) {
         existingSettings.MCP_OWNER_SUBJECT = ownerSubject;
-        await sql.unsafe('SELECT public.atax_mcp_set_settings_v1($1::jsonb, $2)', [
-          JSON.stringify(existingSettings),
-          actorSubject,
-        ]);
+        await callRpc('atax_mcp_set_settings_v1', {
+          settings_in: existingSettings,
+          actor_subject_in: actorSubject,
+        });
       }
     } catch {
       // Non-fatal if caller role has upsert grants without settings admin grant
@@ -285,26 +414,23 @@ export function createVaultService(
     enabled: boolean;
   }> {
     const valid = validateProviderInput(input);
-    const sql = requireRunner();
+    requireDataApiConfig();
 
-    await ensureOwnerPolicy(sql, valid.ownerSubject, valid.actorSubject);
+    await ensureOwnerPolicy(valid.ownerSubject, valid.actorSubject);
 
-    const rows = await sql.unsafe(
-      'SELECT public.atax_mcp_upsert_provider_v1($1, $2, $3, $4, $5, $6, $7) AS id',
-      [
-        valid.ownerSubject,
-        valid.provider,
-        valid.alias,
-        valid.credential,
-        valid.actorSubject,
-        valid.accountId,
-        valid.enabled,
-      ]
-    );
+    const idRaw = await callRpc('atax_mcp_upsert_provider_v1', {
+      owner_subject_in: valid.ownerSubject,
+      provider_in: valid.provider,
+      alias_in: valid.alias,
+      credential_in: valid.credential,
+      actor_subject_in: valid.actorSubject,
+      account_id_in: valid.accountId,
+      enabled_in: valid.enabled,
+    });
 
-    const id = rows[0]?.id ? String(rows[0].id) : '';
+    const id = typeof idRaw === 'string' ? idRaw : idRaw ? String(idRaw) : '';
     if (!id) {
-      throw new Error('Supabase Vault did not return a credential reference.');
+      throw new VaultError('Supabase Vault did not return a credential reference.', 502);
     }
 
     return {
@@ -324,14 +450,16 @@ export function createVaultService(
     actorSubject: string
   ): Promise<void> {
     if (!SUBJECT_REGEX.test(ownerSubject) || !SUBJECT_REGEX.test(actorSubject)) {
-      throw new Error('Invalid subject.');
+      throw new VaultError('Invalid subject.', 400);
     }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    const sql = requireRunner();
-    await sql.unsafe(
-      'SELECT public.atax_mcp_set_provider_enabled_v1($1, $2, $3, $4, $5)',
-      [ownerSubject, provider, alias, Boolean(enabled), actorSubject]
-    );
+    await callRpc('atax_mcp_set_provider_enabled_v1', {
+      owner_subject_in: ownerSubject,
+      provider_in: provider,
+      alias_in: alias,
+      enabled_in: Boolean(enabled),
+      actor_subject_in: actorSubject,
+    });
   }
 
   async function deleteAccount(
@@ -341,16 +469,15 @@ export function createVaultService(
     actorSubject: string
   ): Promise<void> {
     if (!SUBJECT_REGEX.test(ownerSubject) || !SUBJECT_REGEX.test(actorSubject)) {
-      throw new Error('Invalid subject.');
+      throw new VaultError('Invalid subject.', 400);
     }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    const sql = requireRunner();
-    await sql.unsafe('SELECT public.atax_mcp_delete_provider_v1($1, $2, $3, $4)', [
-      ownerSubject,
-      provider,
-      alias,
-      actorSubject,
-    ]);
+    await callRpc('atax_mcp_delete_provider_v1', {
+      owner_subject_in: ownerSubject,
+      provider_in: provider,
+      alias_in: alias,
+      actor_subject_in: actorSubject,
+    });
   }
 
   async function testAccountConnection(
@@ -359,17 +486,15 @@ export function createVaultService(
     aliasRaw: string
   ): Promise<ProviderTestResult> {
     if (!SUBJECT_REGEX.test(ownerSubject)) {
-      throw new Error('Invalid owner subject.');
+      throw new VaultError('Invalid owner subject.', 400);
     }
     const { provider, alias } = validateProviderKey(providerRaw, aliasRaw);
-    const sql = requireRunner();
-    const rows = await sql.unsafe('SELECT public.atax_mcp_runtime_config_v1() AS cfg', []);
-    const cfg = rows[0]?.cfg as
+    const cfg = (await callRpc('atax_mcp_runtime_config_v1', {})) as
       | {
           settings?: Record<string, unknown>;
           accounts?: Array<{ provider: string; alias: string; token: string }>;
         }
-      | undefined;
+      | null;
 
     const configuredOwner =
       typeof cfg?.settings?.MCP_OWNER_SUBJECT === 'string'

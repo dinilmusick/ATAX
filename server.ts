@@ -4,26 +4,36 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OperatorAuthStore, isSameOriginRequest } from './server/operatorAuth.ts';
 import { createSubstrateService } from './server/supabaseSubstrate.ts';
-import { createVaultService, inspectSupabaseConnection } from './server/supabaseVault.ts';
+import { VaultError, createVaultService, inspectSupabaseConnection } from './server/supabaseVault.ts';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
-// Load optional .env file only for ATAX_SUPABASE_CONNECTION_URL if not already set
-function hydrateSingleEnvFromDotEnv() {
-  if (process.env.ATAX_SUPABASE_CONNECTION_URL) return;
+// Load optional .env file for ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY if not already set
+function hydrateEnvFromDotEnv() {
+  if (process.env.ATAX_SUPABASE_URL && process.env.ATAX_SUPABASE_SECRET_KEY) return;
   const envPath = resolve(rootDir, '.env');
   if (!existsSync(envPath)) return;
   try {
-    const lines = readFileSync(envPath, 'utf8').split('\n');
+    const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
       const idx = trimmed.indexOf('=');
       if (idx > 0) {
         const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        if (key === 'ATAX_SUPABASE_CONNECTION_URL' && val && !process.env.ATAX_SUPABASE_CONNECTION_URL) {
-          process.env.ATAX_SUPABASE_CONNECTION_URL = val;
+        let val = trimmed.slice(idx + 1).trim();
+        if (
+          (val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))
+        ) {
+          val = val.slice(1, -1).trim();
+        }
+        if (
+          (key === 'ATAX_SUPABASE_URL' || key === 'ATAX_SUPABASE_SECRET_KEY') &&
+          val &&
+          !process.env[key]
+        ) {
+          process.env[key] = val;
         }
       }
     }
@@ -32,7 +42,7 @@ function hydrateSingleEnvFromDotEnv() {
   }
 }
 
-hydrateSingleEnvFromDotEnv();
+hydrateEnvFromDotEnv();
 
 const authStore = new OperatorAuthStore();
 const vaultService = createVaultService(process.env);
@@ -78,7 +88,7 @@ app.get('/api/settings/status', (req, res) => {
     operatorClaimed: authStore.isClaimed(),
     authenticated: claims !== null,
     operatorSubject: claims ? claims.sub : authStore.getClaimedSubject(),
-    requiredEnvVars: ['ATAX_SUPABASE_CONNECTION_URL'],
+    requiredEnvVars: ['ATAX_SUPABASE_URL', 'ATAX_SUPABASE_SECRET_KEY'],
   });
 });
 
@@ -148,7 +158,7 @@ app.post('/api/settings/providers', requireOperator, async (req, res) => {
     res.status(503).json({
       error:
         conn.error ||
-        'Supabase backend is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment to save secrets to Supabase Vault.',
+        'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment to save secrets to Supabase Vault.',
     });
     return;
   }
@@ -175,7 +185,12 @@ app.post('/api/settings/providers', requireOperator, async (req, res) => {
     res.status(201).json({ account: saved });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to store secret in Supabase Vault.';
-    const status = message.includes('must ') || message.includes('Unsupported') ? 400 : 502;
+    const status =
+      err instanceof VaultError
+        ? err.statusCode
+        : message.includes('must ') || message.includes('Unsupported')
+        ? 400
+        : 502;
     res.status(status).json({ error: message });
   }
 });
@@ -183,7 +198,11 @@ app.post('/api/settings/providers', requireOperator, async (req, res) => {
 app.patch('/api/settings/providers/:provider/:alias/enabled', requireOperator, async (req, res) => {
   const conn = inspectSupabaseConnection(process.env);
   if (!conn.configured) {
-    res.status(503).json({ error: 'Supabase backend is not connected.' });
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
+    });
     return;
   }
   const body = (req.body || {}) as { enabled?: unknown };
@@ -203,14 +222,19 @@ app.patch('/api/settings/providers/:provider/:alias/enabled', requireOperator, a
     res.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to update provider state.';
-    res.status(400).json({ error: message });
+    const status = err instanceof VaultError ? err.statusCode : 400;
+    res.status(status).json({ error: message });
   }
 });
 
 app.delete('/api/settings/providers/:provider/:alias', requireOperator, async (req, res) => {
   const conn = inspectSupabaseConnection(process.env);
   if (!conn.configured) {
-    res.status(503).json({ error: 'Supabase backend is not connected.' });
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
+    });
     return;
   }
   const actorSubject = String(res.locals.operatorSubject || 'atax-operator');
@@ -224,14 +248,19 @@ app.delete('/api/settings/providers/:provider/:alias', requireOperator, async (r
     res.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to delete provider secret.';
-    res.status(400).json({ error: message });
+    const status = err instanceof VaultError ? err.statusCode : 400;
+    res.status(status).json({ error: message });
   }
 });
 
 app.post('/api/settings/providers/:provider/:alias/test', requireOperator, async (req, res) => {
   const conn = inspectSupabaseConnection(process.env);
   if (!conn.configured) {
-    res.status(503).json({ error: 'Supabase backend is not connected.' });
+    res.status(503).json({
+      error:
+        conn.error ||
+        'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
+    });
     return;
   }
   const actorSubject = String(res.locals.operatorSubject || 'atax-operator');
@@ -244,7 +273,8 @@ app.post('/api/settings/providers/:provider/:alias/test', requireOperator, async
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Connection verification failed.';
-    res.status(400).json({ error: message });
+    const status = err instanceof VaultError ? err.statusCode : 400;
+    res.status(status).json({ error: message });
   }
 });
 
@@ -254,7 +284,7 @@ app.get('/api/substrate/systems', async (_req, res) => {
     res.status(503).json({
       error:
         conn.error ||
-        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
     });
     return;
   }
@@ -273,7 +303,7 @@ app.get('/api/substrate/visions-goals', async (_req, res) => {
     res.status(503).json({
       error:
         conn.error ||
-        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
     });
     return;
   }
@@ -293,7 +323,7 @@ app.get('/api/substrate/skills', async (_req, res) => {
     res.status(503).json({
       error:
         conn.error ||
-        'Supabase ledger is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.',
+        'Supabase ledger is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.',
     });
     return;
   }
