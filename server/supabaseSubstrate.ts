@@ -194,7 +194,7 @@ type SafeQueryResult =
   | { ok: true; rows: Array<Record<string, unknown>> }
   | { ok: false; error: string };
 
-const STATIC_QUERIES = new Map<string,string>([
+export const STATIC_QUERIES = new Map<string,string>([
   ['universes?select=id,universe_key,name,description,status&status=neq.retired&order=created_at.asc',
    "select id,universe_key,name,description,status from public.universes where status <> 'retired' order by created_at asc"],
   ['systems?select=id,universe_id,system_key,parent_system_id,name,system_type,description,status,parameters,context_version&status=neq.retired&order=created_at.asc,name.asc',
@@ -241,13 +241,16 @@ const STATIC_QUERIES = new Map<string,string>([
    'select id,slug,name,tool_type from public.skill_tools'],
 ]);
 
-function createDataApiClient(env: Record<string,string|undefined>){
+function createDataApiClient(
+  env: Record<string,string|undefined>,
+  ledgerFactory: (env: Record<string,string|undefined>) => Promise<any> = openLedger,
+){
   return {
     async selectAll(pathWithQuery: string): Promise<SafeQueryResult>{
       const sql=STATIC_QUERIES.get(pathWithQuery);
       if(!sql) return {ok:false,error:'Unsupported substrate query.'};
       try{
-        const db=await openLedger(env);
+        const db=await ledgerFactory(env);
         return {ok:true,rows:await db.query(sql)};
       }catch(err){
         return {ok:false,error:err instanceof Error?err.message:'Supabase PostgreSQL query failed.'};
@@ -255,7 +258,7 @@ function createDataApiClient(env: Record<string,string|undefined>){
     },
     async callRpc(name:string,body:Record<string,unknown>={}):Promise<SafeQueryResult>{
       try{
-        const db=await openLedger(env);
+        const db=await ledgerFactory(env);
         return {ok:true,rows:[{value:await db.rpc(name,body)}]};
       }catch(err){
         return {ok:false,error:err instanceof Error?err.message:'Supabase PostgreSQL RPC failed.'};
@@ -266,10 +269,11 @@ function createDataApiClient(env: Record<string,string|undefined>){
 
 export function createSubstrateService(
   env: Record<string, string | undefined> = process.env,
-  _fetcher?: typeof fetch
+  _fetcher?: typeof fetch,
+  ledgerFactory: (env: Record<string,string|undefined>) => Promise<any> = openLedger,
 ) {
   function resolveApi(): ReturnType<typeof createDataApiClient> {
-    return createDataApiClient(env);
+    return createDataApiClient(env, ledgerFactory);
   }
 
   async function getSystemsGraph(): Promise<SystemsSubstrateResponse> {
