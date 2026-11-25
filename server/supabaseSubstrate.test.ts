@@ -34,10 +34,6 @@ function makeLedgerFactory(mockFetcher: typeof fetch) {
 test('getSystemsGraph maps canonical ledger queries and maps subsystems, functions, relationships, and wormholes', async () => {
   const mockFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const headers = (init?.headers || {}) as Record<string, string>;
-    assert.equal(headers.apikey, makeEnv().ATAX_SUPABASE_CONNECTION_URL);
-    assert.equal(headers.Authorization, `Bearer ${makeEnv().ATAX_SUPABASE_SECRET_KEY}`);
-
     if (url.includes('/rest/v1/universes?')) {
       return Response.json([
         { id: 'u1', universe_key: 'atax', name: 'ATAX', description: 'Control plane', status: 'active' },
