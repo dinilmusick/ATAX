@@ -8,7 +8,8 @@
     "start": "node server.ts",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test server/*.test.ts"
   },
   "dependencies": {
     "@types/express": "^5.0.6",
@@ -19,7 +20,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.1",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "postgres": "4.1.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
