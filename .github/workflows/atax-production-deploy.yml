@@ -83,20 +83,81 @@ jobs:
             npx --yes wrangler@4 secret put ATAX_SUPABASE_CONNECTION_URL --config wrangler.toml
       - name: Deploy production Worker
         run: npx --yes wrangler@4 deploy --config wrangler.toml
-      - name: Verify deployed Worker
+      - name: Verify deployed Worker and settings control plane
         shell: bash
         run: |
           set -euo pipefail
-          health="$(curl --fail --silent --show-error --max-time 20 https://atax.dextro1n1laevo.workers.dev/health)"
+          base="https://atax.dextro1n1laevo.workers.dev"
+
+          health="$(curl --fail --silent --show-error --max-time 20 "$base/health")"
           echo "$health"
           echo "$health" | grep -q '"version":"1.1.0"'
           echo "$health" | grep -q '"settings":{"routes":true,"authentication":"instance-passkey"}'
-          status_code="$(curl --silent --output /tmp/atax-settings-status.json --write-out '%{http_code}' --max-time 20 https://atax.dextro1n1laevo.workers.dev/api/settings/status)"
+
+          status_code="$(curl --silent --output /tmp/atax-settings-status.json --write-out '%{http_code}' --max-time 20 "$base/api/settings/status")"
           echo "settings status HTTP $status_code"
-          cat /tmp/atax-settings-status.json
           test "$status_code" != "404"
           grep -q '"backend"' /tmp/atax-settings-status.json
-          providers_code="$(curl --silent --output /tmp/atax-providers.json --write-out '%{http_code}' --max-time 20 https://atax.dextro1n1laevo.workers.dev/api/settings/providers)"
-          echo "providers HTTP $providers_code"
-          cat /tmp/atax-providers.json
-          test "$providers_code" = "401"
+          grep -q '"authentication"' /tmp/atax-settings-status.json
+
+          providers_unauth_code="$(curl --silent --output /tmp/atax-providers-unauth.json --write-out '%{http_code}' --max-time 20 "$base/api/settings/providers")"
+          echo "unauthenticated providers HTTP $providers_unauth_code"
+          test "$providers_unauth_code" = "401"
+
+          substrate_code="$(curl --silent --output /tmp/atax-visions-goals.json --write-out '%{http_code}' --max-time 20 "$base/api/substrate/visions-goals")"
+          echo "visions-goals HTTP $substrate_code"
+          test "$substrate_code" != "404"
+
+          rm -f /tmp/atax-cookie.txt /tmp/atax-unlock.json /tmp/atax-providers-auth.json /tmp/atax-provider-test.json /tmp/atax-logout.json /tmp/atax-production-evidence.json
+
+          unlock_payload="$(jq -nc --arg passkey "$ATAX_INSTANCE_PASSKEY" '{passkey:$passkey}')"
+          unlock_code="$(curl --silent --output /tmp/atax-unlock.json --write-out '%{http_code}' --max-time 20 \
+            -c /tmp/atax-cookie.txt -b /tmp/atax-cookie.txt \
+            -H 'Content-Type: application/json' \
+            -X POST "$base/api/settings/auth/unlock" \
+            --data-binary "$unlock_payload")"
+          echo "unlock HTTP $unlock_code"
+          test "$unlock_code" = "200"
+          ! grep -Fq "$ATAX_INSTANCE_PASSKEY" /tmp/atax-unlock.json
+
+          providers_auth_code="$(curl --silent --output /tmp/atax-providers-auth.json --write-out '%{http_code}' --max-time 20 -b /tmp/atax-cookie.txt "$base/api/settings/providers")"
+          echo "authenticated providers HTTP $providers_auth_code"
+          test "$providers_auth_code" = "200"
+          ! grep -Eiq '"(token|credential|secret|decrypted_secret)"[[:space:]]*:' /tmp/atax-providers-auth.json
+
+          IFS=$'\t' read -r provider_name provider_alias <<<"$(jq -r '.accounts[] | select(.enabled==true and (.provider=="github" or .provider=="cloudflare")) | [.provider,.alias] | @tsv' /tmp/atax-providers-auth.json | head -n1)"
+          test -n "$provider_name"
+          test -n "$provider_alias"
+          provider_path="$(jq -rn --arg p "$provider_name" --arg a "$provider_alias" '"\($p|@uri)/\($a|@uri)"')"
+          provider_test_code="$(curl --silent --output /tmp/atax-provider-test.json --write-out '%{http_code}' --max-time 20 \
+            -b /tmp/atax-cookie.txt \
+            -X POST "$base/api/settings/providers/$provider_path/test")"
+          echo "provider test HTTP $provider_test_code"
+          test "$provider_test_code" = "200"
+          ! grep -Eiq '"(token|credential|secret|decrypted_secret)"[[:space:]]*:' /tmp/atax-provider-test.json
+
+          logout_code="$(curl --silent --output /tmp/atax-logout.json --write-out '%{http_code}' --max-time 20 \
+            -b /tmp/atax-cookie.txt -c /tmp/atax-cookie.txt -X POST "$base/api/settings/auth/logout")"
+          echo "logout HTTP $logout_code"
+          test "$logout_code" = "200"
+
+          jq -n \
+            --arg commit "$GITHUB_SHA" \
+            --arg version "1.1.0" \
+            --arg provider "$provider_name" \
+            --arg alias "$provider_alias" \
+            --argjson providerTest "$(cat /tmp/atax-provider-test.json)" \
+            --argjson status "$(cat /tmp/atax-settings-status.json)" \
+            --arg visions "$substrate_code" \
+            '{commit:$commit,workerVersion:$version,settingsStatusHttp:200,unauthenticatedProvidersHttp:401,authenticatedProvidersHttp:200,providerTestHttp:200,providerTestOk:($providerTest.ok == true),providerTestProvider:$provider,providerTestAlias:$alias,providerTestSummary:($providerTest.summary // ""),visionsGoalsHttp:($visions|tonumber),backend:($status.backend // null),authentication:($status.authentication // null),providers:($status.providers // null)}' > /tmp/atax-production-evidence.json
+
+          cat /tmp/atax-production-evidence.json
+          rm -f /tmp/atax-cookie.txt /tmp/atax-unlock.json
+
+      - name: Upload production verification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atax-production-settings-evidence-${{ github.sha }}
+          path: /tmp/atax-production-evidence.json
+          if-no-files-found: error
+          retention-days: 14
