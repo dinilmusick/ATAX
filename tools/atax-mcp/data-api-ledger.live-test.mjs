@@ -1,19 +1,14 @@
-// Runs only against isolated local Supabase created by database-integration.yml.
-// No remote credentials or production effects. Read-only PostgREST RPC contract tests.
+// Runs only against the isolated local Supabase created by database-integration.yml.
+// No remote credentials or production effects. PostgreSQL canonical RPC contract tests.
 import assert from 'node:assert/strict';
-import { createLedgerDb } from './data-api-ledger.mjs';
+import { createLedgerDb, parseDataApiConfig } from './data-api-ledger.mjs';
 
-const baseUrl = process.env.ATAX_SUPABASE_URL || process.env.SUPABASE_URL;
-const apiKey = process.env.ATAX_SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
-
-if (!baseUrl || !(baseUrl.startsWith('http://127.0.0.1:') || baseUrl.startsWith('http://localhost:'))) {
-  throw Error('Disposable local Supabase Data API URL (127.0.0.1 / localhost) required');
-}
-if (!apiKey) {
-  throw Error('Disposable local Supabase service key required');
+const connectionString = process.env.ATAX_SUPABASE_CONNECTION_URL;
+if (!connectionString || !connectionString.startsWith('postgresql://127.0.0.1:') && !connectionString.startsWith('postgresql://postgres:postgres@127.0.0.1:')) {
+  throw Error('Disposable local PostgreSQL connection URI required');
 }
 
-const db = createLedgerDb({ baseUrl: baseUrl.replace(/\/+$/, ''), apiKey });
+const db = createLedgerDb(parseDataApiConfig({ATAX_SUPABASE_CONNECTION_URL:connectionString}));
 
 const overview = await db.rpc('goal_ledger_overview', { tags_in: null });
 assert.ok(overview !== undefined, 'migrated canonical goal overview must resolve');
@@ -26,11 +21,14 @@ const socket = await db.rpc('atax_mcp_socket_config_v1', {});
 assert.ok(socket && typeof socket === 'object');
 assert.ok(!Object.hasOwn(socket, 'accounts'));
 
+const authStatus = await db.rpc('atax_mcp_instance_auth_status_v1', {});
+assert.equal(Boolean(authStatus?.passkeyConfigured), false, 'fresh disposable database must not have a configured instance passkey');
+
 const search = await db.skills('synthetic-nonexistent-slug');
 assert.ok(Array.isArray(search), 'skills search must be an array');
 
-const catalog = await db.request('skills?select=id,name');
-assert.ok(Array.isArray(catalog), 'published skills catalog must be array');
+const catalog = await db.skillsCatalog();
+assert.ok(Array.isArray(catalog), 'published skills catalog must be an array');
 
 const tagged = await db.rpc('goal_ledger_overview', { tags_in: ['test-nonmatching'] });
 assert.ok(tagged !== undefined);
@@ -40,4 +38,4 @@ await assert.rejects(
   err => err?.name === 'LedgerError' && err?.status === 404
 );
 
-console.log('ATAX Supabase Data API PostgREST RPC and restricted config smoke passed');
+console.log('ATAX disposable Supabase PostgreSQL RPC and restricted configuration smoke passed');
