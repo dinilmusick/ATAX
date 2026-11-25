@@ -18,7 +18,7 @@ async function getAppSession(page) {
       credentials: 'include', cache: 'no-store', headers: { accept: 'application/json' },
     });
     const body = await response.json().catch(() => ({}));
-    return { status: response.status, authenticated: body.authenticated === true };
+    return { status: response.status, authenticated: body.authenticated === true, error: typeof body.error === 'string' ? body.error : '' };
   });
 }
 
@@ -57,12 +57,12 @@ for (const [name, app, mode] of apps) {
     await page.waitForURL(url => url.origin === new URL(app).origin && !url.pathname.startsWith('/api/auth/'), { timeout: 65000 });
     stage = 'session';
     const session = await getAppSession(page);
-    if (session.status !== 200 || !session.authenticated) throw new Error('APP_SESSION_ABSENT');
+    if (session.status !== 200 || !session.authenticated) { const path = new URL(page.url()).pathname; throw new Error('APP_SESSION_ABSENT:' + session.status + ':' + (session.error || 'NO_ERROR') + ':' + path); }
     report.push(name + ': OAuth callback + authenticated session PASS');
     stage = 'refresh';
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 35000 });
     const persistent = await getAppSession(page);
-    if (persistent.status !== 200 || !persistent.authenticated) throw new Error('SESSION_NOT_PERSISTENT');
+    if (persistent.status !== 200 || !persistent.authenticated) { const path = new URL(page.url()).pathname; throw new Error('SESSION_NOT_PERSISTENT:' + persistent.status + ':' + (persistent.error || 'NO_ERROR') + ':' + path); }
     report.push(name + ': session persists after refresh PASS');
     stage = 'logout';
     const logout = await page.evaluate(async () => {
@@ -78,8 +78,9 @@ for (const [name, app, mode] of apps) {
     const revoked = await getAppSession(page);
     if (revoked.status !== 401 || revoked.authenticated) throw new Error('LOGOUT_SESSION_STILL_ACTIVE');
     report.push(name + ': logout revokes app session PASS');
-  } catch {
-    failures.push(name + ':' + stage.toUpperCase().replace(/[^A-Z_]/g, '_') + '_FAILED');
+  } catch (error) {
+    const safe = error instanceof Error ? error.message.replace(/[^A-Z0-9_:./-]/gi, '_').slice(0, 180) : 'UNKNOWN';
+    failures.push(name + ':' + stage.toUpperCase().replace(/[^A-Z_]/g, '_') + '_FAILED:' + safe);
   } finally {
     await context.close();
   }
