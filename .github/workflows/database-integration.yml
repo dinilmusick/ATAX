@@ -1,4 +1,5 @@
 name: Disposable Supabase Database Integration
+# Reconciler trigger: keep candidate-head disposable database verification runnable on every candidate push.
 
 on:
   push:
