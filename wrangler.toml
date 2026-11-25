@@ -9,5 +9,5 @@ directory = "./dist"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/health", "/mcp", "/socket", "/.well-known/*"]
 
-# Production MCP database transport: Supabase Data API / PostgREST over HTTPS.
-# Set ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY via `wrangler secret put`. Never in [vars].
+# Production database transport: Supabase PostgreSQL over TLS.
+# Set ATAX_SUPABASE_CONNECTION_URL via `wrangler secret put`. Never in [vars].
