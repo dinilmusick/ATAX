@@ -203,85 +203,316 @@ async function safeQuery(
   }
 }
 
+type SafeQueryResult =
+  | { ok: true; rows: Array<Record<string, unknown>> }
+  | { ok: false; error: string };
+
+interface DataApiConfig {
+  baseUrl: string;
+  apiKey: string;
+}
+
+function inspectDataApiConfig(env: Record<string, string | undefined>): DataApiConfig | null {
+  const urlRaw = (env.ATAX_SUPABASE_URL || env.SUPABASE_URL || '').trim();
+  const keyRaw = (
+    env.ATAX_SUPABASE_SECRET_KEY ||
+    env.SUPABASE_SERVICE_ROLE_KEY ||
+    env.SUPABASE_SECRET_KEY ||
+    ''
+  ).trim();
+  if (!urlRaw || !keyRaw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(urlRaw);
+  } catch {
+    throw new Error('Invalid ATAX_SUPABASE_URL configured for Data API.');
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    !(parsed.hostname.endsWith('.supabase.co') || parsed.hostname.endsWith('.supabase.com'))
+  ) {
+    throw new Error('ATAX_SUPABASE_URL must be a canonical HTTPS Supabase URL.');
+  }
+  return { baseUrl: parsed.origin, apiKey: keyRaw };
+}
+
+function createDataApiClient(config: DataApiConfig, fetcher: typeof fetch) {
+  const headers = {
+    apikey: config.apiKey,
+    Authorization: `Bearer ${config.apiKey}`,
+    Accept: 'application/json',
+  };
+
+  async function selectAll(pathWithQuery: string): Promise<SafeQueryResult> {
+    try {
+      const pageSize = 1000;
+      const rows: Array<Record<string, unknown>> = [];
+      for (let offset = 0; offset < 20000; offset += pageSize) {
+        const res = await fetcher(`${config.baseUrl}/rest/v1/${pathWithQuery}`, {
+          method: 'GET',
+          headers: { ...headers, Range: `${offset}-${offset + pageSize - 1}` },
+        });
+        if (!res.ok) {
+          return { ok: false, error: `Supabase Data API query failed (HTTP ${res.status})` };
+        }
+        const chunk = (await res.json()) as unknown;
+        if (!Array.isArray(chunk)) {
+          return { ok: false, error: 'Unexpected response format from Supabase Data API' };
+        }
+        for (const item of chunk) {
+          rows.push(asRecord(item));
+        }
+        if (chunk.length < pageSize) break;
+      }
+      return { ok: true, rows };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Supabase Data API request failed',
+      };
+    }
+  }
+
+  async function callRpc(name: string, body: Record<string, unknown> = {}): Promise<SafeQueryResult> {
+    try {
+      const res = await fetcher(`${config.baseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        return { ok: false, error: `Supabase Data API RPC failed (HTTP ${res.status})` };
+      }
+      const data = await res.json();
+      return { ok: true, rows: [{ value: data }] };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Supabase Data API RPC request failed',
+      };
+    }
+  }
+
+  return { selectAll, callRpc };
+}
+
 export function createSubstrateService(
   env: Record<string, string | undefined> = process.env,
-  runnerFactory: (url: string) => SqlRunner = getSqlRunner
+  runnerFactory?: (url: string) => SqlRunner,
+  fetcher: typeof fetch = fetch
 ) {
-  function requireRunner(): SqlRunner {
+  function resolveBackend():
+    | { mode: 'sql'; sql: SqlRunner }
+    | { mode: 'data-api'; api: ReturnType<typeof createDataApiClient> } {
+    if (runnerFactory) {
+      const conn = inspectSupabaseConnection(env);
+      if (!conn.configured || !conn.connectionUrl) {
+        throw new Error(
+          conn.error ||
+            'Supabase backend is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.'
+        );
+      }
+      return { mode: 'sql', sql: runnerFactory(conn.connectionUrl) };
+    }
+
+    const dataApiCfg = inspectDataApiConfig(env);
+    if (dataApiCfg) {
+      return { mode: 'data-api', api: createDataApiClient(dataApiCfg, fetcher) };
+    }
+
     const conn = inspectSupabaseConnection(env);
     if (!conn.configured || !conn.connectionUrl) {
       throw new Error(
         conn.error ||
-          'Supabase backend is not connected. Configure ATAX_SUPABASE_CONNECTION_URL in your environment.'
+          'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY (or ATAX_SUPABASE_CONNECTION_URL) in your environment.'
       );
     }
-    return runnerFactory(conn.connectionUrl);
+    return { mode: 'sql', sql: getSqlRunner(conn.connectionUrl) };
   }
 
   async function getSystemsGraph(): Promise<SystemsSubstrateResponse> {
-    const sql = requireRunner();
+    const backend = resolveBackend();
     const fetchedAt = new Date().toISOString();
 
-    const universesRes = await safeQuery(
-      sql,
-      `SELECT id::text, universe_key, name, coalesce(description, '') AS description, status
-       FROM public.universes
-       WHERE status <> 'retired'
-       ORDER BY created_at ASC`
-    );
+    let universesRes: SafeQueryResult;
+    let systemsRes: SafeQueryResult;
+    let fnRes: SafeQueryResult;
+    let memCountsRes: SafeQueryResult;
+    let constraintsRes: SafeQueryResult;
+    let relRes: SafeQueryResult;
+    let wormholesRes: SafeQueryResult;
+    let overviewRpc: SafeQueryResult | null = null;
 
-    const systemsRes = await safeQuery(
-      sql,
-      `SELECT s.id::text, s.universe_id::text, u.name AS universe_name, s.system_key,
-              s.parent_system_id::text, s.name, s.system_type, s.description, s.status,
-              s.parameters, s.context_version
-       FROM public.systems s
-       LEFT JOIN public.universes u ON u.id = s.universe_id
-       WHERE s.status <> 'retired'
-       ORDER BY s.created_at ASC, s.name ASC`
-    );
+    if (backend.mode === 'data-api') {
+      const { api } = backend;
+      [universesRes, systemsRes] = await Promise.all([
+        api.selectAll(
+          'universes?select=id,universe_key,name,description,status&status=neq.retired&order=created_at.asc'
+        ),
+        api.selectAll(
+          'systems?select=id,universe_id,system_key,parent_system_id,name,system_type,description,status,parameters,context_version&status=neq.retired&order=created_at.asc,name.asc'
+        ),
+      ]);
+      if (systemsRes.ok) {
+        const universeNameById = new Map(
+          (universesRes.ok ? universesRes.rows : []).map((u) => [String(u.id), String(u.name || '')])
+        );
+        systemsRes = {
+          ok: true,
+          rows: systemsRes.rows.map((s) => ({
+            ...s,
+            universe_name: s.universe_id ? universeNameById.get(String(s.universe_id)) ?? null : null,
+          })),
+        };
+        const [rawFns, rawMems, rawCons, rawRels, rawWormholes] = await Promise.all([
+          api.selectAll(
+            'system_functions?select=id,system_id,function_key,name,description,input_contract,output_contract,transformation,status&order=created_at.asc'
+          ),
+          api.selectAll('system_memories?select=system_id,memory_type&status=eq.active'),
+          api.selectAll('system_constraints?select=system_id'),
+          api.selectAll(
+            'system_relationships?select=id,source_system_id,target_system_id,relation_type,description&order=created_at.asc'
+          ),
+          api.selectAll(
+            'system_wormholes?select=id,source_system_id,target_system_id,status,sync_mode,description&status=neq.closed&order=created_at.asc'
+          ),
+        ]);
+        fnRes = rawFns;
+        if (rawMems.ok) {
+          const counts = new Map<string, { active: number; constraint: number }>();
+          for (const m of rawMems.rows) {
+            const sid = String(m.system_id || '');
+            const cur = counts.get(sid) ?? { active: 0, constraint: 0 };
+            cur.active += 1;
+            if (m.memory_type === 'constraint') cur.constraint += 1;
+            counts.set(sid, cur);
+          }
+          memCountsRes = {
+            ok: true,
+            rows: Array.from(counts.entries()).map(([system_id, c]) => ({
+              system_id,
+              active_memories: c.active,
+              constraint_memories: c.constraint,
+            })),
+          };
+        } else {
+          memCountsRes = rawMems;
+        }
+        if (rawCons.ok) {
+          const counts = new Map<string, number>();
+          for (const c of rawCons.rows) {
+            const sid = String(c.system_id || '');
+            counts.set(sid, (counts.get(sid) ?? 0) + 1);
+          }
+          constraintsRes = {
+            ok: true,
+            rows: Array.from(counts.entries()).map(([system_id, cnt]) => ({ system_id, cnt })),
+          };
+        } else {
+          constraintsRes = rawCons;
+        }
+        relRes = rawRels.ok
+          ? {
+              ok: true,
+              rows: rawRels.rows.map((r) => ({
+                ...r,
+                source: r.source_system_id,
+                target: r.target_system_id,
+              })),
+            }
+          : rawRels;
+        wormholesRes = rawWormholes.ok
+          ? {
+              ok: true,
+              rows: rawWormholes.rows.map((w) => ({
+                ...w,
+                source: w.source_system_id,
+                target: w.target_system_id,
+              })),
+            }
+          : rawWormholes;
+      } else {
+        fnRes = { ok: false, error: 'Skipped' };
+        memCountsRes = { ok: false, error: 'Skipped' };
+        constraintsRes = { ok: false, error: 'Skipped' };
+        relRes = { ok: false, error: 'Skipped' };
+        wormholesRes = { ok: false, error: 'Skipped' };
+        const rpc = await api.callRpc('agent_context_overview');
+        overviewRpc = rpc.ok ? { ok: true, rows: [{ overview: rpc.rows[0]?.value }] } : rpc;
+      }
+    } else {
+      const { sql } = backend;
+      universesRes = await safeQuery(
+        sql,
+        `SELECT id::text, universe_key, name, coalesce(description, '') AS description, status
+         FROM public.universes
+         WHERE status <> 'retired'
+         ORDER BY created_at ASC`
+      );
+
+      systemsRes = await safeQuery(
+        sql,
+        `SELECT s.id::text, s.universe_id::text, u.name AS universe_name, s.system_key,
+                s.parent_system_id::text, s.name, s.system_type, s.description, s.status,
+                s.parameters, s.context_version
+         FROM public.systems s
+         LEFT JOIN public.universes u ON u.id = s.universe_id
+         WHERE s.status <> 'retired'
+         ORDER BY s.created_at ASC, s.name ASC`
+      );
+
+      if (systemsRes.ok) {
+        fnRes = await safeQuery(
+          sql,
+          `SELECT f.id::text, f.system_id::text, f.function_key, f.name, f.description,
+                  f.input_contract, f.output_contract, f.transformation, f.status
+           FROM public.system_functions f
+           ORDER BY f.created_at ASC`
+        );
+
+        memCountsRes = await safeQuery(
+          sql,
+          `SELECT system_id::text,
+                  count(*) FILTER (WHERE status = 'active')::int AS active_memories,
+                  count(*) FILTER (WHERE status = 'active' AND memory_type = 'constraint')::int AS constraint_memories
+           FROM public.system_memories
+           GROUP BY system_id`
+        );
+
+        constraintsRes = await safeQuery(
+          sql,
+          `SELECT system_id::text, count(*)::int AS cnt
+           FROM public.system_constraints
+           GROUP BY system_id`
+        );
+
+        relRes = await safeQuery(
+          sql,
+          `SELECT id::text, source_system_id::text AS source, target_system_id::text AS target,
+                  relation_type, description
+           FROM public.system_relationships
+           ORDER BY created_at ASC`
+        );
+
+        wormholesRes = await safeQuery(
+          sql,
+          `SELECT id::text, source_system_id::text AS source, target_system_id::text AS target,
+                  status, sync_mode, coalesce(description, '') AS description
+           FROM public.system_wormholes
+           WHERE status <> 'closed'
+           ORDER BY created_at ASC`
+        );
+      } else {
+        fnRes = { ok: false, error: 'Skipped' };
+        memCountsRes = { ok: false, error: 'Skipped' };
+        constraintsRes = { ok: false, error: 'Skipped' };
+        relRes = { ok: false, error: 'Skipped' };
+        wormholesRes = { ok: false, error: 'Skipped' };
+        overviewRpc = await safeQuery(sql, 'SELECT public.agent_context_overview() AS overview');
+      }
+    }
 
     if (systemsRes.ok) {
-      const fnRes = await safeQuery(
-        sql,
-        `SELECT f.id::text, f.system_id::text, f.function_key, f.name, f.description,
-                f.input_contract, f.output_contract, f.transformation, f.status
-         FROM public.system_functions f
-         ORDER BY f.created_at ASC`
-      );
-
-      const memCountsRes = await safeQuery(
-        sql,
-        `SELECT system_id::text,
-                count(*) FILTER (WHERE status = 'active')::int AS active_memories,
-                count(*) FILTER (WHERE status = 'active' AND memory_type = 'constraint')::int AS constraint_memories
-         FROM public.system_memories
-         GROUP BY system_id`
-      );
-
-      const constraintsRes = await safeQuery(
-        sql,
-        `SELECT system_id::text, count(*)::int AS cnt
-         FROM public.system_constraints
-         GROUP BY system_id`
-      );
-
-      const relRes = await safeQuery(
-        sql,
-        `SELECT id::text, source_system_id::text AS source, target_system_id::text AS target,
-                relation_type, description
-         FROM public.system_relationships
-         ORDER BY created_at ASC`
-      );
-
-      const wormholesRes = await safeQuery(
-        sql,
-        `SELECT id::text, source_system_id::text AS source, target_system_id::text AS target,
-                status, sync_mode, coalesce(description, '') AS description
-         FROM public.system_wormholes
-         WHERE status <> 'closed'
-         ORDER BY created_at ASC`
-      );
 
       const functionsBySystem = new Map<string, SystemFunctionSummary[]>();
       if (fnRes.ok) {
@@ -404,7 +635,11 @@ export function createSubstrateService(
     }
 
     // Fallback to canonical RPC agent_context_overview() if direct table SELECT is restricted
-    const overviewRes = await safeQuery(sql, 'SELECT public.agent_context_overview() AS overview');
+    const overviewRes =
+      overviewRpc ??
+      (backend.mode === 'sql'
+        ? await safeQuery(backend.sql, 'SELECT public.agent_context_overview() AS overview')
+        : { ok: false as const, error: 'Unavailable' });
     if (overviewRes.ok && overviewRes.rows[0]?.overview) {
       const ov = asRecord(overviewRes.rows[0].overview);
       const rawSystems = asArray(ov.systems).map(asRecord);
@@ -478,78 +713,187 @@ export function createSubstrateService(
   }
 
   async function getVisionsGoalsGraph(): Promise<VisionsGoalsSubstrateResponse> {
-    const sql = requireRunner();
+    const backend = resolveBackend();
     const fetchedAt = new Date().toISOString();
     const nowMs = Date.now();
 
-    const visionsRes = await safeQuery(
-      sql,
-      `SELECT id::text, vision_key, title, description, target, status, created_at, updated_at
-       FROM public.visions
-       WHERE status <> 'archived'
-       ORDER BY updated_at DESC`
-    );
+    let visionsRes: SafeQueryResult;
+    let targetsRes: SafeQueryResult;
+    let linksRes: SafeQueryResult;
+    let goalsRes: SafeQueryResult;
+    let tasksRes: SafeQueryResult;
+    let goalDepsRes: SafeQueryResult = { ok: false, error: 'Skipped' };
+    let taskDepsRes: SafeQueryResult = { ok: false, error: 'Skipped' };
+    let budgetsRes: SafeQueryResult = { ok: false, error: 'Skipped' };
+    let atomEdgesRes: SafeQueryResult = { ok: false, error: 'Skipped' };
+    let overviewRpc: SafeQueryResult | null = null;
 
-    const targetsRes = await safeQuery(
-      sql,
-      `SELECT id::text, vision_id::text, parent_target_id::text, target, label
-       FROM public.vision_targets`
-    );
+    if (backend.mode === 'data-api') {
+      const { api } = backend;
+      let rawSystemsRes: SafeQueryResult;
+      [visionsRes, targetsRes, linksRes, goalsRes, tasksRes, rawSystemsRes] = await Promise.all([
+        api.selectAll(
+          'visions?select=id,vision_key,title,description,target,status,created_at,updated_at&status=neq.archived&order=updated_at.desc'
+        ),
+        api.selectAll('vision_targets?select=id,vision_id,parent_target_id,target,label'),
+        api.selectAll('vision_target_goals?select=vision_target_id,goal_id'),
+        api.selectAll(
+          'goals?select=id,goal_key,name,description,status,goal_type,target,user_priority,goal_loop_definition,goal_loop_iteration,system_id,created_at,updated_at&status=not.in.(archived,cancelled)&order=user_priority.desc.nullslast,updated_at.desc'
+        ),
+        api.selectAll(
+          'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,task_type,status,verification_status,priority,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,blocker_notoriety,input_contract,output_contract,required_tools,required_capabilities,acceptance_criteria,verification_plan,loop_definition,task_definition,checkpoints,updated_at&status=not.in.(cancelled,abandoned)&order=priority.asc,created_at.asc'
+        ),
+        api.selectAll('systems?select=id,system_key'),
+      ]);
 
-    const linksRes = await safeQuery(
-      sql,
-      `SELECT vtg.vision_target_id::text, vtg.goal_id::text, vt.vision_id::text, vt.label AS target_label
-       FROM public.vision_target_goals vtg
-       JOIN public.vision_targets vt ON vt.id = vtg.vision_target_id`
-    );
+      if (linksRes.ok && targetsRes.ok) {
+        const targetById = new Map(targetsRes.rows.map((t) => [String(t.id), t]));
+        linksRes = {
+          ok: true,
+          rows: linksRes.rows.map((l) => {
+            const target = targetById.get(String(l.vision_target_id));
+            return {
+              ...l,
+              vision_id: target?.vision_id ?? null,
+              target_label: target?.label ?? '',
+            };
+          }),
+        };
+      }
 
-    const goalsRes = await safeQuery(
-      sql,
-      `SELECT g.id::text, g.goal_key, g.name, g.description, g.status, g.goal_type,
-              g.target, g.user_priority, g.goal_loop_definition, g.goal_loop_iteration,
-              g.system_id::text, s.system_key, g.created_at, g.updated_at
-       FROM public.goals g
-       LEFT JOIN public.systems s ON s.id = g.system_id
-       WHERE g.status NOT IN ('archived', 'cancelled')
-       ORDER BY g.user_priority DESC NULLS LAST, g.updated_at DESC`
-    );
+      if (goalsRes.ok && rawSystemsRes.ok) {
+        const sysKeyById = new Map(
+          rawSystemsRes.rows.map((s) => [String(s.id), String(s.system_key || '')])
+        );
+        goalsRes = {
+          ok: true,
+          rows: goalsRes.rows.map((g) => ({
+            ...g,
+            system_key: g.system_id ? sysKeyById.get(String(g.system_id)) ?? null : null,
+          })),
+        };
+      }
 
-    const tasksRes = await safeQuery(
-      sql,
-      `SELECT t.id::text, t.task_key, t.goal_id::text, t.parent_task_id::text,
-              t.task_name, t.description, t.task_type, t.status, t.verification_status,
-              t.priority, t.claimed_by_agent_id, t.claimed_by_agent_name,
-              t.claimed_at, t.heartbeat_at, t.claim_expires_at, t.current_step, t.blocker,
-              t.blocker_notoriety, t.input_contract, t.output_contract, t.required_tools,
-              t.required_capabilities, t.acceptance_criteria, t.verification_plan,
-              t.loop_definition, t.task_definition, t.checkpoints, t.updated_at
-       FROM public.tasks t
-       WHERE t.status NOT IN ('cancelled', 'abandoned')
-       ORDER BY t.priority ASC, t.created_at ASC`
-    );
+      if (goalsRes.ok && tasksRes.ok) {
+        const [rawGoalDeps, rawTaskDeps, rawBudgets, rawAtomEdges] = await Promise.all([
+          api.selectAll('goal_dependencies?select=id,goal_id,depends_on_goal_id,dependency_type'),
+          api.selectAll('task_dependencies?select=id,task_id,depends_on_task_id,dependency_type'),
+          api.selectAll('socket_task_budgets?select=task_id,max_total,input_used,output_used'),
+          api.selectAll(
+            'socket_atomization_edges?select=source_task_id,target_task_id,dependency_type,source_output,target_input'
+          ),
+        ]);
+        goalDepsRes = rawGoalDeps.ok
+          ? {
+              ok: true,
+              rows: rawGoalDeps.rows.map((d) => ({
+                ...d,
+                target: d.goal_id,
+                source: d.depends_on_goal_id,
+              })),
+            }
+          : rawGoalDeps;
+        taskDepsRes = rawTaskDeps.ok
+          ? {
+              ok: true,
+              rows: rawTaskDeps.rows.map((d) => ({
+                ...d,
+                target: d.task_id,
+                source: d.depends_on_task_id,
+              })),
+            }
+          : rawTaskDeps;
+        budgetsRes = rawBudgets;
+        atomEdgesRes = rawAtomEdges.ok
+          ? {
+              ok: true,
+              rows: rawAtomEdges.rows.map((ae) => ({
+                ...ae,
+                source: ae.source_task_id,
+                target: ae.target_task_id,
+              })),
+            }
+          : rawAtomEdges;
+      } else {
+        const rpc = await api.callRpc('goal_ledger_overview', { tags_in: null });
+        overviewRpc = rpc.ok ? { ok: true, rows: [{ overview: rpc.rows[0]?.value }] } : rpc;
+      }
+    } else {
+      const { sql } = backend;
+      visionsRes = await safeQuery(
+        sql,
+        `SELECT id::text, vision_key, title, description, target, status, created_at, updated_at
+         FROM public.visions
+         WHERE status <> 'archived'
+         ORDER BY updated_at DESC`
+      );
+
+      targetsRes = await safeQuery(
+        sql,
+        `SELECT id::text, vision_id::text, parent_target_id::text, target, label
+         FROM public.vision_targets`
+      );
+
+      linksRes = await safeQuery(
+        sql,
+        `SELECT vtg.vision_target_id::text, vtg.goal_id::text, vt.vision_id::text, vt.label AS target_label
+         FROM public.vision_target_goals vtg
+         JOIN public.vision_targets vt ON vt.id = vtg.vision_target_id`
+      );
+
+      goalsRes = await safeQuery(
+        sql,
+        `SELECT g.id::text, g.goal_key, g.name, g.description, g.status, g.goal_type,
+                g.target, g.user_priority, g.goal_loop_definition, g.goal_loop_iteration,
+                g.system_id::text, s.system_key, g.created_at, g.updated_at
+         FROM public.goals g
+         LEFT JOIN public.systems s ON s.id = g.system_id
+         WHERE g.status NOT IN ('archived', 'cancelled')
+         ORDER BY g.user_priority DESC NULLS LAST, g.updated_at DESC`
+      );
+
+      tasksRes = await safeQuery(
+        sql,
+        `SELECT t.id::text, t.task_key, t.goal_id::text, t.parent_task_id::text,
+                t.task_name, t.description, t.task_type, t.status, t.verification_status,
+                t.priority, t.claimed_by_agent_id, t.claimed_by_agent_name,
+                t.claimed_at, t.heartbeat_at, t.claim_expires_at, t.current_step, t.blocker,
+                t.blocker_notoriety, t.input_contract, t.output_contract, t.required_tools,
+                t.required_capabilities, t.acceptance_criteria, t.verification_plan,
+                t.loop_definition, t.task_definition, t.checkpoints, t.updated_at
+         FROM public.tasks t
+         WHERE t.status NOT IN ('cancelled', 'abandoned')
+         ORDER BY t.priority ASC, t.created_at ASC`
+      );
+
+      if (goalsRes.ok && tasksRes.ok) {
+        goalDepsRes = await safeQuery(
+          sql,
+          `SELECT id::text, goal_id::text AS target, depends_on_goal_id::text AS source, dependency_type
+           FROM public.goal_dependencies`
+        );
+        taskDepsRes = await safeQuery(
+          sql,
+          `SELECT id::text, task_id::text AS target, depends_on_task_id::text AS source, dependency_type
+           FROM public.task_dependencies`
+        );
+        budgetsRes = await safeQuery(
+          sql,
+          `SELECT task_id::text, max_total, input_used, output_used
+           FROM public.socket_task_budgets`
+        );
+        atomEdgesRes = await safeQuery(
+          sql,
+          `SELECT source_task_id::text AS source, target_task_id::text AS target,
+                  dependency_type, source_output, target_input
+           FROM public.socket_atomization_edges`
+        );
+      } else {
+        overviewRpc = await safeQuery(sql, 'SELECT public.goal_ledger_overview(NULL) AS overview');
+      }
+    }
 
     if (goalsRes.ok && tasksRes.ok) {
-      const goalDepsRes = await safeQuery(
-        sql,
-        `SELECT id::text, goal_id::text AS target, depends_on_goal_id::text AS source, dependency_type
-         FROM public.goal_dependencies`
-      );
-      const taskDepsRes = await safeQuery(
-        sql,
-        `SELECT id::text, task_id::text AS target, depends_on_task_id::text AS source, dependency_type
-         FROM public.task_dependencies`
-      );
-      const budgetsRes = await safeQuery(
-        sql,
-        `SELECT task_id::text, max_total, input_used, output_used
-         FROM public.socket_task_budgets`
-      );
-      const atomEdgesRes = await safeQuery(
-        sql,
-        `SELECT source_task_id::text AS source, target_task_id::text AS target,
-                dependency_type, source_output, target_input
-         FROM public.socket_atomization_edges`
-      );
 
       const budgetByTask = new Map<string, TaskContextLimit>();
       if (budgetsRes.ok) {
@@ -731,7 +1075,11 @@ export function createSubstrateService(
     }
 
     // Fallback to canonical goal_ledger_overview(NULL) RPC if direct SELECT is restricted
-    const rpcRes = await safeQuery(sql, 'SELECT public.goal_ledger_overview(NULL) AS overview');
+    const rpcRes =
+      overviewRpc ??
+      (backend.mode === 'sql'
+        ? await safeQuery(backend.sql, 'SELECT public.goal_ledger_overview(NULL) AS overview')
+        : { ok: false as const, error: 'Unavailable' });
     if (rpcRes.ok && rpcRes.rows[0]?.overview) {
       const ov = asRecord(rpcRes.rows[0].overview);
       const rawGoals = asArray(ov.goals).map(asRecord);
@@ -836,32 +1184,96 @@ export function createSubstrateService(
   }
 
   async function getSkillsCatalog(): Promise<SkillsSubstrateResponse> {
-    const sql = requireRunner();
+    const backend = resolveBackend();
     const fetchedAt = new Date().toISOString();
 
-    const skillsRes = await safeQuery(
-      sql,
-      `SELECT k.id, k.name, k.slug, coalesce(k.description, '') AS description, k.status,
-              k.metadata,
-              coalesce(c.name, 'Uncategorized') AS category_name,
-              coalesce(v.version, '1.0.0') AS version,
-              coalesce((
-                SELECT jsonb_agg(jsonb_build_object(
-                  'slug', st.slug,
-                  'name', st.name,
-                  'type', st.tool_type,
-                  'required', stl.is_required
-                ) ORDER BY stl.is_required DESC, st.slug ASC)
-                FROM public.skill_tool_links stl
-                JOIN public.skill_tools st ON st.id = stl.tool_id
-                WHERE stl.skill_id = k.id
-              ), '[]'::jsonb) AS tools
-       FROM public.skills k
-       LEFT JOIN public.skill_categories c ON c.id = k.category_id
-       LEFT JOIN public.skill_versions v ON v.id = k.current_version_id
-       WHERE k.status IN ('active', 'deprecated')
-       ORDER BY k.name ASC`
-    );
+    let skillsRes: SafeQueryResult;
+    let catalogRpc: SafeQueryResult | null = null;
+
+    if (backend.mode === 'data-api') {
+      const { api } = backend;
+      const [rawSkills, rawCats, rawVers, rawLinks, rawTools] = await Promise.all([
+        api.selectAll(
+          'skills?select=id,name,slug,description,status,metadata,category_id,current_version_id&status=in.(active,deprecated)&order=name.asc'
+        ),
+        api.selectAll('skill_categories?select=id,name'),
+        api.selectAll('skill_versions?select=id,version'),
+        api.selectAll('skill_tool_links?select=skill_id,tool_id,is_required'),
+        api.selectAll('skill_tools?select=id,slug,name,tool_type'),
+      ]);
+
+      if (rawSkills.ok) {
+        const catById = new Map((rawCats.ok ? rawCats.rows : []).map((c) => [String(c.id), String(c.name || '')]));
+        const verById = new Map((rawVers.ok ? rawVers.rows : []).map((v) => [String(v.id), String(v.version || '')]));
+        const toolById = new Map((rawTools.ok ? rawTools.rows : []).map((t) => [String(t.id), t]));
+        const toolsBySkill = new Map<string, Array<Record<string, unknown>>>();
+
+        if (rawLinks.ok) {
+          for (const link of rawLinks.rows) {
+            const tool = toolById.get(String(link.tool_id));
+            if (!tool) continue;
+            const skillId = String(link.skill_id);
+            const list = toolsBySkill.get(skillId) ?? [];
+            list.push({
+              slug: tool.slug,
+              name: tool.name,
+              type: tool.tool_type,
+              required: link.is_required !== false,
+            });
+            toolsBySkill.set(skillId, list);
+          }
+          for (const list of toolsBySkill.values()) {
+            list.sort((a, b) => {
+              const reqDiff = Number(b.required !== false) - Number(a.required !== false);
+              if (reqDiff !== 0) return reqDiff;
+              return String(a.slug || '').localeCompare(String(b.slug || ''));
+            });
+          }
+        }
+
+        skillsRes = {
+          ok: true,
+          rows: rawSkills.rows.map((k) => ({
+            ...k,
+            category_name: k.category_id ? catById.get(String(k.category_id)) || 'Uncategorized' : 'Uncategorized',
+            version: k.current_version_id ? verById.get(String(k.current_version_id)) || '1.0.0' : '1.0.0',
+            tools: toolsBySkill.get(String(k.id)) ?? [],
+          })),
+        };
+      } else {
+        skillsRes = rawSkills;
+        const rpc = await api.callRpc('atax_mcp_skills_catalog_v1');
+        catalogRpc = rpc.ok ? { ok: true, rows: [{ catalog: rpc.rows[0]?.value }] } : rpc;
+      }
+    } else {
+      const { sql } = backend;
+      skillsRes = await safeQuery(
+        sql,
+        `SELECT k.id, k.name, k.slug, coalesce(k.description, '') AS description, k.status,
+                k.metadata,
+                coalesce(c.name, 'Uncategorized') AS category_name,
+                coalesce(v.version, '1.0.0') AS version,
+                coalesce((
+                  SELECT jsonb_agg(jsonb_build_object(
+                    'slug', st.slug,
+                    'name', st.name,
+                    'type', st.tool_type,
+                    'required', stl.is_required
+                  ) ORDER BY stl.is_required DESC, st.slug ASC)
+                  FROM public.skill_tool_links stl
+                  JOIN public.skill_tools st ON st.id = stl.tool_id
+                  WHERE stl.skill_id = k.id
+                ), '[]'::jsonb) AS tools
+         FROM public.skills k
+         LEFT JOIN public.skill_categories c ON c.id = k.category_id
+         LEFT JOIN public.skill_versions v ON v.id = k.current_version_id
+         WHERE k.status IN ('active', 'deprecated')
+         ORDER BY k.name ASC`
+      );
+      if (!skillsRes.ok) {
+        catalogRpc = await safeQuery(sql, 'SELECT public.atax_mcp_skills_catalog_v1() AS catalog');
+      }
+    }
 
     if (skillsRes.ok) {
       const skills: SkillRecord[] = skillsRes.rows.map((r) => {
@@ -898,7 +1310,11 @@ export function createSubstrateService(
     }
 
     // Fallback to canonical RPC atax_mcp_skills_catalog_v1()
-    const rpcRes = await safeQuery(sql, 'SELECT public.atax_mcp_skills_catalog_v1() AS catalog');
+    const rpcRes =
+      catalogRpc ??
+      (backend.mode === 'sql'
+        ? await safeQuery(backend.sql, 'SELECT public.atax_mcp_skills_catalog_v1() AS catalog')
+        : { ok: false as const, error: 'Unavailable' });
     if (rpcRes.ok) {
       const raw = asArray(rpcRes.rows[0]?.catalog).map(asRecord);
       const skills: SkillRecord[] = raw.map((r) => {

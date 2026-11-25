@@ -311,3 +311,56 @@ test('getSkillsCatalog queries skills registry and falls back cleanly on RPC', a
   assert.equal(rpcRes.skills.length, 1);
   assert.equal(rpcRes.skills[0].slug, 'fallback-skill');
 });
+
+test('createSubstrateService prefers HTTPS Data API over TCP pooler when ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY are set', async () => {
+  const calls: string[] = [];
+  const mockFetcher = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('/rest/v1/universes?')) {
+      return Response.json([{ id: 'u1', universe_key: 'atax', name: 'ATAX', description: '', status: 'active' }]);
+    }
+    if (url.includes('/rest/v1/systems?')) {
+      return Response.json([
+        {
+          id: 's1',
+          universe_id: 'u1',
+          system_key: 'atax',
+          parent_system_id: null,
+          name: 'ATAX',
+          system_type: 'service',
+          description: 'Data API system',
+          status: 'active',
+          parameters: {},
+          context_version: 1,
+        },
+      ]);
+    }
+    if (url.includes('/rest/v1/system_memories?')) {
+      return Response.json([
+        { system_id: 's1', memory_type: 'constraint' },
+        { system_id: 's1', memory_type: 'note' },
+      ]);
+    }
+    if (url.includes('/rest/v1/system_constraints?')) {
+      return Response.json([{ system_id: 's1' }]);
+    }
+    return Response.json([]);
+  }) as typeof fetch;
+
+  const svc = createSubstrateService(
+    {
+      ATAX_SUPABASE_URL: 'https://vcaerawuwffziufvpbvw.supabase.co',
+      ATAX_SUPABASE_SECRET_KEY: 'sb_secret_mock_key_1234567890',
+      ATAX_SUPABASE_CONNECTION_URL: 'postgresql://postgres:secret@aws-0-ap-south-1.pooler.supabase.com:6543/postgres',
+    },
+    undefined,
+    mockFetcher
+  );
+
+  const sysRes = await svc.getSystemsGraph();
+  assert.equal(sysRes.systems.length, 1);
+  assert.equal(sysRes.systems[0].memoriesCount, 2);
+  assert.equal(sysRes.systems[0].constraintsCount, 2);
+  assert.ok(calls.some((u) => u.startsWith('https://vcaerawuwffziufvpbvw.supabase.co/rest/v1/')));
+});

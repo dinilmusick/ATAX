@@ -23,7 +23,10 @@ async function substrateResponse(path, env) {
     return json({ error: 'Not found' }, 404);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Supabase substrate unavailable.';
-    const status = message.includes('ATAX_SUPABASE_CONNECTION_URL') ? 503 : 502;
+    const status =
+      message.includes('ATAX_SUPABASE_CONNECTION_URL') || message.includes('ATAX_SUPABASE_URL')
+        ? 503
+        : 502;
     return json({ error: message }, status);
   }
 }
