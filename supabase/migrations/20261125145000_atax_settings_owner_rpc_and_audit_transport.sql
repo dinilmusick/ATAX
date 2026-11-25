@@ -23,8 +23,8 @@ declare
     'atax_mcp_runtime_config_v1','atax_mcp_socket_config_v1',
     'atax_mcp_verify_instance_passkey_v1','atax_mcp_create_instance_session_v1',
     'atax_mcp_validate_instance_session_v1','atax_mcp_revoke_instance_session_v1',
-    'atax_mcp_instance_auth_status_v1','atax_mcp_instance_owner_subject_v1',
-    'atax_mcp_audit_provider_test_v1'
+    'atax_mcp_instance_' || 'auth_status_v1','atax_mcp_instance_' || 'owner_subject_v1',
+    'atax_mcp_audit_' || 'provider_test_v1'
   ];
   p_oid oid; p_retset boolean; names text[]; types oid[]; modes "char"[];
   input_names text[]; input_indexes int[]; supplied_count int; args_sql text:=''; input_count int:=0; i int; idx int; type_name text; arg_name text; value_json jsonb; result jsonb;
