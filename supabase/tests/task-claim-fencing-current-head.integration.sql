@@ -5,6 +5,7 @@ DECLARE fixture_goal_id uuid; task_row public.tasks; first_claim public.tasks; s
 BEGIN
   INSERT INTO public.goals(name,created_by_agent_id,status) VALUES ('Fenced claim regression ' || replace(gen_random_uuid()::text,'-',''),'fenced-claim-test','ready') RETURNING id INTO fixture_goal_id;
   SELECT * INTO task_row FROM public.task_ledger_register('fenced-claim-test','Fenced Claim Test','Lease fencing regression','Disposable task',ARRAY['fenced-claim-test']::text[],'fenced-claim-session','worker',3::smallint,'Verify fenced task recovery','{}'::jsonb,NULL);
+  UPDATE public.goals SET target=task_row.target WHERE id=fixture_goal_id;
   UPDATE public.tasks SET goal_id=fixture_goal_id,required_capabilities=ARRAY['fenced-claim-test']::text[],task_role='loop_authoring' WHERE id=task_row.id;
   SELECT * INTO first_claim FROM public.task_ledger_claim_next('fenced-claim-original','Original Worker','worker',ARRAY['fenced-claim-test']::text[],120);
   IF first_claim.id IS DISTINCT FROM task_row.id THEN RAISE EXCEPTION 'fixture task was not claimed'; END IF;
