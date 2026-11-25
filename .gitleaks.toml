@@ -35,3 +35,69 @@ id = "generic-api-key"
   regexTarget = "match"
   paths = ['''server/vaultAndAuth\.test\.ts$''']
   regexes = ['''ghp_1234567890abcdef123456''']
+
+  [[rules.allowlists]]
+  description = "ATAX MCP ledger uses a canonical RPC identifier, not a credential"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.mjs$''']
+  regexes = ['''atax_mcp_instance_auth_status_v1''']
+
+  [[rules.allowlists]]
+  description = "Worker dashboard test uses a deterministic non-secret Supabase fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''worker-dashboard\.test\.ts$''']
+  regexes = ['''sb_secret_test_key_0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "Settings control-plane tests use a deterministic non-secret Supabase fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/settingsControlPlane\.test\.ts$''']
+  regexes = ['''sb_secret_test_key_0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "Vault/auth test uses deterministic non-secret Supabase fixtures"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/vaultAndAuth\.test\.ts$''']
+  regexes = ['''(?:sb_secret_test_key_0123456789abcdef|sb_secret_leaky_key_0123456789abcdef)''']
+
+  [[rules.allowlists]]
+  description = "Concurrency test uses a deterministic ATAX fixture token"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tests/m1-challenger-concurrency\.test\.mjs$''']
+  regexes = ['''atax_5426bb43a95f34297740e50804035fc67db24be2be32098d''']
+
+  [[rules.allowlists]]
+  description = "Data API challenger test uses a deterministic ATAX fixture token"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-challenger\.test\.mjs$''']
+  regexes = ['''atax_0123456789abcdef0123456789abcdef0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "E2E mock server uses a deterministic ATAX fixture token"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tests/e2e-data-api/mock-server\.mjs$''']
+  regexes = ['''atax_5426bb43a95f34297740e50804035fc67db24be2be32098d''']
+
+  [[rules.allowlists]]
+  description = "Data API ledger tests use a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "Data API ledger test uses a deterministic synthetic JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
