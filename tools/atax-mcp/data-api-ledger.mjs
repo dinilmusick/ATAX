@@ -1,7 +1,7 @@
 /**
  * tools/atax-mcp/data-api-ledger.mjs
  * Pure HTTPS Supabase Data API / PostgREST transport for the canonical ATAX ledger.
- * Replaces direct PostgreSQL/Hyperdrive TCP connections with native fetch().
+ * Sole canonical transport for the ATAX ledger via native HTTPS fetch() to PostgREST.
  * Zero external npm runtime dependencies.
  * Fail-closed, sanitized error mapping; zero secret leakage.
  */

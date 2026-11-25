@@ -18,14 +18,14 @@ node --test worker.test.mjs
 npx wrangler deploy
 ```
 
-`SUPABASE_URL` is a non-secret variable in `wrangler.toml`. Before deployment, provision the Supabase **server-side** key and any named provider keys through your chosen Cloudflare account's Worker secret configuration. See [OWNER_SETUP.md](OWNER_SETUP.md) for the exact account naming contract:
+Configure **only** the HTTPS Data API connection secrets on your Worker (`ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SECRET_KEY`). Never place secrets in `[vars]`, git, logs, or chats.
 
 ```bash
-npx wrangler secret put SUPABASE_SECRET_KEY
-# or legacy credential: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put ATAX_SUPABASE_URL
+npx wrangler secret put ATAX_SUPABASE_SECRET_KEY
 ```
 
-Choose **one** of these authentication mechanisms:
+Owner authentication policy (`MCP_OWNER_SUBJECT`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_AUTH_*`, `MCP_ATAX_OWNER_JWT_SUBJECT`, `MCP_AUTH_OWNER_SCOPES`) and encrypted GitHub/Cloudflare credentials live inside Supabase (`atax_private.mcp_server_settings` and Supabase Vault via `atax_private.provider_accounts`), loaded per request through `atax_mcp_runtime_config_v1` over HTTPS Data API:
 
 1. **Recommended**: Configure `MCP_AUTH_JWKS_URL`, `MCP_AUTH_ISSUER`, and `MCP_AUTH_AUDIENCE` for signed, audience-bound resource tokens. Configure **exactly one verified owner** using `MCP_ATAX_OWNER_JWT_SUBJECT`, with scoped permissions in `MCP_AUTH_OWNER_SCOPES`. The gateway refuses non-owner subjects even if their JWT includes `atax:*` scopes. `MCP_AUTH_AUTHORIZATION_SERVER` optionally sets protected-resource metadata; ATAX does not mint tokens.
 2. **Single-owner bootstrap**: Generate a **random 48+ byte** bearer token outside the repo, store only its SHA-256 hex digest as the `MCP_SHARED_TOKEN_SHA256` Worker secret, and configure `MCP_SHARED_SUBJECT` and `MCP_SHARED_SCOPES` (space separated). Use **read-only by default**. Do not share the same token between an executing worker and its independent verifier; for distinct principals prefer JWT mode. Neither the bearer token nor any Supabase secret belongs in source, issues, tests, logs or chats.
@@ -49,17 +49,18 @@ Optional `MCP_ALLOWED_ORIGINS` (comma-separated exact HTTPS origin strings) enab
 The server exposes `atax_github_workflows_guide` (always read first), `atax_github_repository_create` and `atax_github_repository_inspect` for permanent repositories, plus `atax_fmrl_create_run_dispose` and `atax_fmrl_get_status` for **automatic provision → run → mandatory delete and independent 404**. The FMRL tools call the existing ATAX GitHub Actions *controller*, never run target code in ATAX. Tools have distinct operator permissions: `atax:github:read`, `atax:github:create` and `atax:fmrl:execute`. Set `MCP_GITHUB_OWNER`, `MCP_FMRL_ALLOWED_TARGETS`, and at least one named `GH_KEY_<ALIAS>` Worker secret with the appropriate repository/Actions rights. The FMRL tools take an optional `account` selector and use that same named token for dispatch/status. FMRL dispatch is disabled without an explicit target-repository allowlist. Full setup, security and agent examples: [GITHUB_TOOLS.md](GITHUB_TOOLS.md).
 
 
-## Single-owner provider secrets — no multi-user BYOC
+## Single-owner provider secrets — managed in Supabase Vault
 
-See **[OWNER_SETUP.md](OWNER_SETUP.md)** for the complete, authoritative credential map, GitHub repository secrets boundary, and direct-GitHub/Supabase connector parity rules.
+See **[OWNER_SETUP.md](OWNER_SETUP.md)** for the complete credential map, GitHub repository secrets boundary, and direct-GitHub/Supabase connector parity rules.
 
-| Worker secret | Function |
-| --- | --- |
-| `GH_KEY_PERSONAL`, `GH_KEY_WORK`, `GH_KEY_<ALIAS>` | Dynamically selected named GitHub accounts |
-| `CF_KEY_PERSONAL`, `CF_KEY_WORK`, `CF_KEY_<ALIAS>` | Dynamically selected named Cloudflare accounts |
-| `SUPABASE_SECRET_KEY` | The one canonical ATAX ledger, server-side only |
+| Store | Secret / Record | Function |
+| --- | --- | --- |
+| Worker secret | `ATAX_SUPABASE_URL` | Canonical ATAX Supabase HTTPS API URL |
+| Worker secret | `ATAX_SUPABASE_SECRET_KEY` | Canonical ledger server key for HTTPS Data API / PostgREST |
+| Supabase Vault | GitHub alias (`PERSONAL`, `WORK`, `<ALIAS>`) | Dynamically selected named GitHub accounts (`GH_KEY_<ALIAS>` in runtime config) |
+| Supabase Vault | Cloudflare alias (`PRIMARY`, `WORK`, `<ALIAS>`) | Dynamically selected named Cloudflare accounts (`CF_KEY_<ALIAS>` in runtime config) |
 
-`GH_TOKEN_<ALIAS>` and `CLOUDFLARE_TOKEN_<ALIAS>` remain supported during migration. Duplicate alias bindings fail closed; secret *values* never appear in MCP tool results. Use `atax_provider_accounts_list` to discover names, then pass the explicit `account` selector when more than one is configured. **Vercel is deferred**, and no per-user database/vault or tenant routing is used.
+Duplicate alias bindings fail closed; secret *values* never appear in MCP tool results. Use `atax_provider_accounts_list` to discover aliases, then pass the explicit `account` selector when more than one is configured. **Vercel is not implemented** (`501 Not Implemented` in Vault; skipped in MCP runtime config), and no per-user tenant routing is used.
 
 GitHub **repository secrets** and Cloudflare **Worker secrets** are independent stores. The same alias names can be configured in both, but GitHub Actions must explicitly map its own repository secrets into trusted workflow jobs; ordinary direct ChatGPT GitHub/Supabase connectors use their existing connector authentication. **Neither direct connector depends on this Worker.**
 
@@ -67,7 +68,7 @@ GitHub **repository secrets** and Cloudflare **Worker secrets** are independent 
 
 The Worker uses one Supabase server-side key for the same ledger accessed directly through the ChatGPT Supabase connector. It admits canonical ledger tools, provider tools, resources and prompts **only to the verified owner**, identified by (1) the actually verified bootstrap bearer and its exact shared subject, or (2) the verified OAuth JWT subject pinned in `MCP_ATAX_OWNER_JWT_SUBJECT`. The signed JWT's scope claims alone are never enough to gain owner access. Required per-tool scopes still apply after owner authentication.
 
-There is **no** provider-account delegation table, per-user vault, tenant enrollment, or separate ATAX database. Cloudflare provider tools are diagnostics only; the direct GitHub/Supabase connector path keeps operating independently. A separate verifier identity and properly scoped verification authority remain required by ATAX's task governance.
+Provider credentials are stored encrypted in **Supabase Vault** under the singleton instance owner (`atax_private.provider_accounts`) and loaded by `atax_mcp_runtime_config_v1` over HTTPS Data API — never tenant enrollment or per-user credential delegation. Cloudflare provider tools are diagnostics only; the direct GitHub/Supabase connector path keeps operating independently. A separate verifier identity and properly scoped verification authority remain required by ATAX's task governance.
 
 ## MCP client configuration
 

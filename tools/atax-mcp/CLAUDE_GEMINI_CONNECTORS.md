@@ -2,7 +2,7 @@
 
 ## Standalone single-owner design
 
-The ATAX Cloudflare Worker is a **stateless, Streamable HTTP MCP resource server**, not an OAuth provider, agent runtime, or tenant credential vault. ATAX requires only its **own** configured Supabase key, named GitHub and Cloudflare secrets, and an owner authentication scheme. It has **no mandatory Luth, ULTRST, Vercel or third-party authorization-server dependency**.
+The ATAX Cloudflare Worker is a **stateless, Streamable HTTP MCP resource server**, not an OAuth provider, agent runtime, or tenant credential vault. ATAX requires only its **own** configured Supabase key and an owner authentication scheme. Provider credentials (GitHub, Cloudflare) are stored in Supabase Vault and managed through the Settings UI. It has **no mandatory Luth, ULTRST, Vercel or third-party authorization-server dependency**.
 
 MCP endpoint: `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`.
 
@@ -10,10 +10,9 @@ MCP endpoint: `https://atax-mcp.dextro1n1laevo.workers.dev/mcp`.
 
 Configure in the selected Cloudflare Worker:
 
-- `SUPABASE_URL`: canonical ATAX Supabase URL, non-secret
-- `SUPABASE_SECRET_KEY`: canonical ledger server key, **Worker secret**
-- `GH_KEY_<ALIAS>`: one or more GitHub account tokens, **Worker secrets**
-- `CF_KEY_<ALIAS>`: optional Cloudflare account tokens, **Worker secrets**
+- `ATAX_SUPABASE_URL`: canonical ATAX Supabase HTTPS API URL, **Worker secret**
+- `ATAX_SUPABASE_SECRET_KEY`: canonical ledger server key for HTTPS PostgREST / Data API, **Worker secret**
+- Provider credentials (GitHub, Cloudflare) are stored in **Supabase Vault** and managed through the Settings UI — do NOT configure them as direct Worker secrets
 - `MCP_SHARED_TOKEN_SHA256`: **SHA-256 hex digest** of a high-entropy, owner-only bearer token, **Worker secret**
 - `MCP_SHARED_SUBJECT`: one stable owner subject
 - `MCP_SHARED_SCOPES`: only the tools needed for that token; `atax:read atax:write` and separately authorized GitHub/Cloudflare/FMRL scopes as appropriate; verifier must be separately authorized

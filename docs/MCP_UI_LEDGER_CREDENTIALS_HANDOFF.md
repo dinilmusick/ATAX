@@ -9,22 +9,24 @@
 - The existing owner/maintainer MCP endpoint and the restricted Socket V1 endpoint remain separate security boundaries. A restricted task socket **must never receive provider-account credentials or unrestricted provider tools**.
 - Do not silently enable unverified Socket V1 production execution, production migrations, or background relay. The user-facing UI is an administrative surface, not an alternate task executor.
 
-## New runtime configuration contract
+## Runtime configuration contract (Supabase Data API only)
 
-**Exactly one externally configured runtime environment variable for the ATAX MCP/UI server:**
+**Two externally configured runtime environment variables/secrets for the ATAX MCP/UI server:**
 
 ```dotenv
-ATAX_SUPABASE_CONNECTION_URL=
+ATAX_SUPABASE_URL=
+ATAX_SUPABASE_SECRET_KEY=
 ```
 
-- Value: a **server-only, TLS-protected PostgreSQL connection URI** to the canonical ATAX Supabase ledger, including appropriate restricted database identity/credentials for the server-side connection. It is **not** the public `https://<project>.supabase.co` API origin alone. The URI is confidential. Never ship it in `VITE_*`, `NEXT_PUBLIC_*`, browser JavaScript, static assets, URL query logs, screenshots or agent prompts.
-- Reject missing, malformed, insecure, untrusted-host or unprivileged connection configuration; **fail closed**. Use a narrowly privileged database role and audited, least-privilege server-side functions. Do not assume the connection URI is safe to display merely because it is named a URL.
-- All other **MCP server/application** configuration belongs in the canonical ledger, with strict authorization: owner identity/admission policy, OAuth issuer/JWKS/client registration settings, GitHub ownership and FMRL policies, provider account aliases, provider-specific organization/account IDs, approved workflows and deployment policies. Configuration is *data*, not a second environment variable.
-- Only sensitive **provider credentials** go in a server-side encrypted secret store, preferably Supabase Vault with database-managed encryption. Store metadata/aliases separately from secret material and reference Vault IDs. Never make decryption or raw token retrieval available to `anon`, general `authenticated` users, read-only graph clients or restricted socket agents.
-- A database connection URI alone is **not** browser/user authentication. Client access still needs independent, standards-based identity verification, owner-bound authorization, replay/CSRF defenses, short sessions, audit events and explicit permissions. If secure bootstrap or credential isolation cannot be proven, withhold administrative mutation endpoints.
-- Existing `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `GH_KEY_*`, `GH_TOKEN_*`, `CF_KEY_*`, `CLOUDFLARE_TOKEN_*`, `CLOUDFLARE_ACCOUNT_ID_*`, `MCP_*`, and future `VERCEL_TOKEN_*` are **legacy MCP runtime bindings to migrate out**, not part of the desired one-variable release. Do not delete required runtime checks before database-backed replacements pass tests. Separate GitHub Actions/Supabase CLI/hosting control-plane credentials are outside this MCP runtime contract and must not be silently removed or moved to the browser.
+- `ATAX_SUPABASE_URL`: HTTPS Supabase project API origin (`https://<project>.supabase.co` or `.supabase.com`).
+- `ATAX_SUPABASE_SECRET_KEY`: server-only Supabase secret key used over **HTTPS Supabase Data API / PostgREST** (`fetch`). Direct PostgreSQL wire/TCP drivers (`postgres.js`), Hyperdrive bindings, and PostgreSQL connection strings are **retired and unsupported**. Never ship `ATAX_SUPABASE_SECRET_KEY` in `VITE_*`, `NEXT_PUBLIC_*`, browser JavaScript, static assets, URL query logs, screenshots, or agent prompts.
+- Reject missing, malformed, non-HTTPS, or untrusted-host configuration; **fail closed**. Use narrowly scoped PostgREST RPCs and least-privilege server-side functions.
+- All other **MCP server/application** configuration belongs in the canonical ledger (`atax_private.mcp_server_settings` and `atax_private.instance_auth`), with strict authorization: singleton instance passkey verification, OAuth issuer/JWKS/client settings, GitHub ownership and FMRL policies, provider account aliases, provider-specific organization/account IDs, approved workflows, and deployment policies. Configuration is *data*, not extra per-provider environment bindings.
+- All sensitive **provider credentials** live encrypted in **Supabase Vault** (`vault.secrets`), referenced by `atax_private.provider_accounts`. Never make decryption or raw token retrieval available to `anon`, general `authenticated` users, read-only graph clients, or restricted socket agents.
+- Backend Supabase credentials are **not** browser/user authentication. Browser administration uses an instance passkey (`atax_private.instance_auth`), server-side session hashes (`atax_private.instance_sessions`), and `HttpOnly; SameSite=Strict` cookies (`atax_settings_session`), with replay/CSRF/origin checks and audit events.
+- Legacy per-provider Worker env vars (`GH_KEY_*`, `GH_TOKEN_*`, `CF_KEY_*`, `CLOUDFLARE_TOKEN_*`, `CLOUDFLARE_ACCOUNT_ID_*`, `MCP_*`) are migrated into canonical Supabase tables and Vault. Separate GitHub Actions, Supabase CLI, or hosting deploy tokens remain external to the MCP/UI server runtime.
 
-**Important architectural constraint:** the current Cloudflare Worker talks to Supabase through HTTPS REST using a separate secret key. The new single URI contract therefore requires an actual backend transport/driver migration (or a secure server-owned adapter with equivalent authenticated database access). Merely renaming `SUPABASE_URL` or removing the API key will break the server. The implementation agent must prove the chosen Cloudflare/Node/Vercel runtime supports a TLS PostgreSQL connection through a tested adapter; no fake fallback or unauthenticated Supabase REST calls.
+**Transport rule:** all Cloudflare Workers (`worker-dashboard.ts`, `tools/atax-mcp/worker.mjs`, `tools/atax-mcp/socket-worker.mjs`) and the local Express server (`server.ts`) talk to Supabase **exclusively via HTTPS Data API / PostgREST (`fetch`)**.
 
 ## Unified credential registry
 
@@ -50,17 +52,21 @@ Minimum UI:
 5. **Access and policy**: owner identities, approved GitHub/FMRL targets, OAuth settings, workflow grants and independently verified deployment/health indicators, all loaded from the ledger after authorization.
 6. **Existing graph read views**: Universe → Systems → Visions → Goals → Tasks, dependencies, heartbeat/lease evidence and independent verification; retain prior UI handoff semantics.
 
-Frontend uses an authenticated same-origin server adapter and **no privileged database connection**. Build the UI in an isolated app package in this repository, with portable React components and a runtime-specific thin server adapter. Do not import `ATAX_SUPABASE_CONNECTION_URL` into the browser bundle or return full database rows. No vendor-specific Luth/ULTRST dependency.
+Frontend uses an authenticated same-origin server adapter and **no browser database connection**. The UI lives cleanly in `src/` with thin shared handlers (`server/settingsControlPlane.ts`, `server/supabaseVault.ts`, `server/supabaseSubstrate.ts`) consumed by both `worker-dashboard.ts` and `server.ts`. Never import `ATAX_SUPABASE_SECRET_KEY` or `ATAX_SUPABASE_URL` into the browser bundle or return raw Vault secrets. No vendor-specific Luth/ULTRST dependency.
 
-Suggested routes are illustrative **new contracts**, not claims of existing handlers:
+Implemented server API routes:
 ```
-GET    /api/mcp/status
-GET    /api/mcp/provider-accounts
-POST   /api/mcp/provider-accounts
-POST   /api/mcp/provider-accounts/:id/test
-PUT    /api/mcp/provider-accounts/:id/credential
-DELETE /api/mcp/provider-accounts/:id
-GET    /api/graph/visions
+GET    /api/settings/status
+POST   /api/settings/auth/unlock
+POST   /api/settings/auth/logout
+GET    /api/settings/providers
+POST   /api/settings/providers
+POST   /api/settings/providers/:provider/:alias/test
+PATCH  /api/settings/providers/:provider/:alias/enabled
+DELETE /api/settings/providers/:provider/:alias
+GET    /api/substrate/systems
+GET    /api/substrate/visions-goals
+GET    /api/substrate/skills
 ```
 All routes must authenticate and authorize server-side. Enforce input schema, size limits, per-actor rate limits, replay protection, same-site sessions and audit logs. Do not turn a credential-setting route into a generic network proxy.
 
@@ -73,7 +79,7 @@ All routes must authenticate and authorize server-side. Enforce input schema, si
 
 ### Release acceptance checklist
 
-- Clean MCP/UI server launch with **only** `ATAX_SUPABASE_CONNECTION_URL` configured; no other required MCP runtime environment variables.
+- Clean MCP/UI server launch with **only** `ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SECRET_KEY` configured over HTTPS Data API / PostgREST; zero PostgreSQL TCP drivers (`postgres.js`) or legacy per-provider env secrets.
 - Secure owner login and durable configuration retrieval using ledger data, without a browser-held privileged database credential.
 - Add, enumerate, rotate, test and disable **two or more** GitHub accounts and Cloudflare accounts; Vercel only after its real adapter succeeds.
 - Negative checks: anonymous user, cross-owner ID, stale session, denied scope, restricted socket, invalid token, secret echo, logged URL/credential, CSRF and leaked React bundle all fail closed.

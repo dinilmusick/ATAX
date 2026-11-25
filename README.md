@@ -1,6 +1,6 @@
 # ATAX
 
-**New ATAX MCP/UI direction (23 Nov 2026):** [MCP server, ledger-managed provider credentials and first-party UI handoff](docs/MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md). The former headless/read-only-first policy is superseded for the MCP management UI. The existing MCP runtime remains legacy-configured until the independently verified database-backed cutover; direct GitHub/Supabase connectors stay unchanged.
+**ATAX Dashboard, Vault & Remote MCP:** See [MCP server, Vault credential management, and UI specification](docs/MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md). Both the deployed Cloudflare Worker (`worker-dashboard.ts`) and local server (`server.ts`) connect to canonical Supabase **exclusively via HTTPS Data API / PostgREST** (`ATAX_SUPABASE_URL` + `ATAX_SUPABASE_SECRET_KEY`). Direct GitHub/Supabase connectors stay unchanged.
 
 ATAX is a durable substrate for **externally created, transient agents**. One canonical Supabase ledger holds systems, goals, tasks, dependencies, constraints, memories, skills, claims, evidence and verified results. ATAX never spawns, schedules or hosts agents.
 
@@ -16,7 +16,7 @@ ATAX is a durable substrate for **externally created, transient agents**. One ca
 
 Read [**Connection modes and guarantees**](docs/connection-modes.md) and [**Architecture**](docs/architecture.md) first.
 
-**Google AI Studio / React handoff:** [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend environment-variable contract](docs/ENVIRONMENT_CONFIGURATION.md) · [blank `.env.example`](.env.example). The proposed React UI is not yet deployed; sensitive provider keys must never be put in a browser build. For the personal MCP Worker, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
+**Dashboard & Environment Configuration:** [Read-only node graph UI specification](docs/AI_STUDIO_REACT_HANDOFF.md) · [Provider and backend Data API configuration](docs/ENVIRONMENT_CONFIGURATION.md) · [blank `.env.example`](.env.example). Sensitive Supabase and provider Vault keys remain strictly server-side (`ATAX_SUPABASE_URL` + `ATAX_SUPABASE_SECRET_KEY`). For owner setup, see [owner setup](tools/atax-mcp/OWNER_SETUP.md).
 
 ## Resume or create work
 

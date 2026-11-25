@@ -42,7 +42,7 @@ export function createMockState() {
       goal_key: 'migrate-mcp-to-data-api',
       system_key: 'atax',
       title: 'Migrate MCP Server to Supabase PostgREST Data API',
-      description: 'Replace postgres.js with native HTTPS fetch to PostgREST RPC',
+      description: 'Use native HTTPS fetch to Supabase Data API / PostgREST RPC',
       status: 'active',
       priority: 0.9,
       tags: ['mcp', 'database', 'security'],

@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify zero-dependency MCP package (no postgres.js)
+      - name: Verify zero-dependency MCP package (Data API only)
         run: |
           test ! -d tools/atax-mcp/node_modules/postgres
           npm install --prefix tools/atax-mcp --ignore-scripts --no-audit --no-fund

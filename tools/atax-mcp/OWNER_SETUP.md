@@ -1,6 +1,6 @@
 # Personal ATAX MCP — one owner, three substrate connection modes
 
-> **Transition notice (23 November 2026):** The operational commands below describe the existing, pre-migration owner MCP deployment. They are **not** the target for the new UI-based configuration. See [the authoritative one-variable Supabase credential/UI handoff](../../docs/MCP_UI_LEDGER_CREDENTIALS_HANDOFF.md). Future MCP runtime configuration must use only `ATAX_SUPABASE_CONNECTION_URL`; GitHub/Cloudflare/Vercel account credentials and auth/settings become owner-managed records in Supabase. The current Worker has not yet completed that cutover; never disable security checks prematurely.
+> **Supabase Data API architecture:** ATAX Workers (`worker-dashboard.ts` / `tools/atax-mcp/worker.mjs`) and the local Express server (`server.ts`) connect to Supabase **exclusively via HTTPS Data API / PostgREST** using `ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SECRET_KEY`. Direct PostgreSQL connection URIs (`ATAX_SUPABASE_CONNECTION_URL`), `postgres.js`, and Hyperdrive bindings are retired and removed. MCP settings, singleton instance passkey auth, and encrypted GitHub/Cloudflare credentials live in canonical Supabase tables + Vault and are managed through the Settings UI (`/api/settings/*`).
 
 
 ATAX supports three ways for externally created agents to reach **one** canonical Supabase ledger: **GitHub connector only** (using an authorized, credential-bearing tool/Actions bridge for live ledger operations), **GitHub plus Supabase connectors** (the existing direct path), and **the remote ATAX MCP Worker**. Full coverage and verification differ by transport; the [connection-mode contract](../../docs/connection-modes.md) documents exact boundaries and acceptance gaps.
@@ -35,33 +35,20 @@ This is **exclusive authorized occupancy**, not a claim that only one external A
 
 **Implementation boundary:** existing PostgreSQL task RPC signatures still accept an opaque `agent_id` for compatibility and audit/claim checking. That is an internal claim-holder reference, **not** a Gemini/Claude identity, agent registry, orchestrator, or reason to pick work. Never derive it from the AI application's vendor/name. Removing it from DB interfaces requires its own guarded migration; until then, the claim token and database row locks remain decisive for excluding concurrent claimers. Verification still requires a separate claim and independent evidence; using one operator account does not itself prove independence.
 
-## Configure one canonical ledger
+## Configure one canonical ledger (Data API)
 
-| Cloudflare Worker binding | Type | Purpose |
+| Cloudflare Worker secret | Type | Purpose |
 | --- | --- | --- |
-| `SUPABASE_URL` | Public configuration | The one canonical ATAX Supabase API origin |
-| `SUPABASE_SECRET_KEY` | **Secret** | Dedicated, server-side Supabase key; never exposed through an MCP response |
-| `MCP_ATAX_OWNER_JWT_SUBJECT` | Operator-supplied configuration | **Exact verified** owner subject from the configured optional OAuth issuer, not an email address or a wildcard |
-| `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE` | Public configuration | Verify signed OAuth resource tokens |
-| `MCP_AUTH_OWNER_SCOPES` | Public policy | Explicitly enables authorized MCP tools for the one owner |
+| `ATAX_SUPABASE_URL` | **Secret** | Canonical ATAX Supabase HTTPS API URL (`https://<project>.supabase.co`) |
+| `ATAX_SUPABASE_SECRET_KEY` | **Secret** | Dedicated server-side Supabase secret key for HTTPS PostgREST / Data API; never exposed through an API/MCP response |
 
-The optional bootstrap shared bearer token uses `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT` and `MCP_SHARED_SCOPES`; it is **not** a substitute for OAuth client compatibility, and must not be shared with external users. Keep executing agents and independent verifiers in distinct identities/scopes.
+Owner authentication policies (`MCP_OWNER_SUBJECT`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_ATAX_OWNER_JWT_SUBJECT`, `MCP_AUTH_ISSUER`, `MCP_AUTH_JWKS_URL`, `MCP_AUTH_AUDIENCE`, `MCP_AUTH_OWNER_SCOPES`) are stored in `atax_private.mcp_server_settings` and loaded via `atax_mcp_runtime_config_v1`. Keep executing agents and independent verifiers in distinct identities/scopes.
 
-## Add named provider accounts to the Worker
+## Add named provider accounts via Supabase Vault
 
-Enter secret values **only** in Cloudflare's Worker Secrets UI or through `wrangler secret put` from a trusted terminal, never in git, `wrangler.toml`, a chat, an issue, or logs.
+Manage named **GitHub** and **Cloudflare** credentials through the authenticated Settings UI (`/api/settings/providers`), which stores tokens encrypted inside **Supabase Vault** (`atax_private.provider_accounts` + `vault.secrets`) under the singleton instance owner. Never store secret values in git, `wrangler.toml`, chats, issues, or logs.
 
-```sh
-cd tools/atax-mcp
-npx wrangler secret put SUPABASE_SECRET_KEY
-
-npx wrangler secret put GH_KEY_PERSONAL
-npx wrangler secret put GH_KEY_WORK
-npx wrangler secret put CF_KEY_PERSONAL
-npx wrangler secret put CF_KEY_SECONDARY
-```
-
-The suffix is the account alias. Account names must match `[A-Z][A-Z0-9_]{0,47}`. `GH_TOKEN_<ALIAS>` and `CLOUDFLARE_TOKEN_<ALIAS>` remain accepted for migration, but setting **both** new and old names for the *same* provider/alias fails closed rather than silently selecting a token. You may add more aliases without editing source code.
+Initialize the instance passkey once via Supabase SQL Editor (`SELECT atax_private.initialize_instance_passkey_v1('<12+ char passkey>');`), then unlock the Settings UI with `Enter passkey` to add, test, enable/disable, rotate, or revoke aliases.
 
 The `atax_provider_accounts_list` tool lists **aliases only**. When just one account is configured, tools can omit `account`; when several exist, tools must select an explicit alias. Selected GitHub credentials serve repository inspection, permanent repository creation and FMRL controller workflow dispatch/status. `CF_KEY_<ALIAS>` supplies Cloudflare account discovery and Worker-list diagnostics. Cloudflare mutation/deployment tools are **not yet** offered by this MCP surface. Vercel is intentionally deferred.
 
@@ -85,7 +72,7 @@ Do not grant secrets to arbitrary PR workflows, untrusted code, or general-purpo
 ## Release/verification contract
 
 1. Run `node --check` on every Worker module and `node --test tools/atax-mcp/*.test.mjs` on the exact commit; verify no multi-user credential vault, no Vercel tools and no secret values in results.
-2. Confirm the target Worker actually has `SUPABASE_SECRET_KEY`, named GitHub/Cloudflare secrets, and verified owner OAuth admission. A public `/health` result alone does not prove readiness.
+2. Confirm the target Worker actually has `ATAX_SUPABASE_URL` and `ATAX_SUPABASE_SECRET_KEY` secrets configured, and verified owner OAuth admission. Provider credentials are managed via Supabase Vault, not direct Worker secrets. A public `/health` result alone does not prove readiness.
 3. Verify an unauthorized identity gets no tools; the actual owner completes `initialize`, `tools/list`, `atax_context`, `atax_skill_get`, named account listing and GitHub/Cloudflare reads.
 4. Verify real GitHub repository operation and FMRL controller execution/cleanup; ensure test actors and an independent verifier retain distinct identities and scopes.
 5. Confirm the **direct GitHub connector + direct Supabase connector path** still works if the Worker is unreachable; compare tool coverage and record any parity gaps before claiming identical capabilities.
