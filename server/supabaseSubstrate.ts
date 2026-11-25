@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { inspectSupabaseConnection, sanitizeVaultMessage } from './supabaseVault.ts';
+import { openLedger } from '../tools/atax-mcp/data-api-ledger.mjs';
 import type {
   GoalGraphNodeData,
   SkillRecord,
@@ -194,103 +194,81 @@ type SafeQueryResult =
   | { ok: true; rows: Array<Record<string, unknown>> }
   | { ok: false; error: string };
 
-interface DataApiConfig {
-  baseUrl: string;
-  apiKey: string;
-}
+const STATIC_QUERIES = new Map<string,string>([
+  ['universes?select=id,universe_key,name,description,status&status=neq.retired&order=created_at.asc',
+   "select id,universe_key,name,description,status from public.universes where status <> 'retired' order by created_at asc"],
+  ['systems?select=id,universe_id,system_key,parent_system_id,name,system_type,description,status,parameters,context_version&status=neq.retired&order=created_at.asc,name.asc',
+   "select id,universe_id,system_key,parent_system_id,name,system_type,description,status,parameters,context_version from public.systems where status <> 'retired' order by created_at asc,name asc"],
+  ['system_functions?select=id,system_id,function_key,name,description,input_contract,output_contract,transformation,status&order=created_at.asc',
+   'select id,system_id,function_key,name,description,input_contract,output_contract,transformation,status from public.system_functions order by created_at asc'],
+  ['system_memories?select=system_id,memory_type&status=eq.active',
+   "select system_id,memory_type from public.system_memories where status='active'"],
+  ['system_constraints?select=system_id',
+   'select system_id from public.system_constraints'],
+  ['system_relationships?select=id,source_system_id,target_system_id,relation_type,description&order=created_at.asc',
+   'select id,source_system_id,target_system_id,relation_type,description from public.system_relationships order by created_at asc'],
+  ['system_wormholes?select=id,source_system_id,target_system_id,status,sync_mode,description&status=neq.closed&order=created_at.asc',
+   "select id,source_system_id,target_system_id,status,sync_mode,description from public.system_wormholes where status <> 'closed' order by created_at asc"],
+  ['visions?select=id,vision_key,title,description,target,status,created_at,updated_at&status=neq.archived&order=updated_at.desc',
+   "select id,vision_key,title,description,target,status,created_at,updated_at from public.visions where status <> 'archived' order by updated_at desc"],
+  ['vision_targets?select=id,vision_id,parent_target_id,target,label',
+   'select id,vision_id,parent_target_id,target,label from public.vision_targets'],
+  ['vision_target_goals?select=vision_target_id,goal_id',
+   'select vision_target_id,goal_id from public.vision_target_goals'],
+  ['goals?select=id,goal_key,name,description,status,goal_type,target,user_priority,goal_loop_definition,goal_loop_iteration,system_id,created_at,updated_at&status=not.in.(archived,cancelled)&order=user_priority.desc.nullslast,updated_at.desc',
+   "select id,goal_key,name,description,status,goal_type,target,user_priority,goal_loop_definition,goal_loop_iteration,system_id,created_at,updated_at from public.goals where status not in ('archived','cancelled') order by user_priority desc nulls last,updated_at desc"],
+  ['tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,task_type,status,verification_status,priority,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,blocker_notoriety,input_contract,output_contract,required_tools,required_capabilities,acceptance_criteria,verification_plan,loop_definition,task_definition,checkpoints,updated_at&status=not.in.(cancelled,abandoned)&order=priority.asc,created_at.asc',
+   "select id,task_key,goal_id,parent_task_id,task_name,description,task_type,status,verification_status,priority,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,blocker_notoriety,input_contract,output_contract,required_tools,required_capabilities,acceptance_criteria,verification_plan,loop_definition,task_definition,checkpoints,updated_at from public.tasks where status not in ('cancelled','abandoned') order by priority asc,created_at asc"],
+  ['systems?select=id,system_key',
+   'select id,system_key from public.systems'],
+  ['goal_dependencies?select=id,goal_id,depends_on_goal_id,dependency_type',
+   'select id,goal_id,depends_on_goal_id,dependency_type from public.goal_dependencies'],
+  ['task_dependencies?select=id,task_id,depends_on_task_id,dependency_type',
+   'select id,task_id,depends_on_task_id,dependency_type from public.task_dependencies'],
+  ['socket_task_budgets?select=task_id,max_total,input_used,output_used',
+   'select task_id,max_total,input_used,output_used from public.socket_task_budgets'],
+  ['socket_atomization_edges?select=source_task_id,target_task_id,dependency_type,source_output,target_input',
+   'select source_task_id,target_task_id,dependency_type,source_output,target_input from public.socket_atomization_edges'],
+  ['skills?select=id,name,slug,description,status,metadata,category_id,current_version_id&status=in.(active,deprecated)&order=name.asc',
+   "select id,name,slug,description,status,metadata,category_id,current_version_id from public.skills where status in ('active','deprecated') order by name asc"],
+  ['skill_categories?select=id,name',
+   'select id,name from public.skill_categories'],
+  ['skill_versions?select=id,version',
+   'select id,version from public.skill_versions'],
+  ['skill_tool_links?select=skill_id,tool_id,is_required',
+   'select skill_id,tool_id,is_required from public.skill_tool_links'],
+  ['skill_tools?select=id,slug,name,tool_type',
+   'select id,slug,name,tool_type from public.skill_tools'],
+]);
 
-function inspectDataApiConfig(env: Record<string, string | undefined>): DataApiConfig {
-  const normalizedEnv: Record<string, string | undefined> = {
-    ATAX_SUPABASE_URL: env.ATAX_SUPABASE_URL || env.SUPABASE_URL,
-    ATAX_SUPABASE_SECRET_KEY:
-      env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY,
-  };
-  const inspection = inspectSupabaseConnection(normalizedEnv);
-  if (!inspection.configured || !inspection.baseUrl || !inspection.apiKey) {
-    throw new Error(
-      inspection.error ||
-        'Supabase backend is not connected. Configure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY in your environment.'
-    );
-  }
-  return { baseUrl: inspection.baseUrl, apiKey: inspection.apiKey };
-}
-
-function createDataApiClient(config: DataApiConfig, fetcher: typeof fetch) {
-  const headers = {
-    apikey: config.apiKey,
-    Authorization: `Bearer ${config.apiKey}`,
-    Accept: 'application/json',
-  };
-
-  async function selectAll(pathWithQuery: string): Promise<SafeQueryResult> {
-    try {
-      const pageSize = 1000;
-      const rows: Array<Record<string, unknown>> = [];
-      for (let offset = 0; offset < 20000; offset += pageSize) {
-        const res = await fetcher(`${config.baseUrl}/rest/v1/${pathWithQuery}`, {
-          method: 'GET',
-          headers: { ...headers, Range: `${offset}-${offset + pageSize - 1}` },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!res.ok) {
-          return { ok: false, error: `Supabase Data API query failed (HTTP ${res.status})` };
-        }
-        const chunk = (await res.json()) as unknown;
-        if (!Array.isArray(chunk)) {
-          return { ok: false, error: 'Unexpected response format from Supabase Data API' };
-        }
-        for (const item of chunk) {
-          rows.push(asRecord(item));
-        }
-        if (chunk.length < pageSize) break;
+function createDataApiClient(env: Record<string,string|undefined>){
+  return {
+    async selectAll(pathWithQuery: string): Promise<SafeQueryResult>{
+      const sql=STATIC_QUERIES.get(pathWithQuery);
+      if(!sql) return {ok:false,error:'Unsupported substrate query.'};
+      try{
+        const db=await openLedger(env);
+        return {ok:true,rows:await db.query(sql)};
+      }catch(err){
+        return {ok:false,error:err instanceof Error?err.message:'Supabase PostgreSQL query failed.'};
       }
-      return { ok: true, rows };
-    } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'Supabase Data API request failed';
-      return {
-        ok: false,
-        error: sanitizeVaultMessage(rawMsg, config.apiKey, config.baseUrl) || 'Supabase Data API request failed',
-      };
+    },
+    async callRpc(name:string,body:Record<string,unknown>={}):Promise<SafeQueryResult>{
+      try{
+        const db=await openLedger(env);
+        return {ok:true,rows:[{value:await db.rpc(name,body)}]};
+      }catch(err){
+        return {ok:false,error:err instanceof Error?err.message:'Supabase PostgreSQL RPC failed.'};
+      }
     }
-  }
-
-  async function callRpc(name: string, body: Record<string, unknown> = {}): Promise<SafeQueryResult> {
-    try {
-      const res = await fetcher(`${config.baseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!res.ok) {
-        return { ok: false, error: `Supabase Data API RPC failed (HTTP ${res.status})` };
-      }
-      if (res.status === 204) {
-        return { ok: true, rows: [{ value: null }] };
-      }
-      const text = await res.text();
-      const data = text && text.trim() ? JSON.parse(text) : null;
-      return { ok: true, rows: [{ value: data }] };
-    } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'Supabase Data API RPC request failed';
-      return {
-        ok: false,
-        error:
-          sanitizeVaultMessage(rawMsg, config.apiKey, config.baseUrl) ||
-          'Supabase Data API RPC request failed',
-      };
-    }
-  }
-
-  return { selectAll, callRpc };
+  };
 }
 
 export function createSubstrateService(
-  env: Record<string, string | undefined> = process.env,
-  fetcher: typeof fetch = fetch
+  env: Record<string, string | undefined> = process.env
 ) {
   function resolveApi(): ReturnType<typeof createDataApiClient> {
-    return createDataApiClient(inspectDataApiConfig(env), fetcher);
+    return createDataApiClient(env);
   }
 
   async function getSystemsGraph(): Promise<SystemsSubstrateResponse> {
