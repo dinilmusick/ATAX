@@ -53,7 +53,12 @@ function post(method,params={},config={}){
 async function call(name,args={},config={}){const res=await post('tools/call',{name,arguments:args},config);return {status:res.status,payload:await res.json()};}
 
 test('health, route and configuration fail closed',async()=>{
-  assert.equal((await handler(new Request('https://atax.example/health'),{})).status,200);
+  const healthRes=await handler(new Request('https://atax.example/health'),{});
+  assert.equal(healthRes.status,200);
+  const healthData=await healthRes.json();
+  assert.equal(healthData.service,'atax-mcp');
+  assert.equal(healthData.status,'ok');
+  assert.equal(healthData.databaseTransport,'supabase-data-api');
   assert.equal((await handler(new Request('https://atax.example/private'),env)).status,404);
   const production=createRuntimeHandler(upstream);
   const missing=new Request('https://atax.example/mcp',{

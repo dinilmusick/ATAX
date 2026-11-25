@@ -25,23 +25,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install pinned PostgreSQL transport for server tests and Worker bundling
-        run: npm install --prefix tools/atax-mcp --ignore-scripts --no-audit --no-fund
-      - name: Syntax and protocol/auth tests (ATAX gateway only)
+      - name: Verify zero-dependency MCP package (no postgres.js)
         run: |
+          test ! -d tools/atax-mcp/node_modules/postgres
+          npm install --prefix tools/atax-mcp --ignore-scripts --no-audit --no-fund
+      - name: Syntax, unit, and E2E Data API contract tests (ATAX gateway only)
+        run: |
+          node --check tools/atax-mcp/data-api-ledger.mjs
+          node --check tools/atax-mcp/ledger-config.mjs
           node --check tools/atax-mcp/worker.mjs
           node --check tools/atax-mcp/github-tools.mjs
           node --check tools/atax-mcp/provider-accounts.mjs
           node --test tools/atax-mcp/*.test.mjs
+          node tests/e2e-data-api/run-all.mjs
 
-      - name: Independent live Cloudflare health and fail-closed probe
+      - name: Independent live Cloudflare health, Data API transport, and fail-closed probe
         if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'dinilmusick/ATAX')
         env:
-          HEALTH_URL: https://atax-mcp.dextro1n1laevo.workers.dev/health
-          MCP_URL: https://atax-mcp.dextro1n1laevo.workers.dev/mcp
+          HEALTH_URL: https://atax.dextro1n1laevo.workers.dev/health
+          MCP_URL: https://atax.dextro1n1laevo.workers.dev/mcp
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --retry 3 --max-time 20 "$HEALTH_URL" | grep -F '"status":"ok"'
+          health_body="$(curl --fail --silent --show-error --retry 3 --max-time 20 "$HEALTH_URL")"
+          echo "$health_body" | grep -F '"status":"ok"'
+          echo "$health_body" | grep -F '"databaseTransport":"supabase-data-api"'
           code="$(curl --silent --show-error --max-time 20 -o /tmp/atax-mcp-unauth.json -w '%{http_code}' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci-probe","version":"1"}}}' "$MCP_URL")"
           echo "Unauthenticated MCP initialize observed HTTP $code (expected 401 or 503)"
           if [ "$code" != "503" ] && [ "$code" != "401" ]; then

@@ -10,24 +10,47 @@ import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { createHandler } from './worker.mjs';
 
-// Auto-load .env from repository root if not already in environment
-if (!process.env.ATAX_SUPABASE_CONNECTION_URL) {
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  const envPath = resolve(repoRoot, '.env');
-  if (existsSync(envPath)) {
-    const lines = readFileSync(envPath, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx > 0) {
-        const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        if (!process.env[key]) process.env[key] = val;
+// Auto-load environment from candidate .env files if not already in process.env
+export function loadLocalEnv() {
+  const toolDir = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(toolDir, '../..');
+  const candidateEnvPaths = [
+    resolve(repoRoot, '.env'),
+    resolve(repoRoot, 'supabase/.env'),
+    resolve(toolDir, '.env')
+  ];
+
+  for (const envPath of candidateEnvPaths) {
+    if (existsSync(envPath)) {
+      const lines = readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx > 0) {
+          const key = trimmed.slice(0, idx).trim();
+          let val = trimmed.slice(idx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
       }
     }
   }
+
+  // Canonical alias resolution for Supabase Data API
+  if (!process.env.ATAX_SUPABASE_URL && process.env.SUPABASE_URL) {
+    process.env.ATAX_SUPABASE_URL = process.env.SUPABASE_URL;
+  }
+  if (!process.env.ATAX_SUPABASE_SECRET_KEY) {
+    process.env.ATAX_SUPABASE_SECRET_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  }
 }
+
+loadLocalEnv();
 
 const PORT = parseInt(process.env.PORT || process.env.ATAX_MCP_PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -81,6 +104,13 @@ export function createLocalServer(env = process.env) {
 
 // Direct execution entrypoint
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  const hasUrl = Boolean(process.env.ATAX_SUPABASE_URL || process.env.SUPABASE_URL);
+  const hasKey = Boolean(process.env.ATAX_SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY);
+  if (!hasUrl || !hasKey) {
+    console.warn('[atax-mcp] Warning: ATAX_SUPABASE_URL or ATAX_SUPABASE_SECRET_KEY is not configured.');
+    console.warn('[atax-mcp] Ensure ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY are set in environment or .env file.');
+  }
+
   const server = createLocalServer();
   server.listen(PORT, HOST, () => {
     console.log(`[atax-mcp] Local unified server listening on http://${HOST}:${PORT}`);

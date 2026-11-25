@@ -11,7 +11,8 @@ const config={settings:{
 ]};
 const open=async ()=>({rpc:async()=>config});
 test('only DB-derived policy and Vault credentials enter the MCP process',async()=>{
-  const r=await loadMcpRuntimeConfig({ATAX_SUPABASE_CONNECTION_URL:'fake',
+  const r=await loadMcpRuntimeConfig({ATAX_SUPABASE_URL:'https://fake.supabase.co',
+    ATAX_SUPABASE_SECRET_KEY:'fake-secret-key-0123456789',
     GH_KEY_EVIL:'ignored',MCP_SHARED_SUBJECT:'ignored'},open);
   assert.equal(r.MCP_SHARED_SUBJECT,'owner');
   assert.equal(r.GH_KEY_PERSONAL,config.accounts[0].token);

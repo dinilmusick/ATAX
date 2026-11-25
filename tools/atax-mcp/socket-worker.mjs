@@ -67,8 +67,8 @@ export function createConfiguredSocketWorker(env,fetcher=fetch){
   const budgetProfile=resolveBudget(String(env.SOCKET_MODEL_ID||'unknown'));
   const database={
     async executeAtomically(command){
-      if(!env.__ledgerDb)throw Error('Canonical PostgreSQL socket transaction unavailable');
-      // One server-controlled PostgreSQL RPC, never a client-directed SQL tool.
+      if(!env.__ledgerDb)throw Error('Canonical Supabase socket transaction unavailable');
+      // One server-controlled Supabase RPC, never a client-directed SQL tool.
       const result=await env.__ledgerDb.rpc('atax_socket_execute_v1',{command_in:command});
       if(!result||typeof result!=='object'||Array.isArray(result))
         throw Error('Canonical socket transaction unavailable');

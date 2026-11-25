@@ -11,22 +11,47 @@ import { dirname, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { createLocalServer } from './local-server.mjs';
 
-// Auto-load .env from repository root
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const envPath = resolve(repoRoot, '.env');
-if (existsSync(envPath)) {
-  const lines = readFileSync(envPath, 'utf8').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx > 0) {
-      const key = trimmed.slice(0, idx).trim();
-      const val = trimmed.slice(idx + 1).trim();
-      if (!process.env[key]) process.env[key] = val;
+// Auto-load environment from candidate .env files if not already in process.env
+function loadLocalEnv() {
+  const toolDir = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(toolDir, '../..');
+  const candidateEnvPaths = [
+    resolve(repoRoot, '.env'),
+    resolve(repoRoot, 'supabase/.env'),
+    resolve(toolDir, '.env')
+  ];
+
+  for (const envPath of candidateEnvPaths) {
+    if (existsSync(envPath)) {
+      const lines = readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx > 0) {
+          const key = trimmed.slice(0, idx).trim();
+          let val = trimmed.slice(idx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
     }
   }
+
+  // Canonical alias resolution for Supabase Data API
+  if (!process.env.ATAX_SUPABASE_URL && process.env.SUPABASE_URL) {
+    process.env.ATAX_SUPABASE_URL = process.env.SUPABASE_URL;
+  }
+  if (!process.env.ATAX_SUPABASE_SECRET_KEY) {
+    process.env.ATAX_SUPABASE_SECRET_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  }
 }
+
+loadLocalEnv();
 
 const token = process.env.ATAX_MCP_SHARED_TOKEN || process.argv[2] || 'atax_5426bb43a95f34297740e50804035fc67db24be2be32098d';
 
@@ -46,7 +71,8 @@ try {
   assert.equal(healthRes.status, 200, 'Health check should return 200');
   const healthData = await healthRes.json();
   assert.equal(healthData.service, 'atax-mcp');
-  console.log('[PASS] Step 2: Health check endpoint responded OK');
+  assert.equal(healthData.databaseTransport, 'supabase-data-api', 'databaseTransport must report supabase-data-api');
+  console.log('[PASS] Step 2: Health check endpoint responded OK (transport: supabase-data-api)');
 
   // Agent RPC Client Helper
   let msgId = 1;

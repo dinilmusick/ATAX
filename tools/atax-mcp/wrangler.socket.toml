@@ -4,5 +4,5 @@ compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# Only required runtime environment binding: ATAX_SUPABASE_CONNECTION_URL.
+# Runtime secrets (ATAX_SUPABASE_URL and ATAX_SUPABASE_SECRET_KEY) are set via `wrangler secret put`. Never in [vars].
 # Restricted socket remains release-gated; never enable without host attestation.

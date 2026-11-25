@@ -44,17 +44,15 @@ export default {
     }
 
     if (url.pathname === '/health') {
+      const hasDataApiConfig =
+        Boolean(env.ATAX_SUPABASE_URL || env.SUPABASE_URL) &&
+        Boolean(env.ATAX_SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY);
       return json({
         service: 'atax',
         version: '1.0.3',
         status: 'ok',
         transports: ['dashboard', 'mcp', 'socket'],
-        databaseTransport:
-          env.HYPERDRIVE &&
-          typeof env.HYPERDRIVE.connectionString === 'string' &&
-          env.HYPERDRIVE.connectionString.length > 0
-            ? 'cloudflare-hyperdrive'
-            : 'unconfigured',
+        databaseTransport: hasDataApiConfig ? 'supabase-data-api' : 'unconfigured',
       });
     }
 

@@ -1,4 +1,4 @@
-import {openLedger} from './pg-ledger.mjs';
+import {openLedger} from './data-api-ledger.mjs';
 
 /** Database-held server policy and Vault secrets, never deployment env vars. */
 const ALIAS=/^[A-Z][A-Z0-9_]{0,47}$/;

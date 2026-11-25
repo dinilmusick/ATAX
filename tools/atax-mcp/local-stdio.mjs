@@ -11,24 +11,47 @@ import { existsSync, readFileSync } from 'node:fs';
 import { loadMcpRuntimeConfig } from './ledger-config.mjs';
 import { routeRpc } from './worker.mjs';
 
-// Auto-load .env from repository root if not already in environment
-if (!process.env.ATAX_SUPABASE_CONNECTION_URL) {
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  const envPath = resolve(repoRoot, '.env');
-  if (existsSync(envPath)) {
-    const lines = readFileSync(envPath, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx > 0) {
-        const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        if (!process.env[key]) process.env[key] = val;
+// Auto-load environment from candidate .env files if not already in process.env
+export function loadLocalEnv() {
+  const toolDir = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(toolDir, '../..');
+  const candidateEnvPaths = [
+    resolve(repoRoot, '.env'),
+    resolve(repoRoot, 'supabase/.env'),
+    resolve(toolDir, '.env')
+  ];
+
+  for (const envPath of candidateEnvPaths) {
+    if (existsSync(envPath)) {
+      const lines = readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx > 0) {
+          const key = trimmed.slice(0, idx).trim();
+          let val = trimmed.slice(idx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
       }
     }
   }
+
+  // Canonical alias resolution for Supabase Data API
+  if (!process.env.ATAX_SUPABASE_URL && process.env.SUPABASE_URL) {
+    process.env.ATAX_SUPABASE_URL = process.env.SUPABASE_URL;
+  }
+  if (!process.env.ATAX_SUPABASE_SECRET_KEY) {
+    process.env.ATAX_SUPABASE_SECRET_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  }
 }
+
+loadLocalEnv();
 
 async function startStdio() {
   console.error('[atax-stdio] Initializing canonical ATAX MCP runtime configuration...');
