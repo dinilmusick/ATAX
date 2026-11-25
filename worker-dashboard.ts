@@ -93,7 +93,7 @@ async function substrateResponse(path: string, env: Record<string,unknown>) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Supabase substrate unavailable.';
     const status =
-      message.includes('ATAX_SUPABASE_CONNECTION_URL') || message.includes('ATAX_SUPABASE_URL')
+      message.includes('ATAX_SUPABASE_CONNECTION_URL')
         ? 503
         : 502;
     return json({ error: message }, status);
