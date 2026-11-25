@@ -9,6 +9,7 @@ DECLARE goal_uuid uuid; task_row public.tasks;
 BEGIN
   INSERT INTO public.goals(name,created_by_agent_id,status) VALUES ('Disposable claim race $cap','race-fixture-orchestrator','ready') RETURNING id INTO goal_uuid;
   SELECT * INTO task_row FROM public.task_ledger_register('race-fixture-agent','Race Fixture','Single-claim regression','Temporary runner fixture',ARRAY['$cap']::text[],'race-fixture-session','worker',3::smallint,'Atomic claim concurrency','{}'::jsonb,NULL);
+  UPDATE public.goals SET target=task_row.target WHERE id=goal_uuid;
   UPDATE public.tasks SET goal_id=goal_uuid,required_capabilities=ARRAY['$cap']::text[],task_role='loop_authoring' WHERE id=task_row.id;
 END;
 \$fixture\$;
