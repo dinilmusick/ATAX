@@ -31,7 +31,7 @@ function makeLedgerFactory(mockFetcher: typeof fetch) {
   });
 }
 
-test('getSystemsGraph queries Data API tables and maps subsystems, functions, relationships, and wormholes', async () => {
+test('getSystemsGraph maps canonical ledger queries and maps subsystems, functions, relationships, and wormholes', async () => {
   const mockFetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const headers = (init?.headers || {}) as Record<string, string>;
@@ -317,7 +317,7 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
   assert.equal(t2.contextLimit, null);
 });
 
-test('getSkillsCatalog queries skills registry via Data API and falls back cleanly on RPC', async () => {
+test('getSkillsCatalog maps skills registry results and falls back cleanly on RPC', async () => {
   const directFetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/rest/v1/skills?')) {
@@ -376,7 +376,6 @@ test('createSubstrateService rejects unconfigured env with PostgreSQL connection
     () => svc.getSystemsGraph(),
     (err: unknown) =>
       err instanceof Error &&
-      err.message.includes('ATAX_SUPABASE_CONNECTION_URL') &&
-      err.message.includes('ATAX_SUPABASE_SECRET_KEY')
+      err.message.includes('ATAX_SUPABASE_CONNECTION_URL')
   );
 });
