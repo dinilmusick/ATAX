@@ -19,8 +19,16 @@ async function readJson(request: Request): Promise<Record<string,unknown>> {
   return body as Record<string,unknown>;
 }
 
-async function settingsResponse(request: Request, env: Record<string,unknown>) {
-  const controller=createSettingsControlPlane(env as Record<string,string|undefined>);
+export type SettingsControlPlane = ReturnType<typeof createSettingsControlPlane>;
+export type SettingsFactory = (
+  env: Record<string,string|undefined>
+) => SettingsControlPlane;
+
+export function createDashboardWorker(
+  settingsFactory: SettingsFactory = createSettingsControlPlane,
+) {
+  async function settingsResponse(request: Request, env: Record<string,unknown>) {
+    const controller=settingsFactory(env as Record<string,string|undefined>);
 
   if(request.method==='GET' && new URL(request.url).pathname==='/api/settings/status'){
     const result=await controller.status(request);
@@ -80,10 +88,10 @@ async function settingsResponse(request: Request, env: Record<string,unknown>) {
     return json(result.body,result.status);
   }
 
-  return null;
-}
+    return null;
+  }
 
-async function substrateResponse(path: string, env: Record<string,unknown>) {
+  async function substrateResponse(path: string, env: Record<string,unknown>) {
   const service = createSubstrateService(env as Record<string,string|undefined>);
   try {
     if (path === '/api/substrate/systems') return json(await service.getSystemsGraph());
@@ -100,44 +108,47 @@ async function substrateResponse(path: string, env: Record<string,unknown>) {
   }
 }
 
-const mcpHandler = createMcpHandler();
+  const mcpHandler = createMcpHandler();
 
-export default {
-  async fetch(request: Request, env: Record<string,unknown>) {
-    const url = new URL(request.url);
+  return {
+    async fetch(request: Request, env: Record<string,unknown>) {
+      const url = new URL(request.url);
 
-    if (
-      url.pathname === '/mcp' ||
-      url.pathname === '/socket' ||
-      url.pathname === '/.well-known/oauth-protected-resource' ||
-      url.pathname === '/.well-known/oauth-protected-resource/mcp'
-    ) {
-      return mcpHandler(request, env);
-    }
+      if (
+        url.pathname === '/mcp' ||
+        url.pathname === '/socket' ||
+        url.pathname === '/.well-known/oauth-protected-resource' ||
+        url.pathname === '/.well-known/oauth-protected-resource/mcp'
+      ) {
+        return mcpHandler(request, env);
+      }
 
-    if (url.pathname === '/health') {
-      const configured=Boolean(env.ATAX_SUPABASE_CONNECTION_URL);
-      return json({
-        service: 'atax',
-        version: '1.1.0',
-        status: 'ok',
-        transports: ['dashboard', 'mcp', 'socket'],
-        databaseTransport: configured ? 'postgresql' : 'unconfigured',
-        settings: {routes:true, authentication:'instance-passkey'},
-      });
-    }
+      if (url.pathname === '/health') {
+        const configured=Boolean(env.ATAX_SUPABASE_CONNECTION_URL);
+        return json({
+          service: 'atax',
+          version: '1.1.0',
+          status: 'ok',
+          transports: ['dashboard', 'mcp', 'socket'],
+          databaseTransport: configured ? 'postgresql' : 'unconfigured',
+          settings: {routes:true, authentication:'instance-passkey'},
+        });
+      }
 
-    if (url.pathname.startsWith('/api/settings/')) {
-      const response=await settingsResponse(request,env);
-      return response || json({error:'Not found'},404);
-    }
+      if (url.pathname.startsWith('/api/settings/')) {
+        const response=await settingsResponse(request,env);
+        return response || json({error:'Not found'},404);
+      }
 
-    if (url.pathname.startsWith('/api/')) {
-      if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
-      return substrateResponse(url.pathname, env);
-    }
+      if (url.pathname.startsWith('/api/')) {
+        if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+        return substrateResponse(url.pathname, env);
+      }
 
-    if (!env.ASSETS) return json({ error: 'Static asset binding unavailable' }, 500);
-    return env.ASSETS.fetch(request);
-  },
-};
+      if (!env.ASSETS) return json({ error: 'Static asset binding unavailable' }, 500);
+      return env.ASSETS.fetch(request);
+    },
+  };
+}
+
+export default createDashboardWorker();
