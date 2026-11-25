@@ -58,7 +58,7 @@ test('health, route and configuration fail closed',async()=>{
   const healthData=await healthRes.json();
   assert.equal(healthData.service,'atax-mcp');
   assert.equal(healthData.status,'ok');
-  assert.equal(healthData.databaseTransport,'supabase-data-api');
+  assert.equal(healthData.databaseTransport,'postgresql');
   assert.equal((await handler(new Request('https://atax.example/private'),env)).status,404);
   const production=createRuntimeHandler(upstream);
   const missing=new Request('https://atax.example/mcp',{
