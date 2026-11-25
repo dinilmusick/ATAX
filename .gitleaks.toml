@@ -92,6 +92,285 @@ id = "generic-api-key"
 id = "jwt"
 
   [[rules.allowlists]]
+  description = "ATAX Data API transport exposes a non-secret RPC identifier"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.mjs  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax_0123456789abcdef0123456789abcdef0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX worker dashboard test uses a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''worker-dashboard\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-worker-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX settings control-plane tests use a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/settingsControlPlane\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-settings-control-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax_mcp_instance_auth_status_v1''']
+
+  [[rules.allowlists]]
+  description = "ATAX worker dashboard test uses deterministic synthetic Supabase key fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''worker-dashboard\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax_0123456789abcdef0123456789abcdef0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX worker dashboard test uses a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''worker-dashboard\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-worker-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX settings control-plane tests use a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/settingsControlPlane\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-settings-control-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''sb_secret_test_key_0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX settings control-plane tests use deterministic synthetic Supabase key fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/settingsControlPlane\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax_0123456789abcdef0123456789abcdef0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX worker dashboard test uses a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''worker-dashboard\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-worker-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX settings control-plane tests use a deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''server/settingsControlPlane\.test\.ts  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''atax-settings-control-test-secret-0123456789abcdef''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\.mocksecretkeylongerthan20chars''']
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic synthetic secret fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\.test\.mjs$''']
+  regexes = ['''my-synthetic-secret-key-12345''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/data-api-ledger\\.test\\.mjs$''']
+  regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9\\.mocksecretkeylongerthan20chars''']
+'']
+  regexes = ['''sb_secret_test_key_0123456789abcdef''']
+
+  [[rules.allowlists]]
   description = "ATAX Data API ledger tests use deterministic test-only JWT fixture"
   condition = "AND"
   regexTarget = "match"
