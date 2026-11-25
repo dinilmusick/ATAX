@@ -20,7 +20,10 @@ declare
     'task_ledger_add_dependency','task_ledger_finalize_loop_script','task_ledger_pending_verification',
     'task_ledger_claim_verification','task_ledger_claim_verification_for_task','task_ledger_verify_result_claimed',
     'atax_socket_execute_v1','atax_mcp_skills_search_v1','atax_mcp_skill_get_v1','atax_mcp_skills_catalog_v1',
-    'atax_mcp_runtime_config_v1','atax_mcp_socket_config_v1','atax_mcp_instance_owner_subject_v1',
+    'atax_mcp_runtime_config_v1','atax_mcp_socket_config_v1',
+    'atax_mcp_verify_instance_passkey_v1','atax_mcp_create_instance_session_v1',
+    'atax_mcp_validate_instance_session_v1','atax_mcp_revoke_instance_session_v1',
+    'atax_mcp_instance_auth_status_v1','atax_mcp_instance_owner_subject_v1',
     'atax_mcp_audit_provider_test_v1'
   ];
   p_oid oid; p_retset boolean; names text[]; types oid[]; modes "char"[];
