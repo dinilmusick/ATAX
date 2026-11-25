@@ -61,16 +61,21 @@ function backendUnavailableStatus(message?: string): SettingsStatus {
   };
 }
 
+export type LedgerFactory = (env: Record<string,string|undefined>) => Promise<any>;
+export type VaultFactory = (env: Record<string,string|undefined>, fetcher: typeof fetch) => any;
+
 export function createSettingsControlPlane(
   env: Record<string,string|undefined>,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  ledgerFactory: LedgerFactory = openLedger,
+  vaultFactory: VaultFactory = createVaultService,
 ) {
-  const vault=createVaultService(env,fetcher);
+  const vault=vaultFactory(env,fetcher);
 
   async function db() {
     const inspection=inspectSupabaseConnection(env);
     if(!inspection.configured) throw new VaultError(inspection.error || 'Supabase backend is not configured.',503);
-    return openLedger(env);
+    return ledgerFactory(env);
   }
 
   async function sessionHashFromRequest(request: Request): Promise<string | null> {
