@@ -23,11 +23,26 @@ jobs:
           for attempt in $(seq 1 30); do
             body="$(curl --fail --silent --show-error --max-time 20 https://atax.dextro1n1laevo.workers.dev/health)"
             echo "$body"
-            echo "$body" | grep -q '"version":"1.0.3"' && exit 0
+            echo "$body" | grep -q '"version":"1.1.0"' && exit 0
             sleep 2
           done
-          echo "Expected deployed Worker version 1.0.3 was not observed."
+          echo "Expected deployed Worker version 1.1.0 was not observed."
           exit 1
+      - name: Probe settings status route
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --output /tmp/settings-status.json --write-out '%{http_code}' --max-time 20 https://atax.dextro1n1laevo.workers.dev/api/settings/status)"
+          echo "HTTP $code"
+          cat /tmp/settings-status.json
+          test "$code" != "404"
+          grep -q '"backend"' /tmp/settings-status.json
+      - name: Probe provider authentication boundary
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --output /tmp/providers.json --write-out '%{http_code}' --max-time 20 https://atax.dextro1n1laevo.workers.dev/api/settings/providers)"
+          echo "HTTP $code"
+          cat /tmp/providers.json
+          test "$code" = "401"
       - name: Probe dashboard
         run: |
           set -euo pipefail
