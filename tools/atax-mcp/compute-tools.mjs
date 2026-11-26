@@ -13,5 +13,9 @@ export const computeTools=[
    }):[];
    return callFrnes('/api/frnes/compute/execute',{...a,accounts,ownerUserId:p.id},ctx.env,ctx.fetcher);
  }),
- tool('atax_compute_destroy','Destroy a FRNES compute environment after execution. Destruction is explicit and idempotent.','atax:write',schema({workspaceId:{type:'string',minLength:1,maxLength:120},environmentId:{type:'string',minLength:1,maxLength:128}},['workspaceId','environmentId']),async(a,_db,p,ctx)=>callFrnes('/api/frnes/compute/destroy',{...a,ownerUserId:p.id},ctx.env,ctx.fetcher)),
+ tool('atax_compute_destroy','Destroy a FRNES compute environment after execution. Destruction is explicit and idempotent.','atax:write',schema({workspaceId:{type:'string',minLength:1,maxLength:120},environmentId:{type:'string',minLength:1,maxLength:128},account:{type:'object',properties:{providerId:{type:'string',minLength:1,maxLength:64},alias:{type:'string',minLength:1,maxLength:48}},required:['providerId','alias'],additionalProperties:false}},['workspaceId','environmentId','account']),async(a,_db,p,ctx)=>{
+   const selected=resolveComputeAccount(ctx.env,p,a.account.providerId,a.account.alias);
+   return callFrnes('/api/frnes/compute/destroy',{workspaceId:a.workspaceId,environmentId:a.environmentId,ownerUserId:p.id,
+     accounts:[{providerId:a.account.providerId,alias:selected.alias,token:selected.token}]},ctx.env,ctx.fetcher);
+ }),
 ];
