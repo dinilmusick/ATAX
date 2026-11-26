@@ -290,8 +290,7 @@ test('creation schemas reject invalid task arrays, acceptance arrays and priorit
 });
 
 const gitEnv={...env,MCP_SHARED_SCOPES:'atax:read atax:github:read atax:github:create atax:fmrl:execute',MCP_GITHUB_OWNER:'dinilmusick',
-  GH_KEY_PERSONAL:'git-create-sample-test-only',
-  MCP_FMRL_ALLOWED_TARGETS:'dinilmusick/Skipo,dinilmusick/Kone'};
+  GH_KEY_PERSONAL:'git-create-sample-test-only'};
 const fakeGitHub=(records=[])=>async(url,options={})=>{
   records.push({url,options});
   if(url==='https://api.github.com/user')return Response.json({login:'dinilmusick'});
@@ -343,14 +342,13 @@ test('permanent GitHub repository creation uses correct API and verifies exact o
   assert.equal((await makeGitCall('atax_github_repository_create',{name:'ATAX'})).isError,true);
   assert.equal((await makeGitCall('atax_github_repository_create',{name:'.git'})).isError,true);
 });
-test('permanent repository path never skips github-specific auth or dispatch allowlist',async()=>{
+test('permanent repository path never skips github-specific auth or owner validation',async()=>{
   const denied=await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,MCP_SHARED_SCOPES:'atax:read atax:write'}});
   assert.equal(denied.isError,true);
   assert.equal((await makeGitCall('atax_github_repository_create',{name:'Demo'},{env:{...gitEnv,GH_KEY_PERSONAL:''}})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'a'.repeat(40)},{env:{...gitEnv,MCP_GITHUB_OWNER:'malicious'}})).isError,true);
-  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'a'.repeat(40)},{env:{...gitEnv,MCP_FMRL_ALLOWED_TARGETS:''}})).isError,true);
 });
-test('FMRL dispatch is controller-only, allowlisted, pinned exact SHA, correlates without leaking tokens',async()=>{
+test('FMRL dispatch is controller-only, owner-scoped, pinned exact SHA, correlates without leaking tokens',async()=>{
   const calls=[]; const ref='f'.repeat(40);
   const result=await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,event:'pull_request',workflow:'ci.yml'},{fetcher:fakeGitHub(calls)});
   assert.equal(result.isError,undefined);
@@ -364,9 +362,20 @@ test('FMRL dispatch is controller-only, allowlisted, pinned exact SHA, correlate
   assert.equal(payload.inputs.repository,'dinilmusick/Skipo');
   assert.ok(!JSON.stringify(result).includes('git-create-sample-test-only'));
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/ATAX',ref})).isError,true);
-  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Unknown',ref})).isError,true);
+  assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'other-owner/Unknown',ref})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref:'bad'})).isError,true);
   assert.equal((await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,workflow:'../ci.yml'})).isError,true);
+  const anyOwnerRepo=await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Unknown',ref});
+  assert.equal(anyOwnerRepo.isError,undefined);
+  assert.equal(anyOwnerRepo.structuredContent.result.state,'dispatch_accepted_not_executed');
+  const repairWithoutBranch=await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,mode:'repair'});
+  assert.equal(repairWithoutBranch.isError,true);
+  const repairCalls=[];
+  const repair=await makeGitCall('atax_fmrl_create_run_dispose',{repository:'dinilmusick/Skipo',ref,mode:'repair',branch:'fmrl-repair'},{fetcher:fakeGitHub(repairCalls)});
+  assert.equal(repair.isError,undefined);
+  const repairPayload=JSON.parse(repairCalls.find(x=>x.url.endsWith('/dispatches')).options.body);
+  assert.equal(repairPayload.inputs.mode,'repair');
+  assert.equal(repairPayload.inputs.branch,'fmrl-repair');
 });
 test('FMRL status requires terminal controller and successful cleanup + anonymous independent 404',async()=>{
   const id='12e43a92-822d-4a30-82a5-5ecb9dd11acf';

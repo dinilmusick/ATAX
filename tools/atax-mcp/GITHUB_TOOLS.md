@@ -27,7 +27,6 @@ The server also advertises this guide as MCP resource `atax://guides/github-work
 | --- | --- | --- |
 | `GH_KEY_PERSONAL`, `GH_KEY_WORK`, `GH_KEY_<ALIAS>` | Cloudflare **secrets** | Named GitHub accounts for repository creation, inspection and FMRL controller dispatch/status; require correct GitHub API permissions |
 | `MCP_GITHUB_OWNER=dinilmusick` | Plain variable | Canonical ATAX FMRL controller owner; not an arbitrary target workspace |
-| `MCP_FMRL_ALLOWED_TARGETS=dinilmusick/Skipo,dinilmusick/Kone` | Plain allowlist | Mandatory exact targets for FMRL; no wildcards |
 | `SUPABASE_SECRET_KEY` | Cloudflare **secret** | The one canonical ledger |
 | `MCP_ATAX_OWNER_JWT_SUBJECT` | Exact owner identity | Refuse all non-owner MCP callers even with nominal tool scopes |
 
@@ -49,7 +48,7 @@ The result verifies the repository under the selected GitHub token's actual user
 
 ### Example FMRL dispatch + cleanup verification
 
-**Preflight:** verify that the target is in `MCP_FMRL_ALLOWED_TARGETS`, that a local container is unavailable/insufficient or independent remote CI is needed, that the exact target commit SHA has been resolved and that the ATAX task is properly claimed.
+**Preflight:** verify that the target is under `MCP_GITHUB_OWNER`, that a local container is unavailable/insufficient or independent remote CI is needed, that the exact target commit SHA has been resolved and that the ATAX task is properly claimed.
 
 ```json
 {"name":"atax_fmrl_create_run_dispose","arguments":{"repository":"dinilmusick/Skipo","account":"PERSONAL","ref":"<exact lowercase 40-character commit SHA>","event":"pull_request","workflow":"test.yml"}}

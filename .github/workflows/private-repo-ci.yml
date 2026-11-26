@@ -116,8 +116,8 @@ jobs:
           assert mode in ('direct','repair','artifact')
           assert not request_id or re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',request_id)
           assert not branch or (re.fullmatch(r'[A-Za-z0-9_./-]{1,180}',branch) and '..' not in branch)
-          assert mode != 'repair' or (repo in ('dinilmusick/Luth','dinilmusick/Srkl-Engine','dinilmusick/Aiko','dinilmusick/Frnes','dinilmusick/Embr') and branch)
-          assert mode != 'artifact' or (repo in ('dinilmusick/Srkl-Engine','dinilmusick/Aiko') and branch)
+          assert mode != 'repair' or branch
+          assert mode != 'artifact' or branch
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
             for key,val in [('repository',repo),('ref',ref),('event',event),('workflow',workflow),('mode',mode),('branch',branch)]:
               print(key+'='+val,file=out)

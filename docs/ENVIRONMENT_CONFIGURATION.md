@@ -23,7 +23,7 @@ Legacy aliases `SUPABASE_URL` and `SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE
 
 **Supabase-stored runtime policy & Vault secrets** (loaded via `atax_mcp_runtime_config_v1`, never deployment env vars):
 - GitHub & Cloudflare provider tokens: stored encrypted in **Supabase Vault** via `atax_private.provider_accounts` (aliases match `[A-Z][A-Z0-9_]{0,47}`).
-- Owner/MCP settings (`MCP_OWNER_SUBJECT`, `MCP_GITHUB_OWNER`, `MCP_FMRL_ALLOWED_TARGETS`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_AUTH_*`, `SOCKET_*`): stored in `atax_private.mcp_server_settings`.
+- Owner/MCP settings (`MCP_OWNER_SUBJECT`, `MCP_GITHUB_OWNER`, `MCP_SHARED_TOKEN_SHA256`, `MCP_SHARED_SUBJECT`, `MCP_SHARED_SCOPES`, `MCP_AUTH_*`, `SOCKET_*`): stored in `atax_private.mcp_server_settings`.
 
 **Vercel:** there is currently **no live Vercel adapter** (`501 Not Implemented` in `server/supabaseVault.ts`, skipped in `tools/atax-mcp/ledger-config.mjs`).
 

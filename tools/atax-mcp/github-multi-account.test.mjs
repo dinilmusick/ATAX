@@ -34,7 +34,6 @@ const multiAccountEnv = {
   MCP_AUTH_OWNER_SCOPES:'atax:read atax:write atax:github:read atax:github:create atax:fmrl:execute',
   MCP_SHARED_TOKEN_SHA256:'',
   MCP_GITHUB_OWNER:'dinilmusick',
-  MCP_FMRL_ALLOWED_TARGETS:'dinilmusick/Skipo',
   GH_KEY_PERSONAL:'gh-token-personal-123456789',
   GH_KEY_WORK:'gh-token-work-987654321xx',
   CF_KEY_MAIN:'cf-token-main-xxxxxxxxxxx',
@@ -295,7 +294,6 @@ test('Phase4: FMRL dispatch & status enforce account consistency and non-hardcod
   const altEnv={
     ...multiAccountEnv,
     MCP_GITHUB_OWNER:'alt-owner',
-    MCP_FMRL_ALLOWED_TARGETS:'alt-owner/AppOne',
   };
   const callAlt=async(name,args)=>{
     const tok=await makeJwt('owner-1');

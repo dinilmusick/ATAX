@@ -41,7 +41,7 @@ sequenceDiagram
   - `MCP_AUTH_AUDIENCE`: `authenticated` (or space/comma-separated list of accepted audiences)
   - `MCP_ATAX_OWNER_JWT_SUBJECT`: Supabase Auth `user.id` UUID of the owner's Google account
   - `MCP_AUTH_OWNER_SCOPES`: explicit space-separated `atax:*` scopes
-  - `MCP_GITHUB_OWNER`, `MCP_FMRL_ALLOWED_TARGETS`
+  - `MCP_GITHUB_OWNER`
 
 ## 3. JWT Verification & Owner Isolation Rules
 
