@@ -485,8 +485,14 @@ jobs:
           status=0
           if [[ -f target/pnpm-lock.yaml ]]; then
             test -f target/package.json
-            (cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
-               pnpm install --frozen-lockfile --ignore-scripts) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
+            (
+              cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
+                pnpm install --frozen-lockfile --ignore-scripts
+              if [[ -f scaffolds/vite/pnpm-lock.yaml && -f scaffolds/vite/package.json ]]; then
+                cd scaffolds/vite && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
+                  pnpm install --frozen-lockfile --ignore-scripts
+              fi
+            ) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
           elif [[ -f target/package.json ]]; then
             (cd target && npm install --package-lock-only --ignore-scripts --no-audit --no-fund &&
                npm ci --ignore-scripts --no-audit --no-fund) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
@@ -657,7 +663,7 @@ def main() -> int:
     target_ref = args.ref
     if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
         raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
-    if not source.get("private", False):
+    if args.mode != "repair" and not source.get("private", False):
         raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
 
     created = api("/user/repos", bearer, "POST", {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ATAX FMRL: commit only a regenerated lockfile to its exact private PR head.
+"""ATAX FMRL: commit only regenerated lockfiles to the exact PR head.
 
 This script runs only after a static no-scripts lock generation step.
 The write credential is scoped to this one trusted step, never to npm/pnpm.
@@ -79,24 +79,28 @@ def main() -> None:
     if not changed:
         print("FMRL lockfile repair: no content change; exact branch verified")
         return
-    if len(changed) != 1 or changed[0] not in LOCKFILES:
+    if not all(Path(p).name in LOCKFILES for p in changed):
         fail("Lockfile repair mutated a non-lockfile source file")
-    path = changed[0]
-    target = ROOT / path
-    if target.is_symlink() or not target.is_file() or target.stat().st_size > 3_000_000:
-        fail("Lockfile missing, symbolic, or exceeds bounded size")
+    tree_entries = []
+    digests = []
+    for path in changed:
+        target = ROOT / path
+        if target.is_symlink() or not target.is_file() or target.stat().st_size > 3_000_000:
+            fail("Lockfile missing, symbolic, or exceeds bounded size")
+        contents = target.read_bytes()
+        local_digest = hashlib.sha256(contents).hexdigest()
+        fileblob = api("/repos/" + repo + "/git/blobs", token, "POST", {
+            "content": base64.b64encode(contents).decode("ascii"),
+            "encoding": "base64",
+        }, stage="create-lock-blob")["sha"]
+        tree_entries.append({"path": path, "mode": "100644", "type": "blob", "sha": fileblob})
+        digests.append((fileblob, local_digest))
 
-    contents = target.read_bytes()
-    local_digest = hashlib.sha256(contents).hexdigest()
-    fileblob = api("/repos/" + repo + "/git/blobs", token, "POST", {
-        "content": base64.b64encode(contents).decode("ascii"),
-        "encoding": "base64",
-    }, stage="create-lock-blob")["sha"]
     base_commit = api("/repos/" + repo + "/git/commits/" + expected, token, stage="base-commit-read")
     base_tree = base_commit["tree"]["sha"]
     new_tree = api("/repos/" + repo + "/git/trees", token, "POST", {
         "base_tree": base_tree,
-        "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": fileblob}],
+        "tree": tree_entries,
     }, stage="create-lock-tree")["sha"]
     new_commit = api("/repos/" + repo + "/git/commits", token, "POST", {
         "message": "fix(auth): regenerate frozen dependency lockfile via isolated ATAX FMRL",
@@ -108,12 +112,13 @@ def main() -> None:
     updated = api(branch_path, token, stage="branch-readback")
     if updated["object"]["sha"] != new_commit:
         fail("Independent branch readback differs from committed SHA")
-    published_blob = api("/repos/" + repo + "/git/blobs/" + fileblob, token, stage="blob-readback")
-    if published_blob.get("encoding") != "base64":
-        fail("Independent blob readback encoding invalid")
-    if hashlib.sha256(base64.b64decode(published_blob["content"])).hexdigest() != local_digest:
-        fail("Independent lockfile readback digest mismatch")
-    print("FMRL lockfile repair: atomic private PR commit and content digest verified")
+    for fileblob, local_digest in digests:
+        published_blob = api("/repos/" + repo + "/git/blobs/" + fileblob, token, stage="blob-readback")
+        if published_blob.get("encoding") != "base64":
+            fail("Independent blob readback encoding invalid")
+        if hashlib.sha256(base64.b64decode(published_blob["content"])).hexdigest() != local_digest:
+            fail("Independent lockfile readback digest mismatch")
+    print("FMRL lockfile repair: atomic PR commit and content digest verified")
 
 
 if __name__ == "__main__":
