@@ -52,6 +52,9 @@ export interface ProviderTestResult {
   statusCode: number;
   summary: string;
   checkedAt: string;
+  apiReachable?: boolean;
+  authVerified?: boolean;
+  computeSupported?: boolean;
 }
 
 export class VaultError extends Error {
@@ -64,9 +67,19 @@ export class VaultError extends Error {
 }
 
 const VALID_PROVIDERS = /^[a-z][a-z0-9_-]{1,63}$/;
+const RESERVED_PROVIDERS = new Set(['__proto__', 'constructor', 'prototype']);
+const COMPUTE_SUPPORTED_PROVIDERS = new Set(['fly', 'northflank', 'render', 'railway']);
 const ALIAS_REGEX = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ACCOUNT_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SUBJECT_REGEX = /^[\w.@:-]{3,200}$/;
+
+function assertValidProviderId(raw: unknown): ProviderType {
+  const provider = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!VALID_PROVIDERS.test(provider) || RESERVED_PROVIDERS.has(provider)) {
+    throw new VaultError('Invalid provider identifier.', 400);
+  }
+  return provider;
+}
 
 export function sanitizeVaultMessage(
   rawMessage: string,
@@ -124,10 +137,7 @@ export function inspectSupabaseConnection(
 }
 
 export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsertInput {
-  const providerRaw = typeof input.provider === 'string' ? input.provider.trim().toLowerCase() : '';
-  if (!VALID_PROVIDERS.test(providerRaw)) {
-    throw new VaultError('Invalid provider identifier.', 400);
-  }
+  const providerRaw = assertValidProviderId(input.provider);
 
   const alias = typeof input.alias === 'string' ? input.alias.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
@@ -149,7 +159,7 @@ export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsert
   }
 
   return {
-    provider: providerRaw as ProviderType,
+    provider: providerRaw,
     alias,
     credential,
     accountId,
@@ -161,15 +171,12 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
   provider: ProviderType;
   alias: string;
 } {
-  const provider = typeof providerRaw === 'string' ? providerRaw.trim().toLowerCase() : '';
-  if (!VALID_PROVIDERS.test(provider)) {
-    throw new VaultError('Invalid provider identifier.', 400);
-  }
+  const provider = assertValidProviderId(providerRaw);
   const alias = typeof aliasRaw === 'string' ? aliasRaw.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
     throw new VaultError('Invalid account alias.', 400);
   }
-  return { provider: provider as ProviderType, alias };
+  return { provider, alias };
 }
 
 export type VaultLedgerOpener = (
@@ -327,9 +334,6 @@ export function createVaultService(
     providerRaw: string,
     aliasRaw: string
   ): Promise<ProviderTestResult> {
-    // Phase 1 bug fix: reject undefined/null owner up front with a clear error
-    // rather than forwarding it to the RPC which would silently fail to find
-    // the credential because no owner subject was supplied for the Vault lookup.
     if (suppliedOwner === undefined || suppliedOwner === null || suppliedOwner === '') {
       throw new VaultError(
         'Instance owner subject is required to retrieve provider credentials. Ensure the instance passkey is initialized and the session is valid.',
@@ -358,6 +362,9 @@ export function createVaultService(
         statusCode: 403,
         summary: 'Configured Vault owner does not match the instance owner.',
         checkedAt: new Date().toISOString(),
+        apiReachable: false,
+        authVerified: false,
+        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
       };
     }
 
@@ -373,43 +380,68 @@ export function createVaultService(
         statusCode: 404,
         summary: 'Active Vault secret not found for this alias (ensure account is enabled).',
         checkedAt: new Date().toISOString(),
+        apiReachable: false,
+        authVerified: false,
+        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
       };
     }
 
-    const probeUrls:Record<string,string|undefined>={
-      github:'https://api.github.com/user',
-      cloudflare:'https://api.cloudflare.com/client/v4/user/tokens/verify',
-      fly:'https://api.machines.dev/v1/apps?org_slug=personal',
-      northflank:'https://api.northflank.com/v1/projects',
-      koyeb:'https://app.koyeb.com/v1/apps',
-      render:'https://api.render.com/v1/services?limit=1',
+    const probeSpecs: Record<string, { url: string; method: 'GET' | 'POST'; body?: string }> = {
+      github: { url: 'https://api.github.com/user', method: 'GET' },
+      cloudflare: { url: 'https://api.cloudflare.com/client/v4/user/tokens/verify', method: 'GET' },
+      fly: { url: 'https://api.machines.dev/v1/apps?org_slug=personal', method: 'GET' },
+      northflank: { url: 'https://api.northflank.com/v1/projects', method: 'GET' },
+      koyeb: { url: 'https://app.koyeb.com/v1/apps', method: 'GET' },
+      render: { url: 'https://api.render.com/v1/services?limit=1', method: 'GET' },
+      railway: {
+        url: 'https://backboard.railway.com/graphql/v2',
+        method: 'POST',
+        body: JSON.stringify({ query: 'query{me{id name}}' }),
+      },
     };
-    const probeUrl=probeUrls[provider];
-    if(!probeUrl){
-      const result:ProviderTestResult={
-        ok:false,provider,alias,statusCode:501,
-        summary:'No live provider probe is implemented for this provider yet.',
-        checkedAt:new Date().toISOString(),
+    const spec = probeSpecs[provider];
+    if (!spec) {
+      const result: ProviderTestResult = {
+        ok: false,
+        provider,
+        alias,
+        statusCode: 501,
+        summary: 'No live provider probe is implemented for this provider yet.',
+        checkedAt: new Date().toISOString(),
+        apiReachable: false,
+        authVerified: false,
+        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
       };
-      try{await db.rpc('atax_mcp_audit_provider_test_v1',{provider_in:provider,alias_in:alias,ok_in:false,status_code_in:501,actor_subject_in:owner});}catch{}
+      try {
+        await db.rpc('atax_mcp_audit_provider_test_v1', {
+          provider_in: provider,
+          alias_in: alias,
+          ok_in: false,
+          status_code_in: 501,
+          actor_subject_in: owner,
+        });
+      } catch {}
       return result;
     }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     let result: ProviderTestResult;
+    const computeSupported = COMPUTE_SUPPORTED_PROVIDERS.has(provider);
     try {
-      const res = await fetcher(probeUrl, {
-        method: 'GET',
+      const res = await fetcher(spec.url, {
+        method: spec.method,
         redirect: 'manual',
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${match.token}`,
           Accept: 'application/json',
           'User-Agent': 'atax-control-plane',
+          ...(spec.body ? { 'Content-Type': 'application/json' } : {}),
         },
+        ...(spec.body ? { body: spec.body } : {}),
       });
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
         result = {
           ok: false,
@@ -418,38 +450,108 @@ export function createVaultService(
           statusCode: res.status,
           summary: `Provider rejected credential (HTTP ${res.status}).`,
           checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: false,
+          computeSupported,
         };
-      } else if (provider === 'github' && typeof data.login === 'string') {
+      } else if (provider === 'github' && data && typeof (data as Record<string, unknown>).login === 'string') {
         result = {
           ok: true,
           provider,
           alias,
           statusCode: res.status,
-          summary: `Verified GitHub account @${data.login}`,
+          summary: `Verified GitHub account @${(data as Record<string, unknown>).login}`,
           checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
         };
-      } else if (provider === 'cloudflare') {
-        const resultObj = data.result as Record<string, unknown> | undefined;
+      } else if (provider === 'cloudflare' && data && (data as Record<string, unknown>).success === true) {
+        const resultObj = (data as Record<string, unknown>).result as Record<string, unknown> | undefined;
         const cfStatus = typeof resultObj?.status === 'string' ? resultObj.status : 'active';
         result = {
-          ok: true,
+          ok: cfStatus === 'active',
           provider,
           alias,
           statusCode: res.status,
           summary: `Cloudflare token status: ${cfStatus}`,
           checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: cfStatus === 'active',
+          computeSupported,
         };
-      } else if (['fly','northflank','koyeb','render'].includes(provider)) {
+      } else if (provider === 'fly' && data && Array.isArray((data as Record<string, unknown>).apps)) {
         result = {
-          ok: true, provider, alias, statusCode: res.status,
-          summary: 'Provider credential verified by live API probe.',
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Fly.io credential (${((data as Record<string, unknown>).apps as unknown[]).length} apps accessible).`,
           checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+        };
+      } else if (provider === 'northflank' && data && Array.isArray(((data as Record<string, any>).data?.projects ?? (data as Record<string, any>).data))) {
+        const projects = ((data as Record<string, any>).data?.projects ?? (data as Record<string, any>).data) as unknown[];
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Northflank credential (${projects.length} projects accessible).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+        };
+      } else if (provider === 'koyeb' && data && Array.isArray((data as Record<string, unknown>).apps)) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Koyeb credential (${((data as Record<string, unknown>).apps as unknown[]).length} apps accessible; compute execution not yet implemented).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported: false,
+        };
+      } else if (provider === 'render' && Array.isArray(data)) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Render credential (${data.length} services sampled).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+        };
+      } else if (provider === 'railway' && data && !Array.isArray((data as Record<string, any>).errors) && typeof (data as Record<string, any>).data?.me?.id === 'string') {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Railway credential (${String((data as Record<string, any>).data.me.name || (data as Record<string, any>).data.me.id)}).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
         };
       } else {
         result = {
-          ok: false, provider, alias, statusCode: 501,
-          summary: 'No live provider probe is implemented for this provider yet.',
+          ok: false,
+          provider,
+          alias,
+          statusCode: 502,
+          summary: 'Provider API returned an unexpected or unauthenticated response payload.',
           checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: false,
+          computeSupported,
         };
       }
     } catch {
@@ -460,6 +562,9 @@ export function createVaultService(
         statusCode: 502,
         summary: 'Upstream provider probe timed out or could not be reached.',
         checkedAt: new Date().toISOString(),
+        apiReachable: false,
+        authVerified: false,
+        computeSupported,
       };
     } finally {
       clearTimeout(timer);
