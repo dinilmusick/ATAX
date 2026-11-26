@@ -25,7 +25,7 @@ jobs:
         run: corepack enable
       - name: Install dependencies
         working-directory: frnes
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --dangerously-allow-all-builds
       - name: Typecheck
         working-directory: frnes
         run: pnpm run typecheck
