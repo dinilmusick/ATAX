@@ -1,6 +1,7 @@
 // FRNES compute adapter gateway contract.
 /** ATAX compute control-plane adapter. FRNES owns provider accounts and execution; ATAX owns policy and routing. */
-import {resolveComputeAccount} from './provider-accounts.mjs';
+import {listAllComputeAccounts,resolveComputeAccount} from './provider-accounts.mjs';
+import {rankWeightedAccounts,recordAccountUsage,selectWeightedAccount} from './weighted-rotation.mjs';
 
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 const tool=(name,description,scope,inputSchema,invoke)=>({name,description,scope,inputSchema,invoke});
@@ -46,8 +47,17 @@ async function callFrnes(path,body,env,fetcher){
   }
   let payload=null;
   try{payload=await response.json();}catch{}
-  if(!response.ok)throw new Error('FRNES compute request rejected');
+  if(!response.ok)throw Object.assign(new Error('FRNES compute request rejected'),{status:response.status});
   return payload;
+}
+
+function orderWeightedComputeAccounts(candidates){
+  if(!Array.isArray(candidates)||candidates.length<=1)return candidates||[];
+  const primary=selectWeightedAccount(candidates);
+  const ranked=rankWeightedAccounts(candidates)
+    .map(x=>x.candidate)
+    .filter(c=>!(c.providerId===primary.providerId&&c.alias===primary.alias));
+  return [primary,...ranked];
 }
 
 export const computeTools=[
@@ -60,7 +70,7 @@ export const computeTools=[
   ),
   tool(
     'atax_compute_execute',
-    'Execute a bounded repository command in a FRNES-selected provider environment. FRNES performs account ownership, quota and capability checks.',
+    'Execute a bounded repository command in a FRNES-selected provider environment using usage-based weighted account rotation.',
     'atax:write',
     schema({
       workspaceId:{type:'string',minLength:1,maxLength:120},
@@ -87,11 +97,35 @@ export const computeTools=[
       timeoutSeconds:{type:'integer',minimum:1,maximum:7200},
     },['workspaceId','repository','ref','command','requirement']),
     async(a,_db,p,ctx)=>{
-      const accounts=Array.isArray(a.accounts)?a.accounts.map(item=>{
-        const selected=resolveComputeAccount(ctx.env,p,item.providerId,item.alias);
-        return {providerId:item.providerId,alias:selected.alias,token:selected.token};
-      }):[];
-      return callFrnes('/api/frnes/compute/execute',{...a,accounts,ownerUserId:p.id},ctx.env,ctx.fetcher);
+      const resolved=Array.isArray(a.accounts)&&a.accounts.length>0
+        ?a.accounts.map(item=>{
+          const selected=resolveComputeAccount(ctx.env,p,item.providerId,item.alias);
+          return {
+            providerId:item.providerId,
+            alias:selected.alias,
+            token:selected.token,
+            weight:selected.weight,
+            remainingFraction:selected.remainingFraction,
+          };
+        })
+        :listAllComputeAccounts(ctx.env,p,a.providerIds);
+      const ordered=orderWeightedComputeAccounts(resolved);
+      const wireAccounts=ordered.map(({providerId,alias,token})=>({providerId,alias,token}));
+      try{
+        const result=await callFrnes('/api/frnes/compute/execute',{...a,accounts:wireAccounts,ownerUserId:p.id},ctx.env,ctx.fetcher);
+        const parts=String(result?.environmentId||'').split('/');
+        const chosenProvider=result?.provider||parts[0]||ordered[0]?.providerId;
+        const chosenAlias=parts[1]||ordered[0]?.alias;
+        if(chosenProvider&&chosenAlias){
+          recordAccountUsage(chosenProvider,chosenAlias,{ok:true});
+        }
+        return result;
+      }catch(err){
+        if(ordered[0]){
+          recordAccountUsage(ordered[0].providerId,ordered[0].alias,{ok:false,rateLimited:err?.status===429});
+        }
+        throw err;
+      }
     }
   ),
   tool(
