@@ -62,7 +62,7 @@ id = "generic-api-key"
   condition = "AND"
   regexTarget = "match"
   paths = ['''server/vaultAndAuth\.test\.ts$''']
-  regexes = ['''(?:sb_secret_test_key_0123456789abcdef|sb_secret_leaky_key_0123456789abcdef)''']
+  regexes = ['''(?:sb_secret_test_key_0123456789abcdef|sb_secret_leaky_key_0123456789abcdef|sb_secret_probe_test_key_0123456789)''']
 
   [[rules.allowlists]]
   description = "Concurrency test uses a deterministic ATAX fixture token"
