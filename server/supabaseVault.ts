@@ -6,7 +6,7 @@ import {
   type LedgerDb,
 } from '../tools/atax-mcp/data-api-ledger.mjs';
 
-export type ProviderType = 'github' | 'cloudflare' | 'vercel';
+export type ProviderType = string;
 
 export interface ProviderAccountSummary {
   id: string;
@@ -63,7 +63,7 @@ export class VaultError extends Error {
   }
 }
 
-const VALID_PROVIDERS = new Set<ProviderType>(['github', 'cloudflare']);
+const VALID_PROVIDERS = /^[a-z][a-z0-9_-]{1,63}$/;
 const ALIAS_REGEX = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ACCOUNT_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SUBJECT_REGEX = /^[\w.@:-]{3,200}$/;
