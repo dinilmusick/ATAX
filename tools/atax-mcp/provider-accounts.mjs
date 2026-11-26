@@ -2,6 +2,8 @@
 const PREFIX = Object.freeze({github:['GH_KEY_','GH_TOKEN_'],cloudflare:['CF_KEY_','CLOUDFLARE_TOKEN_']});
 const COMPUTE_PREFIX='FRNES_KEY_';
 const COMPUTE_JSON='FRNES_COMPUTE_ACCOUNTS_JSON';
+const AI_PREFIX='AI_KEY_';
+const AI_JSON='AI_INFERENCE_ACCOUNTS_JSON';
 const PROVIDER_ID=/^[a-z][a-z0-9_-]{1,63}$/;
 const ALIAS = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -32,29 +34,34 @@ function configuredAccounts(env,provider) {
   }
   return found;
 }
-function parseComputeJsonEntries(env) {
-  if(typeof env?.[COMPUTE_JSON]!=='string'||!env[COMPUTE_JSON].trim())return [];
+function parseJsonEntries(env,jsonKey,errLabel) {
+  if(typeof env?.[jsonKey]!=='string'||!env[jsonKey].trim())return [];
   let parsed;
-  try{parsed=JSON.parse(env[COMPUTE_JSON]);}catch{throw new Error('Invalid FRNES compute account configuration');}
-  if(!Array.isArray(parsed))throw new Error('Invalid FRNES compute account configuration');
+  try{parsed=JSON.parse(env[jsonKey]);}catch{throw new Error(errLabel);}
+  if(!Array.isArray(parsed))throw new Error(errLabel);
   return parsed;
 }
 function configuredComputeAccounts(env,provider) {
   if(!PROVIDER_ID.test(provider))throw new Error('Invalid compute provider identifier');
   const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'__';
   const accounts=new Map();
-  for(const item of parseComputeJsonEntries(env)) {
+  for(const item of parseJsonEntries(env,COMPUTE_JSON,'Invalid FRNES compute account configuration')) {
     if(!item||typeof item!=='object'||item.providerId!==provider||typeof item.alias!=='string'||typeof item.token!=='string')continue;
     const alias=item.alias.toUpperCase();
     if(!ALIAS.test(alias)||!item.token.trim())continue;
     if(accounts.has(alias))throw new Error('Duplicate compute provider account alias: '+alias);
-    accounts.set(alias,{alias,token:item.token});
+    accounts.set(alias,{
+      alias,
+      token:item.token,
+      weight:typeof item.weight==='number'&&Number.isFinite(item.weight)&&item.weight>0?item.weight:1,
+      remainingFraction:typeof item.remainingFraction==='number'?item.remainingFraction:null,
+    });
   }
   for(const key of Object.keys(env||{})) if(key.startsWith(prefix)) {
     const alias=key.slice(prefix.length);
     if(ALIAS.test(alias)&&typeof env[key]==='string'&&env[key].trim()) {
       if(accounts.has(alias))throw new Error('Duplicate compute provider account alias: '+alias);
-      accounts.set(alias,{alias,token:env[key]});
+      accounts.set(alias,{alias,token:env[key],weight:1,remainingFraction:null});
     }
   }
   return accounts;
@@ -67,6 +74,29 @@ export function availableAccounts(env,principal,provider) {
 export function availableComputeAccounts(env,principal,provider) {
   if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))return [];
   return [...configuredComputeAccounts(env,provider).keys()].sort();
+}
+export function listAllComputeAccounts(env,principal,providerIds=null) {
+  if(!isOwnerPrincipal(env,principal))return [];
+  const filter=Array.isArray(providerIds)&&providerIds.length>0?new Set(providerIds):null;
+  const providers=new Set();
+  for(const item of parseJsonEntries(env,COMPUTE_JSON,'Invalid FRNES compute account configuration')) {
+    if(item&&typeof item==='object'&&typeof item.providerId==='string'&&PROVIDER_ID.test(item.providerId)) {
+      providers.add(item.providerId);
+    }
+  }
+  for(const key of Object.keys(env||{})) if(key.startsWith(COMPUTE_PREFIX)) {
+    const rest=key.slice(COMPUTE_PREFIX.length);
+    const provider=rest.split('__')[0].replace(/_/g,'-');
+    if(PROVIDER_ID.test(provider)) providers.add(provider);
+  }
+  const results=[];
+  for(const providerId of [...providers].sort()) {
+    if(filter&&!filter.has(providerId))continue;
+    for(const acc of configuredComputeAccounts(env,providerId).values()) {
+      results.push({providerId,alias:acc.alias,token:acc.token,weight:acc.weight,remainingFraction:acc.remainingFraction});
+    }
+  }
+  return results;
 }
 export function resolveComputeAccount(env,principal,provider,requested) {
   if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))throw new Error('Compute account unavailable or not authorized');
@@ -93,8 +123,9 @@ export function resolveProviderAccount(env,principal,provider,requested) {
 function safeAccounts(env,principal){
   const standard=Object.keys(PREFIX).map(provider=>({provider,aliases:availableAccounts(env,principal,provider),kind:'provider'}));
   const computeProviders=new Set();
+  const inferenceMap=new Map();
   if(isOwnerPrincipal(env,principal)) {
-    for(const item of parseComputeJsonEntries(env)) {
+    for(const item of parseJsonEntries(env,COMPUTE_JSON,'Invalid FRNES compute account configuration')) {
       if(item&&typeof item==='object'&&typeof item.providerId==='string'&&PROVIDER_ID.test(item.providerId)&&typeof item.alias==='string'&&ALIAS.test(item.alias.toUpperCase())&&typeof item.token==='string'&&item.token.trim()) {
         computeProviders.add(item.providerId);
       }
@@ -104,8 +135,31 @@ function safeAccounts(env,principal){
       const provider=rest.split('__')[0].replace(/_/g,'-');
       if(PROVIDER_ID.test(provider)) computeProviders.add(provider);
     }
+    for(const item of parseJsonEntries(env,AI_JSON,'Invalid AI inference account configuration')) {
+      if(item&&typeof item==='object'&&typeof item.providerId==='string'&&PROVIDER_ID.test(item.providerId)&&typeof item.alias==='string'&&ALIAS.test(item.alias.toUpperCase())&&typeof item.token==='string'&&item.token.trim()) {
+        if(!inferenceMap.has(item.providerId)) inferenceMap.set(item.providerId,new Set());
+        inferenceMap.get(item.providerId).add(item.alias.toUpperCase());
+      }
+    }
+    for(const key of Object.keys(env||{})) if(key.startsWith(AI_PREFIX)) {
+      const rest=key.slice(AI_PREFIX.length);
+      const parts=rest.split('__');
+      const provider=parts[0].replace(/_/g,'-');
+      const alias=parts[1]||'';
+      if(PROVIDER_ID.test(provider)&&ALIAS.test(alias)&&typeof env[key]==='string'&&env[key].trim()) {
+        if(!inferenceMap.has(provider)) inferenceMap.set(provider,new Set());
+        inferenceMap.get(provider).add(alias);
+      }
+    }
   }
-  return {accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}]};
+  const inference=[...inferenceMap.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([provider,set])=>({
+    provider,
+    aliases:[...set].sort(),
+  }));
+  return {
+    accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}],
+    inference,
+  };
 }
 async function providerGet(fetcher,url,token) {
   const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
@@ -134,7 +188,7 @@ async function cloudflareWorkers(a,_db,p,ctx) {
   return {account:selected.alias,cloudflare_account_id:id,scripts:limited(payload.result).map(x=>({id:x.id,modified_on:x.modified_on}))};
 }
 export const providerTools=[
-  tool('atax_provider_accounts_list','List configured owner-only GitHub and Cloudflare aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
+  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
   tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
   tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers)
 ];
