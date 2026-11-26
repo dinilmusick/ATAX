@@ -1,5 +1,7 @@
 /** Named provider credentials for one ATAX Worker. Tokens never leave this module. */
 const PREFIX = Object.freeze({github:['GH_KEY_','GH_TOKEN_'],cloudflare:['CF_KEY_','CLOUDFLARE_TOKEN_']});
+const COMPUTE_PREFIX='FRNES_KEY_';
+const PROVIDER_ID=/^[a-z][a-z0-9_-]{1,63}$/;
 const ALIAS = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const tool = (name,description,scope,inputSchema,invoke)=>({name,description,scope,inputSchema,invoke});
@@ -34,6 +36,29 @@ export function availableAccounts(env,principal,provider) {
   if(!isOwnerPrincipal(env,principal))return [];
   return [...configuredAccounts(env,provider).keys()].sort();
 }
+export function availableComputeAccounts(env,principal,provider) {
+  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))return [];
+  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'_';
+  return Object.keys(env||{}).filter(k=>k.startsWith(prefix)).map(k=>k.slice(prefix.length))
+    .filter(x=>ALIAS.test(x)&&typeof env[prefix+x]==='string').sort();
+}
+export function resolveComputeAccount(env,principal,provider,requested) {
+  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))throw new Error('Compute account unavailable or not authorized');
+  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'_';
+  const accounts=new Map();
+  for(const key of Object.keys(env||{})) if(key.startsWith(prefix)) {
+    const alias=key.slice(prefix.length);
+    if(ALIAS.test(alias)&&typeof env[key]==='string'&&env[key].trim()) {
+      if(accounts.has(alias))throw new Error('Duplicate compute provider account alias: '+alias);
+      accounts.set(alias,{alias,token:env[key]});
+    }
+  }
+  const names=[...accounts.keys()];
+  const alias=requested===undefined?(names.length===1?names[0]:null):String(requested).toUpperCase();
+  if(alias&&accounts.has(alias))return accounts.get(alias);
+  if(!alias&&names.length>1)throw new Error('Specify a compute account alias when multiple accounts are configured');
+  throw new Error('Compute account unavailable or not authorized');
+}
 export function resolveProviderAccount(env,principal,provider,requested) {
   if(!isOwnerPrincipal(env,principal))throw new Error('Provider account unavailable or not authorized');
   const accounts=configuredAccounts(env,provider);
@@ -46,9 +71,14 @@ export function resolveProviderAccount(env,principal,provider,requested) {
   throw new Error('Provider account unavailable or not authorized');
 }
 function safeAccounts(env,principal){
-  return {accounts:Object.keys(PREFIX).map(provider=>({
-    provider,aliases:availableAccounts(env,principal,provider)
-  }))};
+  const standard=Object.keys(PREFIX).map(provider=>({provider,aliases:availableAccounts(env,principal,provider),kind:'provider'}));
+  const computeProviders=new Set();
+  for(const key of Object.keys(env||{})) if(key.startsWith(COMPUTE_PREFIX)) {
+    const rest=key.slice(COMPUTE_PREFIX.length);
+    const provider=rest.split('_').slice(0,-1).join('_').replace(/_/g,'-');
+    if(PROVIDER_ID.test(provider)) computeProviders.add(provider);
+  }
+  return {accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}]};
 }
 async function providerGet(fetcher,url,token) {
   const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
