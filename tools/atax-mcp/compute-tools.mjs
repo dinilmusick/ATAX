@@ -1,8 +1,7 @@
 /** ATAX compute control-plane adapter. FRNES owns provider accounts and execution; ATAX owns policy and routing. */
-const text=(x,max=8192)=>typeof x==='string'&&x.length>0&&x.length<=max?x:null;
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 const tool=(name,description,scope,inputSchema,invoke)=>({name,description,scope,inputSchema,invoke});
-function frnesConfig(env){const url=String(env.FRNES_URL||'').trim().replace(/\\/+$/,'');const token=String(env.FRNES_SERVICE_TOKEN||'').trim();if(!/^https:\\/\\//.test(url)||token.length<16)throw new Error('FRNES compute gateway is not configured');return {url,token};}
+function frnesConfig(env){const url=String(env.FRNES_URL||'').trim().replace(/\/+$/,'');const token=String(env.FRNES_SERVICE_TOKEN||'').trim();if(!url.startsWith('https://')||token.length<16)throw new Error('FRNES compute gateway is not configured');return {url,token};}
 async function callFrnes(path,body,env,fetcher){const c=frnesConfig(env);const response=await fetcher(c.url+path,{method:'POST',redirect:'manual',headers:{authorization:'Bearer '+c.token,'content-type':'application/json','accept':'application/json','x-atax-compute':'1'},body:JSON.stringify(body)});let payload=null;try{payload=await response.json();}catch{}if(!response.ok)throw new Error('FRNES compute request rejected');return payload;}
 export const computeTools=[
  tool('atax_compute_capabilities','Discover FRNES compute providers and currently executable environment capabilities without exposing credentials.','atax:read',schema({workspaceId:{type:'string',minLength:1,maxLength:120}}),async(a,_db,p,ctx)=>callFrnes('/api/frnes/compute/capabilities',{workspaceId:a.workspaceId,ownerUserId:p.id},ctx.env,ctx.fetcher)),
