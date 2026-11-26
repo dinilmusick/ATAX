@@ -30,11 +30,11 @@ id = "generic-api-key"
   regexes = ['''Ov23limRaIiQdRQ3xoyd''']
 
   [[rules.allowlists]]
-  description = "GitHub provider validation test uses a deterministic non-secret fixture token"
+  description = "GitHub and Groq provider validation tests use deterministic non-secret fixture tokens"
   condition = "AND"
   regexTarget = "match"
   paths = ['''server/vaultAndAuth\.test\.ts$''']
-  regexes = ['''ghp_1234567890abcdef123456''']
+  regexes = ['''(?:ghp_1234567890abcdef123456|gsk_1234567890abcdef123456)''']
 
   [[rules.allowlists]]
   description = "ATAX MCP ledger uses a canonical RPC identifier, not a credential"
@@ -63,6 +63,20 @@ id = "generic-api-key"
   regexTarget = "match"
   paths = ['''server/vaultAndAuth\.test\.ts$''']
   regexes = ['''(?:sb_secret_test_key_0123456789abcdef|sb_secret_leaky_key_0123456789abcdef|sb_secret_probe_test_key_0123456789)''']
+
+  [[rules.allowlists]]
+  description = "Inference tools test uses deterministic non-secret fixture tokens"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/inference-tools\.test\.mjs$''']
+  regexes = ['''(?:groq-group-a-secret-token|groq-group-b-secret-token|google-group-a-secret-token|openrouter-group-c-secret-token)''']
+
+  [[rules.allowlists]]
+  description = "Ledger config test uses deterministic non-secret fixture tokens"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''tools/atax-mcp/ledger-config\.test\.mjs$''']
+  regexes = ['''(?:fly-mock-token-longer-than-16|groq-mock-token-longer-than-16|google-mock-token-longer-than-16)''']
 
   [[rules.allowlists]]
   description = "Concurrency test uses a deterministic ATAX fixture token"
