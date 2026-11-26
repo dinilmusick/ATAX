@@ -125,9 +125,6 @@ export function inspectSupabaseConnection(
 
 export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsertInput {
   const providerRaw = typeof input.provider === 'string' ? input.provider.trim().toLowerCase() : '';
-  if (providerRaw === 'vercel') {
-    throw new VaultError('Vercel provider adapter is not implemented.', 501);
-  }
   if (!VALID_PROVIDERS.test(providerRaw)) {
     throw new VaultError('Invalid provider identifier.', 400);
   }
@@ -165,9 +162,6 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
   alias: string;
 } {
   const provider = typeof providerRaw === 'string' ? providerRaw.trim().toLowerCase() : '';
-  if (provider === 'vercel') {
-    throw new VaultError('Vercel provider adapter is not implemented.', 501);
-  }
   if (!VALID_PROVIDERS.test(provider)) {
     throw new VaultError('Invalid provider identifier.', 400);
   }
