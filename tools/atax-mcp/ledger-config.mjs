@@ -28,17 +28,18 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
   }
   const used=new Set();
   for(const account of config.accounts){
-    if(!obj(account)||!['github','cloudflare','vercel'].includes(account.provider)||
+    if(!obj(account)||typeof account.provider!=='string'||
+       !/^[a-z][a-z0-9_-]{1,63}$/.test(account.provider)||
        typeof account.alias!=='string'||!ALIAS.test(account.alias)||
        typeof account.token!=='string'||account.token.length<16||account.token.length>8192)
       throw Error('Invalid canonical provider credential');
     const name=account.provider+':'+account.alias;
     if(used.has(name))throw Error('Duplicate canonical provider account');
     used.add(name);
-    // Vercel secrets can be stored but are deliberately not an operating
-    // MCP adapter until independently tested.
+    // Vercel remains disabled as an MCP operating adapter.
     if(account.provider==='vercel')continue;
-    const prefix=account.provider==='github'?'GH_KEY_':'CF_KEY_';
+    const prefix=account.provider==='github'?'GH_KEY_':account.provider==='cloudflare'?'CF_KEY_':
+      'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'_';
     resolved[prefix+account.alias]=account.token;
     if(account.provider==='cloudflare'&&account.accountId!==null&&account.accountId!==undefined){
       if(typeof account.accountId!=='string'||
