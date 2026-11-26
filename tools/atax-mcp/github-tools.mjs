@@ -1,4 +1,4 @@
-// FMRL target configuration remains comma-separated; do not change the delimiter without updating the runtime settings contract.\nimport {resolveProviderAccount} from './provider-accounts.mjs';
+import {resolveProviderAccount} from './provider-accounts.mjs';
 /** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */
 // Phase 3: OWNER constant is kept as a build-time safety net for the FMRL controller
 // repository path, but assertOwner() now validates against the env var rather than
