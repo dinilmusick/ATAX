@@ -60,15 +60,23 @@ test('Cloudflare provider calls use only requested credential; redact upstream e
   const requests=[];
   const fetcher=async(url,options)=>{
     requests.push({url,options});
-    if(url.includes('/workers/scripts'))return Response.json({success:true,result:[{id:'app',modified_on:'2026-11-22',secret:'DO_NOT_RETURN'}]});
+    if(url.includes('/builds/workers/'))return Response.json({success:true,result:[{build_uuid:'856f46e5-bac5-4733-ba7f-9362b70f778e',status:'stopped',build_outcome:'fail',build_trigger_metadata:{branch:'main',commit_hash:'301de643'},created_on:'2026-11-26T16:59:45Z',stopped_on:'2026-11-26T17:00:41Z',secret:'DO_NOT_RETURN'}]});
+    if(url.includes('/builds/builds/'))return Response.json({success:true,result:{lines:['step 1 ok','ERR_PNPM_OUTDATED_LOCKFILE']}});
+    if(url.includes('/workers/scripts'))return Response.json({success:true,result:[{id:'app',tag:'tag-app-123',modified_on:'2026-11-22',secret:'DO_NOT_RETURN'}]});
     return Response.json({success:true,result:[{id:'abc12345',name:'Account',secret:'DO_NOT_RETURN'}]});
   };
   const accounts=await invoke('atax_cloudflare_accounts_list',{account:'WORK'},oauthOwner,env,fetcher);
   const scripts=await invoke('atax_cloudflare_workers_list',{account:'WORK'},oauthOwner,env,fetcher);
+  const builds=await invoke('atax_cloudflare_worker_builds_list',{account:'WORK',script_id:'app'},oauthOwner,env,fetcher);
+  const logs=await invoke('atax_cloudflare_build_logs_get',{account:'WORK',build_uuid:'856f46e5-bac5-4733-ba7f-9362b70f778e',tail_lines:10},oauthOwner,env,fetcher);
   assert.equal(accounts.accounts[0].id,'abc12345');
   assert.equal(scripts.scripts[0].id,'app');
+  assert.equal(scripts.scripts[0].tag,'tag-app-123');
+  assert.equal(builds.worker_tag,'tag-app-123');
+  assert.equal(builds.builds[0].build_outcome,'fail');
+  assert.deepEqual(logs.lines,['step 1 ok','ERR_PNPM_OUTDATED_LOCKFILE']);
   assert.ok(requests.every(x=>x.options.headers.authorization==='Bearer cloudflare-work-test'));
-  assert.ok(!JSON.stringify({accounts,scripts}).includes('DO_NOT_RETURN'));
+  assert.ok(!JSON.stringify({accounts,scripts,builds,logs}).includes('DO_NOT_RETURN'));
   await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'WORK',account_id:'wrong'},owner,env,fetcher),/differs/);
   await assert.rejects(invoke('atax_cloudflare_accounts_list',{account:'WORK'},outsider,env,fetcher),/not authorized/);
 });
