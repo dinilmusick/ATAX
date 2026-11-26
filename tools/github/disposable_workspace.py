@@ -640,10 +640,6 @@ def main() -> int:
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
     if args.mode in ("repair", "artifact"):
-        allowed = (("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine", "dinilmusick/Frnes", "dinilmusick/Embr")
-                   if args.mode == "repair" else ("dinilmusick/Aiko", "dinilmusick/Srkl-Engine"))
-        if args.source not in allowed:
-            raise SystemExit("Repair target must be an allowlisted private repository.")
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
 

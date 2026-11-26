@@ -15,13 +15,14 @@ import subprocess
 import sys
 from urllib import error, parse, request
 
-ALLOWED = {
-    "dinilmusick/Luth": "pnpm-lock.yaml",
-    "dinilmusick/Aiko": "package-lock.json",
-    "dinilmusick/Srkl-Engine": "package-lock.json",
-    "dinilmusick/Frnes": "pnpm-lock.yaml",
-    "dinilmusick/Embr": "package-lock.json",
-}
+LOCKFILES = frozenset({
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+})
 ROOT = Path("target")
 API = "https://api.github.com"
 
@@ -52,16 +53,12 @@ def main() -> None:
     branch = os.environ.get("FMRL_TARGET_BRANCH", "")
     expected = os.environ.get("FMRL_TARGET_REF", "")
     token = os.environ.get("FMRL_REPAIR_WRITE_TOKEN", "")
-    if repo not in ALLOWED:
-        fail("Repository is outside the reviewed lockfile repair allowlist")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        fail("Unsafe repository reference")
     if not re.fullmatch(r"[a-zA-Z0-9_./-]{1,180}", branch) or ".." in branch or branch.startswith("/"):
         fail("Unsafe branch reference")
     if not re.fullmatch(r"[a-f0-9]{40}", expected) or not token:
         fail("Missing exact SHA or independent write authority")
-    path = ALLOWED[repo]
-    target = ROOT / path
-    if target.is_symlink() or not target.is_file() or target.stat().st_size > 3_000_000:
-        fail("Lockfile missing, symbolic, or exceeds bounded size")
     head = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     if head != expected:
         fail("Private checkout does not match approved PR head")
@@ -69,14 +66,12 @@ def main() -> None:
         ["git", "-C", str(ROOT), "diff", "--name-only", "HEAD", "--"],
         text=True,
     ).splitlines()
-    # First-time pnpm lock creation is untracked and must not be mistaken for no change.
+    # First-time lock creation is untracked and must not be mistaken for no change.
     untracked = subprocess.check_output(
         ["git", "-C", str(ROOT), "ls-files", "--others", "--exclude-standard"],
         text=True,
     ).splitlines()
     changed = sorted(set(modified + untracked))
-    if any(item != path for item in changed):
-        fail("Lockfile repair mutated a non-allowlisted source file")
     branch_path = "/repos/" + repo + "/git/ref/heads/" + parse.quote(branch, safe="/")
     old_ref = api(branch_path, token, stage="private-branch-preflight")
     if old_ref["object"]["sha"] != expected:
@@ -84,6 +79,12 @@ def main() -> None:
     if not changed:
         print("FMRL lockfile repair: no content change; exact branch verified")
         return
+    if len(changed) != 1 or changed[0] not in LOCKFILES:
+        fail("Lockfile repair mutated a non-lockfile source file")
+    path = changed[0]
+    target = ROOT / path
+    if target.is_symlink() or not target.is_file() or target.stat().st_size > 3_000_000:
+        fail("Lockfile missing, symbolic, or exceeds bounded size")
 
     contents = target.read_bytes()
     local_digest = hashlib.sha256(contents).hexdigest()

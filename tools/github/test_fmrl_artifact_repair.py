@@ -10,15 +10,15 @@ spec.loader.exec_module(module)
 
 
 class FmrlArtifactContract(unittest.TestCase):
-    def test_allowlisted_only_aiko_srkl_and_single_generated_worker(self):
+    def test_generic_single_generated_worker_writeback(self):
         writer = (ROOT / "fmrl_artifact_writer.py").read_text()
-        self.assertIn('"dinilmusick/Aiko": "api/index.js"', writer)
-        self.assertIn('"dinilmusick/Srkl-Engine": "api/index.js"', writer)
-        self.assertNotIn('"dinilmusick/Luth":', writer)
+        self.assertIn('ARTIFACT_PATH = "api/index.js"', writer)
+        self.assertNotIn("dinilmusick/Aiko", writer)
+        self.assertNotIn("dinilmusick/Srkl-Engine", writer)
         self.assertNotIn('"package-lock.json"', writer)
         self.assertIn("any(item != path for item in changed)", writer)
         self.assertIn("target.is_symlink()", writer)
-        self.assertIn("repo not in ALLOWED", writer)
+        self.assertIn("Unsafe repository reference", writer)
         self.assertIn('"force": False', writer)
         self.assertIn('stage="private-branch-preflight"', writer)
         self.assertIn('stage="atomic-branch-update"', writer)
@@ -54,8 +54,7 @@ class FmrlArtifactContract(unittest.TestCase):
         self.assertIn("github.event.issue.user.id == 155351357", controller)
         self.assertIn("[atax-fmrl] repair-artifact", controller)
         self.assertIn("PR_[A-Za-z0-9_-]", controller)
-        self.assertIn("assert mode != 'artifact'", parent)
-        self.assertIn("repo in ('dinilmusick/Srkl-Engine','dinilmusick/Aiko')", parent)
+        self.assertIn("assert mode != 'artifact' or branch", parent)
         self.assertIn('if args.mode in ("repair", "artifact")', (ROOT / "disposable_workspace.py").read_text())
 
 
