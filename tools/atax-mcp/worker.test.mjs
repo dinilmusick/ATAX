@@ -427,7 +427,7 @@ test('MCP named GitHub accounts use selected token and do not use canonical owne
   assert.equal(seen.length,3);
 });
 
-test('MCP exposes only GitHub and Cloudflare provider diagnostics with owner scopes',async()=>{
+test('MCP exposes provider diagnostics and FRNES compute account routing with owner scopes',async()=>{
   const cfg={...gitEnv,
     MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read',
     GH_KEY_WORK:'git-work-secret',
@@ -440,7 +440,7 @@ test('MCP exposes only GitHub and Cloudflare provider diagnostics with owner sco
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
   const list=await makeGitCall('atax_provider_accounts_list',{}, {env:cfg});
   const configured=list.structuredContent.result.accounts;
-  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare']);
+  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare','compute']);
   assert.deepEqual(configured.find(x=>x.provider==='cloudflare').aliases,['WORK']);
   assert.equal((await makeGitCall('atax_cloudflare_accounts_list',{account:'WORK'},{env:gitEnv})).isError,true);
 });
