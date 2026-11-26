@@ -1,4 +1,4 @@
-/** ATAX compute control-plane adapter. FRNES owns provider accounts and execution; ATAX owns policy and routing. */
+// FRNES compute adapter gateway contract.\n/** ATAX compute control-plane adapter. FRNES owns provider accounts and execution; ATAX owns policy and routing. */
 import {resolveComputeAccount} from './provider-accounts.mjs';
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 const tool=(name,description,scope,inputSchema,invoke)=>({name,description,scope,inputSchema,invoke});
