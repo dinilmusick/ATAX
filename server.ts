@@ -59,7 +59,7 @@ if (!process.env.MCP_SHARED_TOKEN_SHA256) {
     'atax_5426bb43a95f34297740e50804035fc67db24be2be32098d';
   process.env.MCP_SHARED_TOKEN_SHA256 = createHash('sha256').update(devToken).digest('hex');
   process.env.MCP_SHARED_SUBJECT = process.env.MCP_SHARED_SUBJECT || 'atax-mcp-operator';
-  process.env.MCP_SHARED_SCOPES = process.env.MCP_SHARED_SCOPES || 'atax:read atax:write atax:verify';
+  process.env.MCP_SHARED_SCOPES = process.env.MCP_SHARED_SCOPES || 'atax:read atax:write atax:verify atax:cloudflare:read';
 }
 
 const app = express();

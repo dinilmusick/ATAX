@@ -21,6 +21,16 @@ on:
         required: false
         default: ""
         type: string
+      mode:
+        description: FMRL execution mode (direct, repair, or artifact)
+        required: false
+        default: direct
+        type: string
+      branch:
+        description: Target branch (required for repair and artifact modes)
+        required: false
+        default: ""
+        type: string
       request_id:
         description: Opaque MCP correlation UUID (no private target data)
         required: false
