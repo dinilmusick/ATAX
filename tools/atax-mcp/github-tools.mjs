@@ -1,6 +1,5 @@
 import {resolveProviderAccount} from './provider-accounts.mjs';
-/** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */
-// Phase 3: OWNER constant is kept as a build-time safety net for the FMRL controller
+/** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */\n// Phase 3: OWNER constant is kept as a build-time safety net for the FMRL controller
 // repository path, but assertOwner() now validates against the env var rather than
 // enforcing a hardcoded string identity — enabling owners with different GitHub logins
 // to operate their own ATAX deployments without code changes.
@@ -12,6 +11,7 @@ const API = 'https://api.github.com';
 const NAME = /^[A-Za-z0-9._-]{1,100}$/;
 const FULL_NAME = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
 const REF = /^[0-9a-f]{40}$/;
+const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,119}$/;
 const REQUEST_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const one = (description, properties, required=[]) => ({type:'object',description,properties,required,additionalProperties:false});
 const s = (description,maxLength=256)=>({type:'string',minLength:1,maxLength,description});
@@ -50,12 +50,6 @@ const requireEnv = (env,key) => {
   if (!value) throw new Error(`${key} not configured`);
   return value;
 };
-// Phase 3: assertOwner now validates MCP_GITHUB_OWNER from env rather than
-// comparing against a hardcoded constant. The env var is the deployment-time
-// policy that controls which GitHub account can operate FMRL. This allows
-// operators with different GitHub logins to run their own ATAX deployments.
-// The OWNER constant is still used only for the CONTROLLER path (this deploy's
-// actual ATAX controller repo), not as an identity constraint.
 function assertOwner(env) {
   const owner = requireEnv(env,'MCP_GITHUB_OWNER');
   if (!/^[a-zA-Z0-9-]{1,39}$/.test(owner)) throw new Error('MCP_GITHUB_OWNER is not a valid GitHub username');
@@ -68,9 +62,13 @@ function ensureName(name, permanent=false) {
     throw new Error('Reserved repository; use the dedicated FMRL controller for disposable work');
   return name;
 }
-// Phase 3: parseRepo validates that the repo owner matches the configured
-// MCP_GITHUB_OWNER policy, not the hardcoded OWNER constant.
-// This correctly scopes FMRL operations to the operator's own GitHub account.
+function ensureBranchName(raw) {
+  const name = String(raw || '').trim().replace(/^refs\/heads\//, '');
+  if (!BRANCH_NAME.test(name) || name.includes('..') || name.includes('//') || name.endsWith('/') || name.endsWith('.lock')) {
+    throw new Error('Invalid GitHub branch name');
+  }
+  return name;
+}
 function parseRepo(repo, env) {
   const configuredOwner = assertOwner(env);
   const match = String(repo||'').match(FULL_NAME);
@@ -102,7 +100,8 @@ async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=
 function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (HTTP ${res.status})`);return res.data;}
 async function repositoryInfo(repo,ctx,token) {
   const data=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}`,token),'GitHub repository lookup');
-  // GitHub repository owner/name is case-insensitive; use GitHub's canonical casing for identity.\n  if (String(data.full_name||'').toLowerCase()!==repo.toLowerCase())\n    throw new Error(`Repository identity mismatch: requested ${repo}, canonical ${data.full_name||'<missing>'}`);
+  if (String(data.full_name||'').toLowerCase()!==repo.toLowerCase())
+    throw new Error(`Repository identity mismatch: requested ${repo}, canonical ${data.full_name||'<missing>'}`);
   return {repository:data.full_name,url:data.html_url,visibility:data.private?'private':'public',default_branch:data.default_branch};
 }
 async function createRepository(a,_db,p,ctx){
@@ -279,6 +278,53 @@ async function putFile(a,_db,p,ctx){
   const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body}),'GitHub file put');
   return {operation:'file_put',account:selected.alias,repository:repo,path,commit_sha:data.commit?.sha,commit_url:data.commit?.html_url,content_sha:data.content?.sha};
 }
+async function deleteFile(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const path=String(a.path||'').replace(/^\/+/,'');
+  if(!path)throw new Error('File path required');
+  const message=String(a.message||'').trim();
+  if(!message)throw new Error('Commit message is required');
+  if(!REF.test(String(a.sha||'')))throw new Error('Valid 40-character blob SHA is required');
+  const body={message,sha:a.sha,...(a.branch?{branch:a.branch}:{})};
+  const url=`${API}/repos/${repo}/contents/${encodeURI(path)}`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'DELETE',body}),'GitHub file delete');
+  return {operation:'file_delete',account:selected.alias,repository:repo,path,commit_sha:data.commit?.sha,commit_url:data.commit?.html_url};
+}
+async function createBranch(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const branch=ensureBranchName(a.branch);
+  let sha=a.sha?String(a.sha).trim():'';
+  const base=a.base?ensureBranchName(a.base):'main';
+  if(sha){
+    if(!REF.test(sha))throw new Error('Commit SHA must be a 40-character lowercase hex SHA');
+  } else {
+    const refUrl=`${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`;
+    const refData=requireOk(await githubRequest(ctx.fetcher,refUrl,selected.token),'GitHub base branch lookup');
+    sha=String(refData.object?.sha||'');
+    if(!REF.test(sha))throw new Error('Unable to resolve base branch commit SHA');
+  }
+  const createUrl=`${API}/repos/${repo}/git/refs`;
+  const created=requireOk(await githubRequest(ctx.fetcher,createUrl,selected.token,{
+    method:'POST',body:{ref:`refs/heads/${branch}`,sha},
+  }),'GitHub branch creation');
+  return {operation:'branch_create',account:selected.alias,repository:repo,branch,base:a.sha?null:base,sha,ref:created.ref};
+}
+async function deleteBranch(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const branch=ensureBranchName(a.branch);
+  if(branch==='main'||branch==='master')throw new Error('Refusing to delete protected default branch');
+  const info=await repositoryInfo(repo,ctx,selected.token);
+  if(branch===info.default_branch)throw new Error('Refusing to delete repository default branch');
+  const url=`${API}/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`;
+  requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'DELETE'}),'GitHub branch deletion');
+  return {operation:'branch_delete',account:selected.alias,repository:repo,branch,deleted:true};
+}
 async function createPullRequest(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
@@ -292,6 +338,34 @@ async function createPullRequest(a,_db,p,ctx){
   const url=`${API}/repos/${repo}/pulls`;
   const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'POST',body}),'GitHub pull request creation');
   return {operation:'pull_request_create',account:selected.alias,repository:repo,number:data.number,title:data.title,url:data.html_url,state:data.state};
+}
+async function listPullRequests(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const state=a.state||'open';
+  const url=`${API}/repos/${repo}/pulls?state=${encodeURIComponent(state)}&per_page=30`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'GitHub pull request list');
+  const pull_requests=(Array.isArray(data)?data:[]).map(pr=>({
+    number:pr.number,title:pr.title,state:pr.state,draft:Boolean(pr.draft),
+    head:pr.head?.ref,head_sha:pr.head?.sha,base:pr.base?.ref,url:pr.html_url,
+  }));
+  return {operation:'pull_request_list',account:selected.alias,repository:repo,state,pull_requests};
+}
+async function mergePullRequest(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  if(!Number.isInteger(a.pull_number)||a.pull_number<1)throw new Error('Valid pull_number is required');
+  const merge_method=a.merge_method||'squash';
+  const body={
+    merge_method,
+    ...(a.commit_title?{commit_title:String(a.commit_title).trim()}:{}),
+    ...(a.sha?{sha:String(a.sha).trim()}:{}),
+  };
+  const url=`${API}/repos/${repo}/pulls/${a.pull_number}/merge`;
+  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body}),'GitHub pull request merge');
+  return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:Boolean(data.merged),sha:data.sha,message:data.message};
 }
 export const githubTools=[
   tool('atax_github_workflows_guide',
@@ -324,7 +398,22 @@ export const githubTools=[
   tool('atax_github_file_put',
     'Create or update a file directly on a GitHub branch via the Contents API with a commit message. Enables remote coding via GitHub without local dirty state.',
     'atax:github:create',one('Put file on GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to create or update',1000),content:{type:'string',description:'File UTF-8 text content'},message:s('Git commit message',1000),branch:s('Optional target branch name (defaults to default branch)',120),sha:s('Blob SHA of the file being replaced (required when updating an existing file)',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','content','message']),putFile),
+  tool('atax_github_file_delete',
+    'Delete a file on a GitHub branch via the Contents API with a commit message.',
+    'atax:github:create',one('Delete file on GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to delete',1000),message:s('Git commit message',1000),sha:s('Blob SHA of the file being deleted',40),branch:s('Optional target branch name (defaults to default branch)',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','message','sha']),deleteFile),
+  tool('atax_github_branch_create',
+    'Create a new GitHub branch from an existing base branch (default main) or exact 40-character commit SHA.',
+    'atax:github:create',one('Create branch on GitHub',{repository:s('GitHub owner/name repository',205),branch:s('New branch name to create',120),base:s('Base branch name to branch from (default main)',120),sha:s('Optional exact 40-character commit SHA to branch from',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','branch']),createBranch),
+  tool('atax_github_branch_delete',
+    'Delete a non-default GitHub feature branch (refuses main/master/default branch).',
+    'atax:github:create',one('Delete branch on GitHub',{repository:s('GitHub owner/name repository',205),branch:s('Feature branch name to delete',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','branch']),deleteBranch),
   tool('atax_github_pull_request_create',
     'Open a Pull Request on GitHub for a feature branch to merge into base, recording title, description, and task reference.',
     'atax:github:create',one('Create pull request on GitHub',{repository:s('GitHub owner/name repository',205),title:s('Pull request title',300),head:s('The branch where your changes are implemented',120),base:s('The branch you want changes pulled into (default main)',120),body:s('Pull request body/description',4000),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','title','head']),createPullRequest),
+  tool('atax_github_pull_request_list',
+    'List Pull Requests on a GitHub repository filtered by state (open, closed, or all).',
+    'atax:github:read',one('List pull requests on GitHub',{repository:s('GitHub owner/name repository',205),state:{type:'string',enum:['open','closed','all'],description:'PR state filter (default open)'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository']),listPullRequests),
+  tool('atax_github_pull_request_merge',
+    'Merge an open Pull Request on GitHub using squash, merge, or rebase.',
+    'atax:github:create',one('Merge pull request on GitHub',{repository:s('GitHub owner/name repository',205),pull_number:{type:'integer',minimum:1,maximum:9007199254740991,description:'Pull request number'},merge_method:{type:'string',enum:['squash','merge','rebase'],description:'Merge method (default squash)'},commit_title:s('Optional merge commit title',300),sha:s('Optional expected head SHA for safe merge',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','pull_number']),mergePullRequest),
 ];
