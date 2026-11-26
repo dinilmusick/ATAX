@@ -69,7 +69,7 @@ test('inspectSupabaseConnection validates ATAX_SUPABASE_URL and ATAX_SUPABASE_SE
   assert.equal(valid.hostLabel?.includes('sb_secret_mock_key_0123456789abcdef'), false);
 });
 
-test('validateProviderInput accepts github and cloudflare, rejects unimplemented vercel (501) and invalid formats', () => {
+test('validateProviderInput accepts standard and compute providers, rejects unimplemented vercel (501) and invalid formats', () => {
   const gh = validateProviderInput({
     provider: 'github',
     alias: 'personal',
@@ -98,9 +98,17 @@ test('validateProviderInput accepts github and cloudflare, rejects unimplemented
     (err: unknown) => err instanceof VaultError && err.statusCode === 501
   );
 
+  const compute = validateProviderInput({
+    provider: 'aws',
+    alias: 'PROD',
+    credential: '12345678901234567',
+  });
+  assert.equal(compute.provider, 'aws');
+  assert.equal(compute.alias, 'PROD');
+
   assert.throws(() =>
     validateProviderInput({
-      provider: 'aws',
+      provider: 'NOT A PROVIDER',
       alias: 'PROD',
       credential: '12345678901234567',
     })
