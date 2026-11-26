@@ -55,6 +55,7 @@ export interface ProviderTestResult {
   apiReachable?: boolean;
   authVerified?: boolean;
   computeSupported?: boolean;
+  inferenceSupported?: boolean;
 }
 
 export class VaultError extends Error {
@@ -69,6 +70,17 @@ export class VaultError extends Error {
 const VALID_PROVIDERS = /^[a-z][a-z0-9_-]{1,63}$/;
 const RESERVED_PROVIDERS = new Set(['__proto__', 'constructor', 'prototype']);
 const COMPUTE_SUPPORTED_PROVIDERS = new Set(['fly', 'northflank', 'render', 'railway']);
+const INFERENCE_SUPPORTED_PROVIDERS = new Set([
+  'google',
+  'groq',
+  'cerebras',
+  'together',
+  'nvidia',
+  'openrouter',
+  'huggingface',
+  'anthropic',
+  'openai',
+]);
 const ALIAS_REGEX = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ACCOUNT_ID_REGEX = /^[A-Za-z0-9_-]{1,128}$/;
 const SUBJECT_REGEX = /^[\w.@:-]{3,200}$/;
@@ -350,6 +362,9 @@ export function createVaultService(
         }
       | undefined;
 
+    const computeSupported = COMPUTE_SUPPORTED_PROVIDERS.has(provider);
+    const inferenceSupported = INFERENCE_SUPPORTED_PROVIDERS.has(provider);
+
     const configuredOwner =
       typeof cfg?.settings?.MCP_OWNER_SUBJECT === 'string'
         ? cfg.settings.MCP_OWNER_SUBJECT
@@ -364,7 +379,8 @@ export function createVaultService(
         checkedAt: new Date().toISOString(),
         apiReachable: false,
         authVerified: false,
-        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
+        computeSupported,
+        inferenceSupported,
       };
     }
 
@@ -382,11 +398,12 @@ export function createVaultService(
         checkedAt: new Date().toISOString(),
         apiReachable: false,
         authVerified: false,
-        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
+        computeSupported,
+        inferenceSupported,
       };
     }
 
-    const probeSpecs: Record<string, { url: string; method: 'GET' | 'POST'; body?: string }> = {
+    const probeSpecs: Record<string, { url: string; method: 'GET' | 'POST'; body?: string; authStyle?: 'bearer' | 'goog' | 'anthropic' }> = {
       github: { url: 'https://api.github.com/user', method: 'GET' },
       cloudflare: { url: 'https://api.cloudflare.com/client/v4/user/tokens/verify', method: 'GET' },
       fly: { url: 'https://api.machines.dev/v1/apps?org_slug=personal', method: 'GET' },
@@ -398,6 +415,15 @@ export function createVaultService(
         method: 'POST',
         body: JSON.stringify({ query: 'query{me{id name}}' }),
       },
+      google: { url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', method: 'GET', authStyle: 'goog' },
+      groq: { url: 'https://api.groq.com/openai/v1/models', method: 'GET' },
+      cerebras: { url: 'https://api.cerebras.ai/v1/models', method: 'GET' },
+      together: { url: 'https://api.together.xyz/v1/models', method: 'GET' },
+      nvidia: { url: 'https://integrate.api.nvidia.com/v1/models', method: 'GET' },
+      openrouter: { url: 'https://openrouter.ai/api/v1/auth/key', method: 'GET' },
+      huggingface: { url: 'https://huggingface.co/api/whoami-v2', method: 'GET' },
+      anthropic: { url: 'https://api.anthropic.com/v1/models', method: 'GET', authStyle: 'anthropic' },
+      openai: { url: 'https://api.openai.com/v1/models', method: 'GET' },
     };
     const spec = probeSpecs[provider];
     if (!spec) {
@@ -410,7 +436,8 @@ export function createVaultService(
         checkedAt: new Date().toISOString(),
         apiReachable: false,
         authVerified: false,
-        computeSupported: COMPUTE_SUPPORTED_PROVIDERS.has(provider),
+        computeSupported,
+        inferenceSupported,
       };
       try {
         await db.rpc('atax_mcp_audit_provider_test_v1', {
@@ -427,18 +454,26 @@ export function createVaultService(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     let result: ProviderTestResult;
-    const computeSupported = COMPUTE_SUPPORTED_PROVIDERS.has(provider);
     try {
+      const headers: Record<string, string> = {
+        Accept: 'application/json',
+        'User-Agent': 'atax-control-plane',
+      };
+      if (spec.authStyle === 'goog') {
+        headers['x-goog-api-key'] = match.token;
+      } else if (spec.authStyle === 'anthropic') {
+        headers['x-api-key'] = match.token;
+        headers['anthropic-version'] = '2023-06-01';
+      } else {
+        headers.Authorization = `Bearer ${match.token}`;
+      }
+      if (spec.body) headers['Content-Type'] = 'application/json';
+
       const res = await fetcher(spec.url, {
         method: spec.method,
         redirect: 'manual',
         signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${match.token}`,
-          Accept: 'application/json',
-          'User-Agent': 'atax-control-plane',
-          ...(spec.body ? { 'Content-Type': 'application/json' } : {}),
-        },
+        headers,
         ...(spec.body ? { body: spec.body } : {}),
       });
       const data = await res.json().catch(() => null);
@@ -453,6 +488,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: false,
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'github' && data && typeof (data as Record<string, unknown>).login === 'string') {
         result = {
@@ -465,6 +501,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'cloudflare' && data && (data as Record<string, unknown>).success === true) {
         const resultObj = (data as Record<string, unknown>).result as Record<string, unknown> | undefined;
@@ -479,6 +516,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: cfStatus === 'active',
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'fly' && data && Array.isArray((data as Record<string, unknown>).apps)) {
         result = {
@@ -491,6 +529,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'northflank' && data && Array.isArray(((data as Record<string, any>).data?.projects ?? (data as Record<string, any>).data))) {
         const projects = ((data as Record<string, any>).data?.projects ?? (data as Record<string, any>).data) as unknown[];
@@ -504,6 +543,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'koyeb' && data && Array.isArray((data as Record<string, unknown>).apps)) {
         result = {
@@ -516,6 +556,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported: false,
+          inferenceSupported,
         };
       } else if (provider === 'render' && Array.isArray(data)) {
         result = {
@@ -528,6 +569,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported,
+          inferenceSupported,
         };
       } else if (provider === 'railway' && data && !Array.isArray((data as Record<string, any>).errors) && typeof (data as Record<string, any>).data?.me?.id === 'string') {
         result = {
@@ -540,6 +582,77 @@ export function createVaultService(
           apiReachable: true,
           authVerified: true,
           computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'google' && data && Array.isArray((data as Record<string, unknown>).models)) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Google AI Studio key (${((data as Record<string, unknown>).models as unknown[]).length} models listed).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (
+        (provider === 'groq' || provider === 'cerebras' || provider === 'nvidia' || provider === 'anthropic' || provider === 'openai') &&
+        data &&
+        Array.isArray((data as Record<string, unknown>).data)
+      ) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified ${provider} API key (${((data as Record<string, unknown>).data as unknown[]).length} models accessible).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'together' && (Array.isArray(data) || (data && Array.isArray((data as Record<string, unknown>).data)))) {
+        const count = Array.isArray(data) ? data.length : ((data as Record<string, unknown>).data as unknown[]).length;
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Together AI key (${count} models accessible).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'openrouter' && data && typeof (data as Record<string, any>).data === 'object' && (data as Record<string, any>).data !== null) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: 'Verified OpenRouter API key.',
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'huggingface' && data && (typeof (data as Record<string, unknown>).name === 'string' || typeof (data as Record<string, unknown>).id === 'string')) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Hugging Face token (${String((data as Record<string, unknown>).name || (data as Record<string, unknown>).id)}).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
         };
       } else {
         result = {
@@ -552,6 +665,7 @@ export function createVaultService(
           apiReachable: true,
           authVerified: false,
           computeSupported,
+          inferenceSupported,
         };
       }
     } catch {
@@ -565,6 +679,7 @@ export function createVaultService(
         apiReachable: false,
         authVerified: false,
         computeSupported,
+        inferenceSupported,
       };
     } finally {
       clearTimeout(timer);
