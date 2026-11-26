@@ -1,6 +1,7 @@
 import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
+import {computeTools} from './compute-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
@@ -19,7 +20,8 @@ const S = {
   bool: description => ({ type: 'boolean', description }),
 };
 const tool = (name, description, scope, inputSchema, invoke) => ({name, description, scope, inputSchema, invoke});
-const TOOLS = [
+const TOOLS = [...computeTools,
+
   tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
   tool('atax_system_context', 'Live canonical context snapshot for one system key', 'atax:read', one('system', {system_key:S.text('Canonical system key')}, ['system_key']), (a,db) => db.rpc('atax_context_snapshot', {system_key_in:a.system_key})),
   tool('atax_goal_overview', 'Open goals and their task states, optionally tag-filtered', 'atax:read', one('overview', {tags:{type:'array',items:S.text('Tag',80),maxItems:20}}), (a,db) => db.rpc('goal_ledger_overview', {tags_in:a.tags??null})),
