@@ -2,6 +2,9 @@ import {openLedger} from './data-api-ledger.mjs';
 
 /** Database-held server policy and Vault secrets, never deployment env vars. */
 const ALIAS=/^[A-Z][A-Z0-9_]{0,47}$/;
+const INFERENCE_PROVIDERS=new Set([
+  'google','groq','cerebras','together','nvidia','openrouter','huggingface','anthropic','openai'
+]);
 const SETTINGS=new Set([
   'MCP_OWNER_SUBJECT','MCP_GITHUB_OWNER','MCP_FMRL_ALLOWED_TARGETS',
   'MCP_SHARED_TOKEN_SHA256','MCP_SHARED_SUBJECT','MCP_SHARED_SCOPES',
@@ -39,6 +42,7 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
     // Vercel remains disabled as an MCP operating adapter.
     if(account.provider==='vercel')continue;
     const prefix=account.provider==='github'?'GH_KEY_':account.provider==='cloudflare'?'CF_KEY_':
+      INFERENCE_PROVIDERS.has(account.provider)?'AI_KEY_'+account.provider.replace(/-/g,'_')+'__':
       'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'__';
     resolved[prefix+account.alias]=account.token;
     if(account.provider==='cloudflare'&&account.accountId!==null&&account.accountId!==undefined){
