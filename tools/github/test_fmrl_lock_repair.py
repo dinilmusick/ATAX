@@ -45,7 +45,7 @@ class FmrlLockRepairContract(unittest.TestCase):
         self.assertIn("source file", writer)
         self.assertIn("Independent", writer)
         self.assertIn("LOCKFILES", writer)
-        self.assertIn('changed[0] not in LOCKFILES', writer)
+        self.assertIn("Path(p).name in LOCKFILES", writer)
         self.assertIn('stage="private-branch-preflight"', writer)
         self.assertIn('stage="atomic-branch-update"', writer)
         self.assertIn('branch_path.replace("/git/ref/", "/git/refs/")', writer)
