@@ -1,5 +1,6 @@
 import {resolveProviderAccount} from './provider-accounts.mjs';
-/** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */\n// Phase 3: OWNER constant is kept as a build-time safety net for the FMRL controller
+/** First-class GitHub/FMRL control-plane tools. No target code or credentials enter MCP results. */
+// Phase 3: OWNER constant is kept as a build-time safety net for the FMRL controller
 // repository path, but assertOwner() now validates against the env var rather than
 // enforcing a hardcoded string identity — enabling owners with different GitHub logins
 // to operate their own ATAX deployments without code changes.
