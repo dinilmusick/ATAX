@@ -32,6 +32,6 @@ jobs:
       - name: Tests
         working-directory: frnes
         run: pnpm test
-      - name: Skipo verification
+      - name: Production build verification
         working-directory: frnes
-        run: pnpm run validate
+        run: pnpm run build
