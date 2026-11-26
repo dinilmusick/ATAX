@@ -98,9 +98,14 @@ function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (
 async function jobFailureReceipts(fetcher,repo,job,token) {
   const url=`${API}/repos/${repo}/actions/jobs/${job.id}/logs`;
   try{
-    const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
+    let res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
       accept:'application/vnd.github+json','x-github-api-version':'2022-11-28',
       'user-agent':'atax-mcp-control-plane',authorization:`Bearer ${token}`}});
+    if(res.status>=300&&res.status<400){
+      const loc=res.headers?.get?.('location')||'';
+      if(!loc||!/^https:\/\//.test(loc))return [];
+      res=await fetcher(loc,{method:'GET',redirect:'follow',headers:{'user-agent':'atax-mcp-control-plane'}});
+    }
     if(!res.ok)return [];
     const text=await res.text();
     const receipts=[];
