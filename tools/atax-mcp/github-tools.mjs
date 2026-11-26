@@ -102,7 +102,7 @@ async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=
 function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (HTTP ${res.status})`);return res.data;}
 async function repositoryInfo(repo,ctx,token) {
   const data=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}`,token),'GitHub repository lookup');
-  if (data.full_name!==repo)throw new Error('Repository identity mismatch');
+  // GitHub repository owner/name is case-insensitive; use GitHub's canonical casing for identity.\n  if (String(data.full_name||'').toLowerCase()!==repo.toLowerCase())\n    throw new Error(`Repository identity mismatch: requested ${repo}, canonical ${data.full_name||'<missing>'}`);
   return {repository:data.full_name,url:data.html_url,visibility:data.private?'private':'public',default_branch:data.default_branch};
 }
 async function createRepository(a,_db,p,ctx){
