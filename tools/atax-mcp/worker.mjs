@@ -2,6 +2,7 @@ import {loadMcpRuntimeConfig} from './ledger-config.mjs';
 import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 import {computeTools} from './compute-tools.mjs';
+import {inferenceTools} from './inference-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
@@ -20,7 +21,7 @@ const S = {
   bool: description => ({ type: 'boolean', description }),
 };
 const tool = (name, description, scope, inputSchema, invoke) => ({name, description, scope, inputSchema, invoke});
-const TOOLS = [...computeTools,
+const TOOLS = [...computeTools, ...inferenceTools,
 
   tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
   tool('atax_system_context', 'Live canonical context snapshot for one system key', 'atax:read', one('system', {system_key:S.text('Canonical system key')}, ['system_key']), (a,db) => db.rpc('atax_context_snapshot', {system_key_in:a.system_key})),
@@ -106,7 +107,7 @@ function scrubSecrets(text, env){
   let clean=String(text);
   for(const [key,val] of Object.entries(env||{})){
     if(typeof val!=='string'||val.length<12)continue;
-    if(key==='FRNES_COMPUTE_ACCOUNTS_JSON'){
+    if(key==='FRNES_COMPUTE_ACCOUNTS_JSON'||key==='AI_INFERENCE_ACCOUNTS_JSON'){
       try{
         const parsed=JSON.parse(val);
         if(Array.isArray(parsed)){
@@ -120,7 +121,7 @@ function scrubSecrets(text, env){
       continue;
     }
     if(key.startsWith('GH_KEY_')||key.startsWith('GH_TOKEN_')||key.startsWith('CF_KEY_')||key.startsWith('CLOUDFLARE_TOKEN_')||
-       key.startsWith('FRNES_KEY_')||key==='FRNES_SERVICE_TOKEN'||
+       key.startsWith('FRNES_KEY_')||key.startsWith('AI_KEY_')||key==='FRNES_SERVICE_TOKEN'||
        key==='ATAX_SUPABASE_SECRET_KEY'||key==='SUPABASE_SERVICE_ROLE_KEY'||key==='SUPABASE_SECRET_KEY'||key==='MCP_SHARED_TOKEN_SHA256'){
       clean=clean.split(val).join('[REDACTED]');
     }
@@ -276,7 +277,7 @@ export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRunt
   async function dispatch(req,env={}){
     const url=new URL(req.url);
     if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL,databaseTransport:'supabase-data-api'});
-    // Claude/Gemini connector discovery: HEAD /mcp → 200 (server reachability probe)
+    // Claude/Gemini connector discovery: HEAD /mcp -> 200 (server reachability probe)
     if(url.pathname==='/mcp'&&req.method==='HEAD')return new Response(null,{status:200,headers:{...safeHeaders,'allow':'POST, GET, HEAD, OPTIONS'}});
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&(req.method==='GET'||req.method==='HEAD')){
       const resource=new URL('/mcp',req.url).toString();
