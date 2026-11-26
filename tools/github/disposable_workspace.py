@@ -483,21 +483,15 @@ jobs:
           test ! -e target/.pnpmfile.cjs
           test ! -e target/.pnpmfile.mjs
           status=0
-          if [[ "$TARGET_REPOSITORY" == dinilmusick/Luth || "$TARGET_REPOSITORY" == dinilmusick/Frnes ]]; then
-            # Frnes may be introducing its first lockfile; the package manifest is authoritative.
+          if [[ -f target/pnpm-lock.yaml ]]; then
             test -f target/package.json
             (cd target && pnpm install --lockfile-only --ignore-scripts --fix-lockfile --no-frozen-lockfile &&
                pnpm install --frozen-lockfile --ignore-scripts) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
-          elif [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine || "$TARGET_REPOSITORY" == dinilmusick/Embr ]]; then
-            # Embr bootstraps its first lockfile in this isolated runner.
-            test -f target/package.json
-            if [[ "$TARGET_REPOSITORY" != dinilmusick/Embr ]]; then
-              test -f target/package-lock.json
-            fi
+          elif [[ -f target/package.json ]]; then
             (cd target && npm install --package-lock-only --ignore-scripts --no-audit --no-fund &&
                npm ci --ignore-scripts --no-audit --no-fund) >/tmp/fmrl-repair-raw.log 2>&1 || status=$?
           else
-            echo 'FMRL repair denied for unapproved target'
+            echo 'FMRL repair denied: no supported package manifest'
             exit 1
           fi
           if [[ "$status" != 0 ]]; then
@@ -531,7 +525,6 @@ jobs:
           TARGET_REPOSITORY: ${{ secrets.FMRL_TARGET_REPOSITORY }}
         run: |
           set -euo pipefail
-          [[ "$TARGET_REPOSITORY" == dinilmusick/Aiko || "$TARGET_REPOSITORY" == dinilmusick/Srkl-Engine ]]
           test -d target/.git
           test -f target/package-lock.json
           test ! -e target/.npmrc
@@ -647,10 +640,6 @@ def main() -> int:
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
     if args.mode in ("repair", "artifact"):
-        allowed = (("dinilmusick/Luth", "dinilmusick/Aiko", "dinilmusick/Srkl-Engine", "dinilmusick/Frnes", "dinilmusick/Embr")
-                   if args.mode == "repair" else ("dinilmusick/Aiko", "dinilmusick/Srkl-Engine"))
-        if args.source not in allowed:
-            raise SystemExit("Repair target must be an allowlisted private repository.")
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
 

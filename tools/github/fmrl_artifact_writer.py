@@ -16,10 +16,7 @@ import subprocess
 import sys
 from urllib import error, parse, request
 
-ALLOWED = {
-    "dinilmusick/Aiko": "api/index.js",
-    "dinilmusick/Srkl-Engine": "api/index.js",
-}
+ARTIFACT_PATH = "api/index.js"
 ROOT = Path("target")
 API = "https://api.github.com"
 
@@ -50,13 +47,13 @@ def main() -> None:
     branch = os.environ.get("FMRL_TARGET_BRANCH", "")
     expected = os.environ.get("FMRL_TARGET_REF", "")
     token = os.environ.get("FMRL_REPAIR_WRITE_TOKEN", "")
-    if repo not in ALLOWED:
-        fail("Repository is outside the reviewed lockfile repair allowlist")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        fail("Unsafe repository reference")
     if not re.fullmatch(r"[a-zA-Z0-9_./-]{1,180}", branch) or ".." in branch or branch.startswith("/"):
         fail("Unsafe branch reference")
     if not re.fullmatch(r"[a-f0-9]{40}", expected) or not token:
         fail("Missing exact SHA or independent write authority")
-    path = ALLOWED[repo]
+    path = ARTIFACT_PATH
     target = ROOT / path
     if target.is_symlink() or not target.is_file() or target.stat().st_size > 20_000_000:
         fail("Worker artifact missing, symbolic, or exceeds bounded size")

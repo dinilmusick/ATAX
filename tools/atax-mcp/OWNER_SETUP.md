@@ -65,7 +65,7 @@ Initialize the instance passkey once via Supabase SQL Editor (`SELECT atax_priva
 
 - **Troubleshooting Settings `Test` button:** `/api/settings/providers/:provider/:alias/test` resolves the instance owner from the canonical database before calling `vault.testAccountConnection(ownerSubject, provider, alias)` and returns `503` if the instance owner is not configured or session is invalid, or `404` if the account alias is disabled in Vault (only enabled accounts are active in `atax_mcp_runtime_config_v1`).
 - **Multi-account GitHub + FMRL:** `atax_provider_accounts_list` lists aliases only. When two or more GitHub accounts are registered (e.g. `PERSONAL`, `WORK`), callers must specify `account` explicitly on every GitHub and FMRL tool call; `atax_fmrl_create_run_dispose` returns `dispatched_account`, which can be passed back to `atax_fmrl_get_status` to enforce same-account polling.
-- Configure `MCP_GITHUB_OWNER` (valid GitHub login for the ATAX controller repo) and `MCP_FMRL_ALLOWED_TARGETS` for FMRL CI dispatch. Selected GitHub credentials never leak in responses or logs.
+- Configure `MCP_GITHUB_OWNER` (valid GitHub login for the ATAX controller repo); FMRL dispatch accepts any target repository under this owner. Selected GitHub credentials never leak in responses or logs.
 
 ## GitHub repository secrets are a separate boundary
 
