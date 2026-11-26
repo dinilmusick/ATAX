@@ -1,0 +1,38 @@
+name: Private Frnes validation bridge
+on:
+  push:
+    paths:
+      - 'ci/frnes-private-validation.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: github.event.commits[0].added == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Frnes private target
+        uses: actions/checkout@v4
+        with:
+          repository: dinilmusick/Frnes
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: frnes
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        working-directory: frnes
+        run: corepack enable
+      - name: Install dependencies
+        working-directory: frnes
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        working-directory: frnes
+        run: pnpm run typecheck
+      - name: Tests
+        working-directory: frnes
+        run: pnpm test
+      - name: Strict verification
+        working-directory: frnes
+        run: pnpm run validate:strict
