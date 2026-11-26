@@ -39,7 +39,7 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
     // Vercel remains disabled as an MCP operating adapter.
     if(account.provider==='vercel')continue;
     const prefix=account.provider==='github'?'GH_KEY_':account.provider==='cloudflare'?'CF_KEY_':
-      'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'_';
+      'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'__';
     resolved[prefix+account.alias]=account.token;
     if(account.provider==='cloudflare'&&account.accountId!==null&&account.accountId!==undefined){
       if(typeof account.accountId!=='string'||
