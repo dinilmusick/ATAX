@@ -18,7 +18,7 @@ begin
     'Rollback-only two-minute stale-heartbeat recovery test',
     jsonb_build_object('purpose','bounded-v2 recovery integration fixture'),
     'Check claim fencing and overview visibility.',
-    jsonb_build_array('A stale direct task can be atomically reclaimed after two minutes'),
+    jsonb_build_array('A stale direct task can be atomically reclaimed after five minutes'),
     'recovery-test-orchestrator',
     jsonb_build_object(
       'name','Recovery test leaf',
@@ -57,7 +57,7 @@ begin
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '1 minute 59 seconds',
+  set heartbeat_at=now()-interval '4 minutes 59 seconds',
       claim_expires_at=now()-interval '1 minute',
       current_step='Recent heartbeat despite expired lease'
   where id=first_claim.id;
@@ -68,11 +68,11 @@ begin
     array['recovery-test']::text[],900
   );
   if early_claim.id is not null then
-    raise exception 'Task was reclaimed before two-minute heartbeat threshold';
+    raise exception 'Task was reclaimed before five-minute heartbeat threshold';
   end if;
 
   update public.tasks
-  set heartbeat_at=now()-interval '2 minutes 1 second',
+  set heartbeat_at=now()-interval '5 minutes 1 second',
       claim_expires_at=now()+interval '15 minutes',
       current_step='Stale heartbeat for recovery'
   where id=first_claim.id;
@@ -129,7 +129,7 @@ begin
     raise exception 'Overview did not aggregate running task';
   end if;
 
-  raise notice 'PASS: bounded-v2 direct task, two-minute heartbeat and expired-lease recovery, fencing and complete overview';
+  raise notice 'PASS: bounded-v2 direct task, five-minute heartbeat and expired-lease recovery, fencing and complete overview';
 end;
 $test$;
 rollback;
