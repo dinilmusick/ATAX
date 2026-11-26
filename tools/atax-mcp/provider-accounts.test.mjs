@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {availableAccounts,resolveProviderAccount,isOwnerPrincipal,providerTools} from './provider-accounts.mjs';
+import {availableAccounts,availableComputeAccounts,resolveProviderAccount,resolveComputeAccount,isOwnerPrincipal,providerTools} from './provider-accounts.mjs';
 
 const owner={id:'owner',authMethod:'shared'};
 const oauthOwner={id:'oauth-owner',authMethod:'jwt'};
@@ -8,7 +8,7 @@ const outsider={id:'outsider',authMethod:'jwt'};
 const env={
   MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'test-digest',
   MCP_ATAX_OWNER_JWT_SUBJECT:'oauth-owner',
-  GH_KEY_PERSONAL:'github-personal-test', GH_KEY_WORK:'github-work-test',
+  GH_KEY_PERSONAL:'github-personal-test', GH_KEY_WORK:'github-work-test', FRNES_KEY_fly_DEV:'fly-dev-test',
   CF_KEY_PERSONAL:'cloudflare-personal-test', CF_KEY_WORK:'cloudflare-work-test',
   CLOUDFLARE_ACCOUNT_ID_WORK:'abc12345',
 };
@@ -27,7 +27,8 @@ test('single shared or pinned OAuth owner discovers named accounts; outsiders ne
   assert.deepEqual(availableAccounts(env,outsider,'cloudflare'),[]);
   assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[]]);
   const listed=await invoke('atax_provider_accounts_list',{},oauthOwner);
-  assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare']);
+  assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare','compute']);
+  assert.deepEqual(listed.accounts[2].providers,[{provider:'fly',aliases:['DEV']}]);
   assert.ok(!JSON.stringify(listed).includes('github-personal-test'));
   assert.ok(!JSON.stringify(listed).includes('cloudflare-work-test'));
   assert.ok(!providerTools.some(t=>t.name.includes('vercel')));
@@ -79,4 +80,11 @@ test('bad configuration, API failures and empty credentials fail closed',async()
   await assert.rejects(invoke('atax_cloudflare_accounts_list',{account:'WORK'},owner,env,async()=>new Response('invalid')),/invalid JSON/);
   await assert.rejects(invoke('atax_cloudflare_workers_list',{account:'PERSONAL'},owner,env),/account ID required/);
   assert.throws(()=>availableAccounts(env,owner,'vercel'),/Unknown provider/);
+});
+
+test('compute account resolution is owner-scoped and requires explicit alias when ambiguous',()=>{
+  assert.deepEqual(availableComputeAccounts(env,owner,'fly'),['DEV']);
+  assert.equal(resolveComputeAccount(env,owner,'fly','dev').token,'fly-dev-test');
+  assert.throws(()=>resolveComputeAccount({...env,FRNES_KEY_fly_WORK:'fly-work-test'},owner,'fly'),/Specify a compute account alias/);
+  assert.throws(()=>resolveComputeAccount(env,outsider,'fly','DEV'),/not authorized/);
 });
