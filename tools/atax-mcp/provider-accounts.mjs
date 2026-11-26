@@ -45,7 +45,7 @@ export function availableComputeAccounts(env,principal,provider) {
 }
 export function resolveComputeAccount(env,principal,provider,requested) {
   if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))throw new Error('Compute account unavailable or not authorized');
-  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'_';
+  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'__';
   const accounts=new Map();
   if(typeof env[COMPUTE_JSON]==='string'&&env[COMPUTE_JSON].trim()){
     let parsed;try{parsed=JSON.parse(env[COMPUTE_JSON]);}catch{throw new Error('Invalid FRNES compute account configuration');}
