@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {computeTools} from './compute-tools.mjs';
+test('ATAX exposes FRNES compute capability and lifecycle tools',()=>{assert.deepEqual(computeTools.map(x=>x.name),['atax_compute_capabilities','atax_compute_execute','atax_compute_destroy']);assert.equal(computeTools.every(x=>x.inputSchema.additionalProperties===false),true);});
+test('ATAX compute adapter rejects missing FRNES gateway configuration',async()=>{await assert.rejects(computeTools[0].invoke({workspaceId:'ws'},null,{id:'owner'},{env:{},fetcher:fetch}),/FRNES compute gateway is not configured/);});
+test('ATAX compute adapter never accepts non-HTTPS FRNES endpoints',async()=>{await assert.rejects(computeTools[0].invoke({workspaceId:'ws'},null,{id:'owner'},{env:{FRNES_URL:'http://bad',FRNES_SERVICE_TOKEN:'1234567890123456'},fetcher:fetch}),/FRNES compute gateway is not configured/);});
