@@ -37,6 +37,23 @@
   font-family: var(--font-sans);
 }
 
+.react-flow__handle {
+  z-index: 20 !important;
+  cursor: crosshair !important;
+  transition: box-shadow 0.12s ease;
+}
+
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+}
+
+.react-flow__handle:hover {
+  box-shadow: 0 0 0 4px rgba(223, 107, 59, 0.55);
+}
+
 .react-flow__edge-path {
   stroke-linecap: round;
 }

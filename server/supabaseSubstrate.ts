@@ -617,17 +617,17 @@ export function createSubstrateService(
     let rawSystemsRes: SafeQueryResult;
     [visionsRes, targetsRes, linksRes, goalsRes, tasksRes, rawSystemsRes] = await Promise.all([
       api.selectAll(
-        'visions?select=id,vision_key,title,description,target,status,created_at,updated_at&status=neq.archived&order=updated_at.desc'
+        'visions?select=id,vision_key,title,description,target,status,metadata,created_at,updated_at&status=neq.archived&order=updated_at.desc'
       ),
       api.selectAll('vision_targets?select=id,vision_id,parent_target_id,target,label'),
       api.selectAll('vision_target_goals?select=vision_target_id,goal_id'),
       api.selectAll(
-        'goals?select=id,goal_key,name,description,status,goal_type,target,user_priority,goal_loop_definition,goal_loop_iteration,system_id,created_at,updated_at&status=not.in.(archived,cancelled)&order=user_priority.desc.nullslast,updated_at.desc'
+        'goals?select=id,goal_key,name,description,status,goal_type,target,user_priority,goal_loop_definition,goal_loop_iteration,system_id,deadline_at,metadata,created_at,updated_at&status=not.in.(archived,cancelled)&order=user_priority.desc.nullslast,updated_at.desc'
       ),
       api.selectAll(
-        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,task_type,status,verification_status,priority,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,blocker_notoriety,input_contract,output_contract,required_tools,required_capabilities,acceptance_criteria,verification_plan,loop_definition,task_definition,checkpoints,updated_at&status=not.in.(cancelled,abandoned)&order=priority.asc,created_at.asc'
+        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,task_type,status,verification_status,priority,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,blocker_notoriety,input_contract,output_contract,required_tools,required_capabilities,acceptance_criteria,verification_plan,loop_definition,task_definition,checkpoints,started_at,due_at,metadata,updated_at&status=not.in.(cancelled,abandoned)&order=priority.asc,started_at.asc'
       ),
-      api.selectAll('systems?select=id,system_key'),
+      api.selectAll('systems?select=id,system_key,name'),
     ]);
 
     if (linksRes.ok && targetsRes.ok) {
@@ -645,10 +645,18 @@ export function createSubstrateService(
       };
     }
 
+    const systemNameByKey = new Map<string, string>();
+    const sysKeyById = new Map<string, string>();
+    if (rawSystemsRes.ok) {
+      for (const s of rawSystemsRes.rows) {
+        if (s.system_key) {
+          sysKeyById.set(String(s.id), String(s.system_key));
+          systemNameByKey.set(String(s.system_key), String(s.name || s.system_key));
+        }
+      }
+    }
+
     if (goalsRes.ok && rawSystemsRes.ok) {
-      const sysKeyById = new Map(
-        rawSystemsRes.rows.map((s) => [String(s.id), String(s.system_key || '')])
-      );
       goalsRes = {
         ok: true,
         rows: goalsRes.rows.map((g) => ({
@@ -703,8 +711,130 @@ export function createSubstrateService(
       overviewRpc = rpc.ok ? { ok: true, rows: [{ overview: rpc.rows[0]?.value }] } : rpc;
     }
 
-    if (goalsRes.ok && tasksRes.ok) {
+    const extractTimestamp = (val: unknown): string | null =>
+      typeof val === 'string' && val.trim() && !Number.isNaN(Date.parse(val)) ? val.trim() : null;
 
+    const assignVisionsToAllGoals = (
+      baseVisions: VisionGraphNodeData[],
+      rawGoals: GoalGraphNodeData[],
+      goalTargetsById: Map<string, { type: string; id: string }>
+    ): VisionGraphNodeData[] => {
+      const resultVisions = baseVisions.map((v) => ({ ...v }));
+      const visionById = new Map(resultVisions.map((v) => [v.id, v]));
+      const visionByTargetSig = new Map<string, VisionGraphNodeData>();
+      for (const v of resultVisions) {
+        if (v.targetType && v.targetLabel) {
+          visionByTargetSig.set(`${v.targetType}:${v.targetLabel}`.toLowerCase(), v);
+          const resolvedSysKey = sysKeyById.get(v.targetLabel);
+          if (resolvedSysKey) {
+            visionByTargetSig.set(`system:${resolvedSysKey}`.toLowerCase(), v);
+          }
+        }
+      }
+
+      const formatBucketTitle = (targetType: string, targetId: string, systemKey?: string | null): string => {
+        if (systemKey && systemNameByKey.has(systemKey)) {
+          return systemNameByKey.get(systemKey)!;
+        }
+        const raw = (systemKey || targetId || targetType || 'General').trim();
+        if (!raw || raw === 'unspecified' || raw.startsWith('legacy-goal:')) {
+          return 'General Substrate Operations';
+        }
+        return raw
+          .replace(/[-_]+/g, ' ')
+          .replace(/\b\w/g, (ch) => ch.toUpperCase());
+      };
+
+      const derivedVisionsByKey = new Map<string, VisionGraphNodeData>();
+      for (const goal of rawGoals) {
+        if (goal.visionId && visionById.has(goal.visionId)) continue;
+
+        const targetInfo = goalTargetsById.get(goal.id);
+        const targetType = targetInfo?.type || 'system';
+        const targetId = targetInfo?.id || goal.systemKey || '';
+        const targetSig = targetId ? `${targetType}:${targetId}`.toLowerCase() : '';
+        const resolvedGoalTargetKey = targetId ? sysKeyById.get(targetId) : undefined;
+
+        const matchedVision =
+          (targetSig ? visionByTargetSig.get(targetSig) : undefined) ||
+          (resolvedGoalTargetKey
+            ? visionByTargetSig.get(`system:${resolvedGoalTargetKey}`.toLowerCase())
+            : undefined) ||
+          (goal.systemKey ? visionByTargetSig.get(`system:${goal.systemKey}`.toLowerCase()) : undefined);
+
+        if (matchedVision) {
+          goal.visionId = matchedVision.id;
+          continue;
+        }
+
+        const bucketRaw =
+          goal.systemKey ||
+          (targetId && targetId !== 'unspecified' && !targetId.startsWith('legacy-goal:')
+            ? `${targetType}:${targetId}`
+            : `domain:${goal.goalType || 'general'}`);
+        const bucketKey = bucketRaw.toLowerCase();
+
+        let derived = derivedVisionsByKey.get(bucketKey);
+        if (!derived) {
+          const derivedId = `vision-domain:${bucketKey}`;
+          const readableKey = `VIS-${bucketKey.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').toUpperCase().slice(0, 24) || 'CORE'}`;
+          derived = {
+            id: derivedId,
+            readableKey,
+            title: formatBucketTitle(targetType, targetId, goal.systemKey),
+            description: `Goals and workstreams scoped to ${targetId || goal.systemKey || goal.goalType || 'general substrate'}.`,
+            targetType,
+            targetLabel: targetId || goal.systemKey || goal.goalType || 'general',
+            status: 'active',
+            goalsCount: 0,
+            createdAt: goal.createdAt ?? null,
+            deadlineAt: goal.deadlineAt ?? null,
+            isDerived: true,
+            position: { x: 20 + resultVisions.length * 420, y: 20 },
+          };
+          derivedVisionsByKey.set(bucketKey, derived);
+          resultVisions.push(derived);
+          visionById.set(derived.id, derived);
+        }
+        goal.visionId = derived.id;
+      }
+
+      // Recalculate goalsCount and aggregate earliest start/deadline onto visions
+      const goalsPerVision = new Map<string, GoalGraphNodeData[]>();
+      for (const g of rawGoals) {
+        if (!g.visionId) continue;
+        const list = goalsPerVision.get(g.visionId) ?? [];
+        list.push(g);
+        goalsPerVision.set(g.visionId, list);
+      }
+      for (const v of resultVisions) {
+        const list = goalsPerVision.get(v.id) ?? [];
+        v.goalsCount = list.length;
+        if (!v.createdAt) {
+          const starts = list
+            .map((g) => g.createdAt)
+            .filter((d): d is string => Boolean(d))
+            .sort((a, b) => Date.parse(a) - Date.parse(b));
+          if (starts.length > 0) v.createdAt = starts[0];
+        }
+        if (!v.deadlineAt) {
+          const deadlines = list
+            .map((g) => g.deadlineAt)
+            .filter((d): d is string => Boolean(d))
+            .sort((a, b) => Date.parse(a) - Date.parse(b));
+          if (deadlines.length > 0) v.deadlineAt = deadlines[0];
+        }
+        if (list.some((g) => g.status === 'blocked')) {
+          v.status = 'blocked';
+        } else if (list.some((g) => g.status === 'active' || g.status === 'in_progress')) {
+          v.status = 'active';
+        }
+      }
+
+      return resultVisions;
+    };
+
+    if (goalsRes.ok && tasksRes.ok) {
       const budgetByTask = new Map<string, TaskContextLimit>();
       if (budgetsRes.ok) {
         for (const b of budgetsRes.rows) {
@@ -724,10 +854,12 @@ export function createSubstrateService(
       const goalToVision = new Map<string, { visionId: string; targetLabel: string }>();
       if (linksRes.ok) {
         for (const l of linksRes.rows) {
-          goalToVision.set(String(l.goal_id), {
-            visionId: String(l.vision_id),
-            targetLabel: String(l.target_label || ''),
-          });
+          if (l.vision_id) {
+            goalToVision.set(String(l.goal_id), {
+              visionId: String(l.vision_id),
+              targetLabel: String(l.target_label || ''),
+            });
+          }
         }
       }
 
@@ -736,6 +868,7 @@ export function createSubstrateService(
       const tasks: TaskGraphNodeData[] = tasksRes.rows.map((r, idx) => {
         const taskId = String(r.id);
         const goalId = r.goal_id ? String(r.goal_id) : null;
+        const meta = asRecord(r.metadata);
         const requiredTools = asArray(r.required_tools).map((t) =>
           typeof t === 'string' ? t : String(asRecord(t).slug || asRecord(t).name || t)
         );
@@ -746,6 +879,7 @@ export function createSubstrateService(
           id: taskId,
           readableKey: String(r.task_key || taskId),
           goalId,
+          parentTaskId: r.parent_task_id ? String(r.parent_task_id) : null,
           title: String(r.task_name || r.task_key || 'Untitled Task'),
           description: r.description ? String(r.description) : undefined,
           taskType: String(r.task_type || 'general'),
@@ -759,6 +893,8 @@ export function createSubstrateService(
           checkpoints: parseCheckpoints(r.checkpoints),
           occupancy: deriveOccupancy(r, nowMs),
           blockerNotoriety: Number(r.blocker_notoriety || 0),
+          startedAt: extractTimestamp(r.started_at),
+          dueAt: extractTimestamp(r.due_at) || extractTimestamp(meta.due_at) || extractTimestamp(meta.deadline_at),
           updatedAt: r.updated_at ? String(r.updated_at) : null,
           position: { x: 20 + idx * 360, y: 98 },
         };
@@ -771,14 +907,17 @@ export function createSubstrateService(
         return task;
       });
 
-      const goalsCountByVision = new Map<string, number>();
+      const goalTargetsById = new Map<string, { type: string; id: string }>();
       const goals: GoalGraphNodeData[] = goalsRes.rows.map((g, idx) => {
         const goalId = String(g.id);
         const visionLink = goalToVision.get(goalId);
         const visionId = visionLink?.visionId ?? null;
-        if (visionId) {
-          goalsCountByVision.set(visionId, (goalsCountByVision.get(visionId) ?? 0) + 1);
-        }
+        const targetObj = asRecord(g.target);
+        const meta = asRecord(g.metadata);
+        goalTargetsById.set(goalId, {
+          type: String(targetObj.type || 'system'),
+          id: String(targetObj.id || ''),
+        });
 
         const goalTasks = tasksByGoal.get(goalId) ?? [];
         const verifiedCount = goalTasks.filter(
@@ -812,36 +951,40 @@ export function createSubstrateService(
           maxIterations,
           currentIteration: Number(g.goal_loop_iteration || 0),
           tasksCount: goalTasks.length,
+          createdAt: extractTimestamp(g.created_at),
+          deadlineAt: extractTimestamp(g.deadline_at) || extractTimestamp(meta.deadline_at),
           position: { x: 24 + idx * 356, y: 112 },
         };
       });
 
-      // Keep vision_targets count available in description/targetLabel if needed
-      const targetsCountByVision = new Map<string, number>();
-      if (targetsRes.ok) {
-        for (const t of targetsRes.rows) {
-          const vid = String(t.vision_id);
-          targetsCountByVision.set(vid, (targetsCountByVision.get(vid) ?? 0) + 1);
-        }
-      }
-
-      const visions: VisionGraphNodeData[] = visionsRes.ok
+      const baseVisions: VisionGraphNodeData[] = visionsRes.ok
         ? visionsRes.rows.map((v, idx) => {
             const vid = String(v.id);
             const target = asRecord(v.target);
+            const meta = asRecord(v.metadata);
+            const rawTargetType = String(target.type || 'system');
+            const rawTargetId = String(target.id || '');
+            const displayTargetLabel =
+              rawTargetType === 'system' && sysKeyById.has(rawTargetId)
+                ? sysKeyById.get(rawTargetId)!
+                : rawTargetId;
             return {
               id: vid,
               readableKey: String(v.vision_key || vid),
               title: String(v.title || v.vision_key || 'Untitled Vision'),
               description: String(v.description || ''),
-              targetType: String(target.type || 'system'),
-              targetLabel: String(target.id || ''),
+              targetType: rawTargetType,
+              targetLabel: displayTargetLabel,
               status: String(v.status || 'planning'),
-              goalsCount: goalsCountByVision.get(vid) ?? 0,
+              goalsCount: 0,
+              createdAt: extractTimestamp(v.created_at),
+              deadlineAt: extractTimestamp(meta.deadline_at) || extractTimestamp(meta.due_at),
               position: { x: 20 + idx * 450, y: 20 },
             };
           })
         : [];
+
+      const visions = assignVisionsToAllGoals(baseVisions, goals, goalTargetsById);
 
       const edges: VisionGoalTaskEdge[] = [];
       if (goalDepsRes.ok) {
@@ -893,6 +1036,7 @@ export function createSubstrateService(
       const tasks: TaskGraphNodeData[] = [];
       const edges: VisionGoalTaskEdge[] = [];
       const taskKeyToId = new Map<string, string>();
+      const goalTargetsById = new Map<string, { type: string; id: string }>();
 
       rawGoals.forEach((g, gi) => {
         const goalId = String(g.id || g.goal_key || gi);
@@ -904,6 +1048,11 @@ export function createSubstrateService(
         const verified = Math.max(0, completed - awaiting);
         const progress = total > 0 ? Math.round((verified / total) * 100) : 0;
         const loopDef = asRecord(g.goal_loop_definition);
+        const targetObj = asRecord(g.target);
+        goalTargetsById.set(goalId, {
+          type: String(targetObj.type || 'system'),
+          id: String(targetObj.id || ''),
+        });
 
         let maxNotoriety = 0;
         rawTasks.forEach((t, ti) => {
@@ -917,6 +1066,7 @@ export function createSubstrateService(
             id: tId,
             readableKey: tKey,
             goalId,
+            parentTaskId: t.parent_task_id ? String(t.parent_task_id) : null,
             title: String(t.name || tKey),
             taskType: String(t.task_type || 'general'),
             status: String(t.status || 'queued'),
@@ -936,6 +1086,8 @@ export function createSubstrateService(
               nowMs
             ),
             blockerNotoriety: notoriety,
+            startedAt: extractTimestamp(t.started_at),
+            dueAt: extractTimestamp(t.due_at),
             position: { x: 20 + ti * 360, y: 98 },
           });
         });
@@ -974,11 +1126,14 @@ export function createSubstrateService(
           maxIterations: Number(loopDef.max_iterations || 0),
           currentIteration: Number(g.goal_loop_iteration || 0),
           tasksCount: rawTasks.length,
+          createdAt: extractTimestamp(g.created_at),
+          deadlineAt: extractTimestamp(g.deadline_at),
           position: { x: 24 + gi * 356, y: 112 },
         });
       });
 
-      return { visions: [], goals, tasks, edges, fetchedAt };
+      const visions = assignVisionsToAllGoals([], goals, goalTargetsById);
+      return { visions, goals, tasks, edges, fetchedAt };
     }
 
     const errMsg = !goalsRes.ok

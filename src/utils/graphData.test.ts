@@ -306,7 +306,7 @@ test('buildSystemsGraph handles empty, root, wormhole-filtered, and nested focus
   assert.equal(insideSys1.edges.length, 0);
 });
 
-test('buildVisionsGoalsGraph handles root, vision drill-down, and goal drill-down nested views', () => {
+test('buildVisionsGoalsGraph renders ONLY visions at root and supports 4-level nested drill-down', () => {
   const root = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
     goals: FIXTURE_GOALS,
@@ -314,10 +314,12 @@ test('buildVisionsGoalsGraph handles root, vision drill-down, and goal drill-dow
     edges: FIXTURE_VG_EDGES,
     scope: { level: 'root' },
   });
-  // Two visions + one standalone goal at root
-  assert.equal(root.nodes.filter((n) => n.type === 'visionNode').length, 2);
-  assert.equal(root.nodes.filter((n) => n.type === 'goalNode').length, 1);
+  // Root MUST show ONLY Vision nodes (2 explicit + 1 derived fallback for standalone goal), zero goals/tasks
+  assert.equal(root.nodes.filter((n) => n.type === 'visionNode').length, 3);
+  assert.equal(root.nodes.filter((n) => n.type === 'goalNode').length, 0);
   assert.equal(root.nodes.filter((n) => n.type === 'taskNode').length, 0);
+  // Cross-vision dependency derived from goal-1 -> goal-standalone
+  assert.equal(root.edges.some((e) => e.source === 'vision-1' && e.target === 'vision-unassigned-goals'), true);
 
   const insideVision1 = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
@@ -329,6 +331,16 @@ test('buildVisionsGoalsGraph handles root, vision drill-down, and goal drill-dow
   assert.equal(insideVision1.nodes.length, 1);
   assert.equal(insideVision1.nodes[0].id, 'goal-1');
   assert.equal(insideVision1.nodes[0].type, 'goalNode');
+
+  const insideFallbackVision = buildVisionsGoalsGraph({
+    visions: FIXTURE_VISIONS,
+    goals: FIXTURE_GOALS,
+    tasks: FIXTURE_TASKS,
+    edges: FIXTURE_VG_EDGES,
+    scope: { level: 'vision', visionId: 'vision-unassigned-goals' },
+  });
+  assert.equal(insideFallbackVision.nodes.length, 1);
+  assert.equal(insideFallbackVision.nodes[0].id, 'goal-standalone');
 
   const insideGoal1 = buildVisionsGoalsGraph({
     visions: FIXTURE_VISIONS,
@@ -345,6 +357,47 @@ test('buildVisionsGoalsGraph handles root, vision drill-down, and goal drill-dow
   const t1 = taskNodes.find((n) => n.id === 'task-1')!;
   const t2 = taskNodes.find((n) => n.id === 'task-2')!;
   assert.ok(t2.position.x > t1.position.x);
+
+  // 4th level: focused task scope
+  const insideTask1 = buildVisionsGoalsGraph({
+    visions: FIXTURE_VISIONS,
+    goals: FIXTURE_GOALS,
+    tasks: FIXTURE_TASKS,
+    edges: FIXTURE_VG_EDGES,
+    scope: { level: 'task', taskId: 'task-1' },
+  });
+  assert.equal(insideTask1.nodes.length, 1);
+  assert.equal(insideTask1.nodes[0].id, 'task-1');
+});
+
+test('createForceBodies excludes stickyNoteNode and groupBoxNode annotations', () => {
+  const bodies = createForceBodies([
+    {
+      id: 'vision-1',
+      type: 'visionNode',
+      position: { x: 20, y: 20 },
+      style: { width: 356, height: 162 },
+      data: {},
+    },
+    {
+      id: 'sticky-1',
+      type: 'stickyNoteNode',
+      position: { x: 400, y: 40 },
+      style: { width: 220, height: 164 },
+      data: { disableFloat: true },
+    },
+    {
+      id: 'group-1',
+      type: 'groupBoxNode',
+      position: { x: 0, y: 0 },
+      style: { width: 480, height: 300 },
+      data: { disableFloat: true },
+    },
+  ]);
+
+  assert.equal(bodies.has('vision-1'), true);
+  assert.equal(bodies.has('sticky-1'), false);
+  assert.equal(bodies.has('group-1'), false);
 });
 
 test('stepForceSimulation produces bounded floaty drift for graph nodes', () => {

@@ -1,4 +1,87 @@
-export type ActiveTab = 'systems' | 'visions-goals' | 'skills' | 'settings';
+export type ActiveTab = 'systems' | 'visions' | 'skills' | 'settings';
+
+export type BranchingNodeKind = 'multi_in_single_out' | 'single_in_multi_out' | 'fan_out';
+
+export type NodeTypeKey =
+  | 'vision'
+  | 'goal'
+  | 'task'
+  | 'system'
+  | 'subsystem'
+  | BranchingNodeKind;
+
+export type DeadlineUrgencyLevel = 'green' | 'yellow' | 'orange' | 'red' | 'none';
+
+export interface StickyNoteItem {
+  id: string;
+  scopeKey: string;
+  text: string;
+  color: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface GroupingBoxItem {
+  id: string;
+  scopeKey: string;
+  title: string;
+  color: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BranchingNodeItem {
+  id: string;
+  scopeKey: string;
+  kind: BranchingNodeKind;
+  title: string;
+  rule: string;
+  description: string;
+  portCount: number;
+  portLabels: string[];
+  x: number;
+  y: number;
+}
+
+export interface CustomDomainNodeItem {
+  id: string;
+  scopeKey: string;
+  domainKind: 'vision' | 'goal' | 'task' | 'system' | 'subsystem';
+  parentId?: string | null;
+  readableKey: string;
+  title: string;
+  description: string;
+  status: string;
+  subtitle: string;
+  x: number;
+  y: number;
+}
+
+export interface CustomEdgeItem {
+  id: string;
+  scopeKey: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  label?: string;
+}
+
+export type SavedNodePositionsMap = Record<string, Record<string, { x: number; y: number }>>;
+
+export interface NodeColorPreferences {
+  byType: Record<NodeTypeKey, string>;
+  byNodeId: Record<string, string>;
+}
+
+export interface NodeDeadlineOverride {
+  startAt: string;
+  deadlineAt: string;
+}
 
 export type ProviderType = string;
 
@@ -123,6 +206,9 @@ export interface VisionGraphNodeData {
   targetLabel: string;
   status: string;
   goalsCount: number;
+  createdAt?: string | null;
+  deadlineAt?: string | null;
+  isDerived?: boolean;
   position: { x: number; y: number };
 }
 
@@ -142,6 +228,8 @@ export interface GoalGraphNodeData {
   maxIterations: number;
   currentIteration: number;
   tasksCount: number;
+  createdAt?: string | null;
+  deadlineAt?: string | null;
   position: { x: number; y: number };
 }
 
@@ -172,6 +260,7 @@ export interface TaskGraphNodeData {
   id: string;
   readableKey: string;
   goalId: string | null;
+  parentTaskId?: string | null;
   title: string;
   description?: string;
   taskType: string;
@@ -185,6 +274,8 @@ export interface TaskGraphNodeData {
   checkpoints: TaskCheckpointSummary[];
   occupancy: TaskOccupancyInfo;
   blockerNotoriety: number;
+  startedAt?: string | null;
+  dueAt?: string | null;
   updatedAt?: string | null;
   position: { x: number; y: number };
 }

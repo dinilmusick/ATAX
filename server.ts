@@ -1,10 +1,13 @@
 import express from 'express';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSettingsControlPlane, dispatchSettingsRequest } from './server/settingsControlPlane.ts';
 import { createSubstrateService } from './server/supabaseSubstrate.ts';
 import { inspectSupabaseConnection } from './server/supabaseVault.ts';
+import { createHandler as createMcpHandler } from './tools/atax-mcp/worker.mjs';
+import { getVisualState, setVisualState } from './tools/atax-mcp/visual-store.mjs';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
@@ -49,6 +52,15 @@ function hydrateEnvFromDotEnv() {
 }
 
 hydrateEnvFromDotEnv();
+
+if (!process.env.MCP_SHARED_TOKEN_SHA256) {
+  const devToken =
+    process.env.ATAX_MCP_SHARED_TOKEN ||
+    'atax_5426bb43a95f34297740e50804035fc67db24be2be32098d';
+  process.env.MCP_SHARED_TOKEN_SHA256 = createHash('sha256').update(devToken).digest('hex');
+  process.env.MCP_SHARED_SUBJECT = process.env.MCP_SHARED_SUBJECT || 'atax-mcp-operator';
+  process.env.MCP_SHARED_SCOPES = process.env.MCP_SHARED_SCOPES || 'atax:read atax:write atax:verify';
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -131,6 +143,62 @@ app.get('/api/substrate/skills', (_req, res) => {
     () => substrateService.getSkillsCatalog(),
     'Unable to query skills catalog from Supabase.'
   );
+});
+
+app.get('/api/substrate/visual-state', (_req, res) => {
+  res.json(getVisualState());
+});
+
+app.post('/api/substrate/visual-state', (req, res) => {
+  try {
+    const updated = setVisualState(req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid visual state update' });
+  }
+});
+
+const mcpHandler = createMcpHandler();
+
+async function handleMcp(req: express.Request, res: express.Response) {
+  const host = req.get('host') || 'localhost:3000';
+  const protocol = req.protocol === 'https' ? 'https' : 'http';
+  let path = req.originalUrl || req.url;
+  if (path.startsWith('/api/mcp')) {
+    path = '/mcp' + path.slice('/api/mcp'.length);
+  }
+  const url = `${protocol}://${host}${path}`;
+
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) headers.set(key, value.join(', '));
+    else if (typeof value === 'string') headers.set(key, value);
+  }
+
+  const hasBody = req.method !== 'GET' && req.method !== 'HEAD' && req.body !== undefined;
+  const webRequest = new Request(url, {
+    method: req.method,
+    headers,
+    body: hasBody ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : undefined,
+  });
+
+  try {
+    const response = await mcpHandler(webRequest, process.env as Record<string, string>);
+    res.status(response.status);
+    response.headers.forEach((v: string, k: string) => res.setHeader(k, v));
+    const text = await response.text();
+    res.send(text);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'MCP processing error' });
+  }
+}
+
+app.all(['/mcp', '/api/mcp', '/socket', '/health'], (req, res) => {
+  void handleMcp(req, res);
+});
+
+app.use('/.well-known', (req, res) => {
+  void handleMcp(req, res);
 });
 
 const PORT = 3000;

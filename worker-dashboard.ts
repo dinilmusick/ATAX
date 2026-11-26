@@ -2,6 +2,7 @@ import { createSettingsControlPlane, dispatchSettingsRequest, jsonHeaders } from
 import { createSubstrateService } from './server/supabaseSubstrate.ts';
 import { handleConsentApi, renderConsentPage } from './server/oauthConsent.ts';
 import { createHandler as createMcpHandler } from './tools/atax-mcp/worker.mjs';
+import { getVisualState, setVisualState } from './tools/atax-mcp/visual-store.mjs';
 
 function json(value: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(value), {
@@ -79,6 +80,18 @@ export function createDashboardWorker(
         if (!result) return json({ error: 'Not found' }, 404);
         const extraHeaders = result.headers ? Object.fromEntries(result.headers.entries()) : {};
         return json(result.body, result.status, extraHeaders);
+      }
+
+      if (url.pathname === '/api/substrate/visual-state') {
+        if (request.method === 'POST') {
+          try {
+            const body = await request.json();
+            return json(setVisualState(body));
+          } catch {
+            return json({ error: 'Invalid visual state' }, 400);
+          }
+        }
+        return json(getVisualState());
       }
 
       if (url.pathname.startsWith('/api/')) {

@@ -1,4 +1,4 @@
-import type { Edge, Node } from '@xyflow/react';
+import { MarkerType, type Edge, type Node } from '@xyflow/react';
 import type {
   GoalGraphNodeData,
   SkillRecord,
@@ -24,7 +24,7 @@ export function formatContextUsage(limit: TaskContextLimit): {
 
 export const SYSTEM_NODE_SIZE = { width: 300, height: 124 };
 export const SUBSYSTEM_NODE_SIZE = { width: 268, height: 90 };
-export const VISION_NODE_SIZE = { width: 310, height: 140 };
+export const VISION_NODE_SIZE = { width: 356, height: 162 };
 export const GOAL_NODE_SIZE = { width: 304, height: 118 };
 export const TASK_NODE_SIZE = { width: 276, height: 98 };
 
@@ -55,9 +55,9 @@ export function buildSystemsGraph(
     }
 
     const subs = focused.subsystems;
-    const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(subs.length * 1.25))));
-    const colGap = 80;
-    const rowGap = 60;
+    const cols = subs.length >= 16 ? 5 : subs.length >= 7 ? 4 : 3;
+    const colGap = 72;
+    const rowGap = 52;
 
     const nodes: Node[] = subs.map((sub, idx) => {
       const c = idx % cols;
@@ -136,6 +136,7 @@ export function buildSystemsGraph(
         }
       }
 
+      const strokeColor = edge.isWormhole ? '#D9441E' : '#7D6659';
       return {
         id: edge.id,
         type: 'smoothstep',
@@ -144,10 +145,16 @@ export function buildSystemsGraph(
         sourceHandle,
         targetHandle,
         label: edge.label,
-        animated: Boolean(edge.isWormhole),
+        animated: false,
         zIndex: 10,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: strokeColor,
+          width: 14,
+          height: 14,
+        },
         style: {
-          stroke: edge.isWormhole ? '#D9441E' : '#7D6659',
+          stroke: strokeColor,
           strokeWidth: edge.isWormhole ? 2 : 1.5,
           strokeDasharray: edge.isWormhole ? '6 4' : undefined,
         },
@@ -170,7 +177,8 @@ export function buildSystemsGraph(
 export type VisionsGoalsScope =
   | { level: 'root' }
   | { level: 'vision'; visionId: string }
-  | { level: 'goal'; goalId: string };
+  | { level: 'goal'; goalId: string }
+  | { level: 'task'; taskId: string };
 
 export interface VisionsGoalsBuildOptions {
   visions: VisionGraphNodeData[];
@@ -283,16 +291,30 @@ function layoutLayeredOrGrid<T extends { id: string }>(
   }
 
   const sortedLayers = Array.from(columns.keys()).sort((a, b) => a - b);
-  let maxColHeight = 0;
+  const subColumns: T[][] = [];
   for (const l of sortedLayers) {
-    const count = columns.get(l)?.length ?? 0;
+    const colItems = columns.get(l) ?? [];
+    const maxRows = items.length >= 12 ? 4 : 5;
+    if (colItems.length <= maxRows) {
+      subColumns.push(colItems);
+    } else {
+      const numSubCols = Math.min(4, Math.ceil(colItems.length / maxRows));
+      const rowsPerSubCol = Math.ceil(colItems.length / numSubCols);
+      for (let i = 0; i < colItems.length; i += rowsPerSubCol) {
+        subColumns.push(colItems.slice(i, i + rowsPerSubCol));
+      }
+    }
+  }
+
+  let maxColHeight = 0;
+  for (const subCol of subColumns) {
+    const count = subCol.length;
     const h = count * size.height + Math.max(0, count - 1) * rowGap;
     maxColHeight = Math.max(maxColHeight, h);
   }
 
   const positions = new Map<string, { x: number; y: number }>();
-  sortedLayers.forEach((l, colIdx) => {
-    const colItems = columns.get(l) ?? [];
+  subColumns.forEach((colItems, colIdx) => {
     const colHeight = colItems.length * size.height + Math.max(0, colItems.length - 1) * rowGap;
     const offsetY = 24 + Math.max(0, (maxColHeight - colHeight) / 2);
     const x = 24 + colIdx * (size.width + colGap);
@@ -313,16 +335,23 @@ function buildStyledEdges(rawEdges: VisionGoalTaskEdge[], visibleIds: Set<string
     .map((e) => {
       const isTaskFlow = e.edgeKind === 'task_dependency' || e.edgeKind === 'artifact_flow';
       const isGate = e.edgeKind === 'goal_dependency' || e.edgeKind === 'vision_dependency';
+      const strokeColor = isTaskFlow ? '#38BDF8' : isGate ? '#F59E0B' : '#8C7263';
       return {
         id: e.id,
         type: 'smoothstep',
         source: e.source,
         target: e.target,
         label: e.label,
-        animated: true,
+        animated: false,
         zIndex: 25,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: strokeColor,
+          width: 14,
+          height: 14,
+        },
         style: {
-          stroke: isTaskFlow ? '#38BDF8' : isGate ? '#F59E0B' : '#8C7263',
+          stroke: strokeColor,
           strokeWidth: isGate ? 2.2 : 1.8,
           strokeDasharray:
             e.edgeKind === 'goal_dependency' || e.dependencyType === 'advisory' ? '5 4' : undefined,
@@ -341,15 +370,63 @@ function buildStyledEdges(rawEdges: VisionGoalTaskEdge[], visibleIds: Set<string
     });
 }
 
+/**
+ * Guarantees every goal belongs to a Vision container so root always renders ONLY Visions.
+ */
+export function normalizeVisionsHierarchy(
+  visions: VisionGraphNodeData[],
+  goals: GoalGraphNodeData[]
+): { visions: VisionGraphNodeData[]; goals: GoalGraphNodeData[] } {
+  const visionIds = new Set(visions.map((v) => v.id));
+  const orphanGoals = goals.filter((g) => !g.visionId || !visionIds.has(g.visionId));
+
+  if (orphanGoals.length === 0) {
+    return { visions, goals };
+  }
+
+  const fallbackVisionId = 'vision-unassigned-goals';
+  const nextGoals = goals.map((g) =>
+    !g.visionId || !visionIds.has(g.visionId) ? { ...g, visionId: fallbackVisionId } : g
+  );
+
+  const starts = orphanGoals
+    .map((g) => g.createdAt)
+    .filter((d): d is string => Boolean(d))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  const deadlines = orphanGoals
+    .map((g) => g.deadlineAt)
+    .filter((d): d is string => Boolean(d))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+
+  const fallbackVision: VisionGraphNodeData = {
+    id: fallbackVisionId,
+    readableKey: 'VIS-GENERAL',
+    title: 'General Substrate Vision',
+    description: 'Container vision for substrate goals not yet bound to a specific vision target.',
+    targetType: 'system',
+    targetLabel: 'substrate',
+    status: orphanGoals.some((g) => g.status === 'blocked') ? 'blocked' : 'active',
+    goalsCount: orphanGoals.length,
+    createdAt: starts[0] ?? null,
+    deadlineAt: deadlines[0] ?? null,
+    isDerived: true,
+    position: { x: 24, y: 24 },
+  };
+
+  return {
+    visions: [...visions, fallbackVision],
+    goals: nextGoals,
+  };
+}
+
 export function buildVisionsGoalsGraph(
   options: VisionsGoalsBuildOptions
 ): {
   nodes: Node[];
   edges: Edge[];
 } {
-  const { visions, goals, tasks, edges: rawEdges, scope = { level: 'root' } } = options;
-  const visionIds = new Set(visions.map((v) => v.id));
-  const goalIds = new Set(goals.map((g) => g.id));
+  const { scope = { level: 'root' }, tasks, edges: rawEdges } = options;
+  const { visions, goals } = normalizeVisionsHierarchy(options.visions, options.goals);
 
   // Level 2: Inside a Vision -> show its Goals cleanly
   if (scope.level === 'vision') {
@@ -357,13 +434,14 @@ export function buildVisionsGoalsGraph(
     if (childGoals.length === 0) {
       return { nodes: [], edges: [] };
     }
+    const goalCols = childGoals.length >= 16 ? 5 : childGoals.length >= 7 ? 4 : 3;
     const positions = layoutLayeredOrGrid(
       childGoals,
       rawEdges,
       GOAL_NODE_SIZE,
-      96,
-      68,
-      3
+      88,
+      64,
+      goalCols
     );
     const nodes: Node[] = childGoals.map((goal) => ({
       id: goal.id,
@@ -384,13 +462,14 @@ export function buildVisionsGoalsGraph(
     if (childTasks.length === 0) {
       return { nodes: [], edges: [] };
     }
+    const taskCols = childTasks.length >= 16 ? 5 : childTasks.length >= 7 ? 4 : 3;
     const positions = layoutLayeredOrGrid(
       childTasks,
       rawEdges,
       TASK_NODE_SIZE,
-      88,
-      54,
-      3
+      84,
+      52,
+      taskCols
     );
     const nodes: Node[] = childTasks.map((task) => ({
       id: task.id,
@@ -405,85 +484,91 @@ export function buildVisionsGoalsGraph(
     return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
   }
 
-  // Level 1 (Root): show Visions, plus any standalone Goals, plus any standalone Tasks
-  const nodes: Node[] = [];
-  let nextStartY = 24;
-
-  if (visions.length > 0) {
-    const vLayout = layoutGridPositions(
-      visions,
-      VISION_NODE_SIZE,
-      24,
-      nextStartY,
-      96,
-      72,
+  // Level 4: Inside a Task -> show subtasks if present, or focused task node
+  if (scope.level === 'task') {
+    const subtasks = tasks.filter((t) => t.parentTaskId === scope.taskId);
+    const focused = tasks.find((t) => t.id === scope.taskId);
+    const displayTasks = subtasks.length > 0 ? subtasks : focused ? [focused] : [];
+    if (displayTasks.length === 0) {
+      return { nodes: [], edges: [] };
+    }
+    const positions = layoutLayeredOrGrid(
+      displayTasks,
+      rawEdges,
+      TASK_NODE_SIZE,
+      84,
+      52,
       3
     );
-    for (const vision of visions) {
-      nodes.push({
-        id: vision.id,
-        type: 'visionNode',
-        position: vLayout.positions.get(vision.id) ?? { x: 24, y: 24 },
-        width: VISION_NODE_SIZE.width,
-        height: VISION_NODE_SIZE.height,
-        style: { width: VISION_NODE_SIZE.width, height: VISION_NODE_SIZE.height },
-        data: { ...vision },
-      });
-    }
-    nextStartY = vLayout.maxBottom + 84;
+    const nodes: Node[] = displayTasks.map((task) => ({
+      id: task.id,
+      type: 'taskNode',
+      position: positions.get(task.id) ?? { x: 24, y: 24 },
+      width: TASK_NODE_SIZE.width,
+      height: TASK_NODE_SIZE.height,
+      style: { width: TASK_NODE_SIZE.width, height: TASK_NODE_SIZE.height },
+      data: { ...task },
+    }));
+    const visibleIds = new Set(nodes.map((n) => n.id));
+    return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
   }
 
-  const standaloneGoals = goals.filter((g) => !g.visionId || !visionIds.has(g.visionId));
-  if (standaloneGoals.length > 0) {
-    const gLayout = layoutGridPositions(
-      standaloneGoals,
-      GOAL_NODE_SIZE,
-      24,
-      nextStartY,
-      84,
-      64,
-      Math.min(4, Math.max(1, Math.ceil(Math.sqrt(standaloneGoals.length * 1.1))))
-    );
-    for (const goal of standaloneGoals) {
-      nodes.push({
-        id: goal.id,
-        type: 'goalNode',
-        position: gLayout.positions.get(goal.id) ?? { x: 24, y: nextStartY },
-        width: GOAL_NODE_SIZE.width,
-        height: GOAL_NODE_SIZE.height,
-        style: { width: GOAL_NODE_SIZE.width, height: GOAL_NODE_SIZE.height },
-        data: { ...goal },
-      });
-    }
-    nextStartY = gLayout.maxBottom + 76;
+  // Level 1 (Root): ONLY show Vision nodes! Goals are always contained inside Visions.
+  if (visions.length === 0) {
+    return { nodes: [], edges: [] };
   }
 
-  const standaloneTasks = tasks.filter((t) => !t.goalId || !goalIds.has(t.goalId));
-  if (standaloneTasks.length > 0) {
-    const tLayout = layoutGridPositions(
-      standaloneTasks,
-      TASK_NODE_SIZE,
-      24,
-      nextStartY,
-      72,
-      54,
-      Math.min(4, Math.max(1, Math.ceil(Math.sqrt(standaloneTasks.length * 1.1))))
-    );
-    for (const task of standaloneTasks) {
-      nodes.push({
-        id: task.id,
-        type: 'taskNode',
-        position: tLayout.positions.get(task.id) ?? { x: 24, y: nextStartY },
-        width: TASK_NODE_SIZE.width,
-        height: TASK_NODE_SIZE.height,
-        style: { width: TASK_NODE_SIZE.width, height: TASK_NODE_SIZE.height },
-        data: { ...task },
-      });
+  const goalToVisionId = new Map<string, string>();
+  for (const g of goals) {
+    if (g.visionId) goalToVisionId.set(g.id, g.visionId);
+  }
+
+  // Derive cross-vision dependency edges from goal_dependency edges that cross vision boundaries
+  const visionEdges: VisionGoalTaskEdge[] = rawEdges.filter((e) => e.edgeKind === 'vision_dependency');
+  const seenVisionPairs = new Set<string>(visionEdges.map((e) => `${e.source}->${e.target}`));
+
+  for (const edge of rawEdges) {
+    if (edge.edgeKind !== 'goal_dependency') continue;
+    const srcV = goalToVisionId.get(edge.source);
+    const tgtV = goalToVisionId.get(edge.target);
+    if (srcV && tgtV && srcV !== tgtV) {
+      const pairKey = `${srcV}->${tgtV}`;
+      if (!seenVisionPairs.has(pairKey)) {
+        seenVisionPairs.add(pairKey);
+        visionEdges.push({
+          id: `vd-derived-${srcV}-${tgtV}`,
+          source: srcV,
+          target: tgtV,
+          edgeKind: 'vision_dependency',
+          dependencyType: edge.dependencyType,
+          label: edge.label,
+        });
+      }
     }
   }
+
+  const visionCols = visions.length >= 16 ? 6 : visions.length >= 7 ? 4 : 3;
+  const positions = layoutLayeredOrGrid(
+    visions,
+    visionEdges,
+    VISION_NODE_SIZE,
+    92,
+    68,
+    visionCols
+  );
+
+  const nodes: Node[] = visions.map((vision) => ({
+    id: vision.id,
+    type: 'visionNode',
+    position: positions.get(vision.id) ?? { x: 24, y: 24 },
+    width: VISION_NODE_SIZE.width,
+    height: VISION_NODE_SIZE.height,
+    style: { width: VISION_NODE_SIZE.width, height: VISION_NODE_SIZE.height },
+    data: { ...vision },
+  }));
 
   const visibleIds = new Set(nodes.map((n) => n.id));
-  return { nodes, edges: buildStyledEdges(rawEdges, visibleIds) };
+  return { nodes, edges: buildStyledEdges(visionEdges, visibleIds) };
 }
 
 export function filterSkills(

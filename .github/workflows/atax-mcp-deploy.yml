@@ -1,0 +1,52 @@
+name: Deploy ATAX MCP Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloudflare_account_id:
+        description: 'Cloudflare account ID (the owner selects the destination explicitly)'
+        required: true
+        type: string
+      worker_url:
+        description: 'Optional exact public Worker URL for health probe (no credentials)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: atax-mcp
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify MCP gateway
+        run: |
+          node --check tools/atax-mcp/worker.mjs
+          node --check tools/atax-mcp/provider-accounts.mjs
+          node --test tools/atax-mcp/*.test.mjs
+      - name: Deploy Cloudflare Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.ATAX_MCP_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid Cloudflare account ID'; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing ATAX_MCP_CLOUDFLARE_API_TOKEN repository secret'; exit 1; }
+          npx --yes wrangler@4 deploy --config tools/atax-mcp/wrangler.toml
+      - name: Verify health at explicit URL
+        if: inputs.worker_url != ''
+        env:
+          WORKER_URL: ${{ inputs.worker_url }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKER_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo 'Expected HTTPS Worker URL'; exit 1; }
+          curl --fail --silent --show-error --max-time 20 "${WORKER_URL%/}/health"

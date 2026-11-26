@@ -32,11 +32,62 @@ function hashSeed(id: string): number {
   return (h >>> 0) / 4294967295;
 }
 
+export function isAnnotationNode(node: Pick<Node, 'type' | 'data'>): boolean {
+  if (node.type === 'stickyNoteNode' || node.type === 'groupBoxNode') return true;
+  const data = node.data as Record<string, unknown> | undefined;
+  return Boolean(data?.disableFloat);
+}
+
+export function getNodeDimensions(node: Pick<Node, 'width' | 'height' | 'measured' | 'style'>): {
+  width: number;
+  height: number;
+} {
+  const width =
+    typeof node.measured?.width === 'number'
+      ? node.measured.width
+      : typeof node.width === 'number'
+      ? node.width
+      : typeof node.style?.width === 'number'
+      ? node.style.width
+      : 300;
+  const height =
+    typeof node.measured?.height === 'number'
+      ? node.measured.height
+      : typeof node.height === 'number'
+      ? node.height
+      : typeof node.style?.height === 'number'
+      ? node.style.height
+      : 160;
+  return { width, height };
+}
+
+export function findContainedNodeIdsForGroupBox(
+  nodes: Node[],
+  groupNode: Node
+): string[] {
+  const { width: gw, height: gh } = getNodeDimensions(groupNode);
+  const gx = groupNode.position.x;
+  const gy = groupNode.position.y;
+  const contained: string[] = [];
+
+  for (const candidate of nodes) {
+    if (candidate.id === groupNode.id || candidate.type === 'groupBoxNode') continue;
+    const { width: cw, height: ch } = getNodeDimensions(candidate);
+    const cx = candidate.position.x + cw * 0.5;
+    const cy = candidate.position.y + ch * 0.5;
+    if (cx >= gx && cx <= gx + gw && cy >= gy && cy <= gy + gh) {
+      contained.push(candidate.id);
+    }
+  }
+  return contained;
+}
+
 export function createForceBodies(nodes: Node[]): Map<string, ForceBody> {
   const byId = new Map<string, Node>(nodes.map((n) => [n.id, n]));
   const bodies = new Map<string, ForceBody>();
 
   for (const node of nodes) {
+    if (isAnnotationNode(node)) continue;
     const seed = hashSeed(node.id);
     const seed2 = hashSeed(`${node.id}-alt`);
     const width = typeof node.style?.width === 'number' ? node.style.width : 300;
@@ -116,6 +167,7 @@ export function applyUserAnchorsToNodes(
 ): Node[] {
   if (userAnchors.size === 0) return nodes;
   return nodes.map((node) => {
+    if (isAnnotationNode(node)) return node;
     const anchor = userAnchors.get(node.id);
     if (!anchor) return node;
     const width = typeof node.style?.width === 'number' ? node.style.width : 300;

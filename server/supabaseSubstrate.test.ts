@@ -195,6 +195,8 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
           goal_loop_definition: { max_iterations: 4 },
           goal_loop_iteration: 1,
           system_id: 's1',
+          created_at: '2026-11-20T00:00:00.000Z',
+          deadline_at: futureExpiry,
         },
         {
           id: 'g2',
@@ -207,11 +209,13 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
           goal_loop_definition: {},
           goal_loop_iteration: 0,
           system_id: null,
+          created_at: '2026-11-21T00:00:00.000Z',
+          deadline_at: null,
         },
       ]);
     }
     if (url.includes('/rest/v1/systems?')) {
-      return Response.json([{ id: 's1', system_key: 'ledger' }]);
+      return Response.json([{ id: 's1', system_key: 'ledger', name: 'Ledger DB' }]);
     }
     if (url.includes('/rest/v1/tasks?')) {
       capturedTaskUrl = url;
@@ -225,6 +229,8 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
           status: 'running',
           verification_status: 'not_started',
           priority: 1,
+          started_at: '2026-11-23T05:00:00.000Z',
+          due_at: futureExpiry,
           claimed_by_agent_id: 'secret-agent-session-id-xyz',
           claimed_by_agent_name: 'WorkerA',
           claimed_at: '2026-11-23T05:00:00.000Z',
@@ -272,19 +278,26 @@ test('getVisionsGoalsGraph excludes sensitive lease tokens, hashes agent IDs, an
   const svc = createSubstrateService(makeEnv(), mockFetcher);
   const res = await svc.getVisionsGoalsGraph();
 
-  // Never select secret claim or verification tokens
+  // Never select secret claim or verification tokens; order tasks by started_at (not created_at)
   assert.equal(capturedTaskUrl.includes('claim_token'), false);
   assert.equal(capturedTaskUrl.includes('claimed_session_id'), false);
   assert.equal(capturedTaskUrl.includes('verification_claim_token'), false);
+  assert.equal(capturedTaskUrl.includes('started_at.asc'), true);
+  assert.equal(capturedTaskUrl.includes('created_at'), false);
 
-  assert.equal(res.visions.length, 1);
-  assert.equal(res.visions[0].goalsCount, 1);
+  // Explicit vision + derived fallback vision for unlinked g2
+  assert.equal(res.visions.length, 2);
+  assert.equal(res.visions.find((v) => v.id === 'v1')!.goalsCount, 1);
   assert.equal(res.goals.length, 2);
-  assert.equal(res.goals.find((g) => g.id === 'g1')!.systemKey, 'ledger');
-  assert.equal(res.goals.find((g) => g.id === 'g2')!.visionId, null);
+  const g1 = res.goals.find((g) => g.id === 'g1')!;
+  const g2 = res.goals.find((g) => g.id === 'g2')!;
+  assert.equal(g1.systemKey, 'ledger');
+  assert.equal(g1.deadlineAt, futureExpiry);
+  assert.ok(g2.visionId && g2.visionId !== 'v1');
 
   const t1 = res.tasks.find((t) => t.id === 't1')!;
   assert.equal(t1.occupancy.leaseState, 'lease_valid');
+  assert.equal(t1.dueAt, futureExpiry);
   assert.ok(t1.occupancy.agentDisplayLabel?.includes('WorkerA'));
   assert.equal(t1.occupancy.agentDisplayLabel?.includes('secret-agent-session-id-xyz'), false);
   assert.deepEqual(t1.contextLimit, { usedTokens: 20000, maxTokens: 100000, windowLabel: '100k tok' });

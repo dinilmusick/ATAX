@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-26T15:35:08.896Z",
+  "stickyNotes": [
+    {
+      "id": "test-sticky",
+      "scopeKey": "root",
+      "text": "Hi",
+      "color": "#FEF08A",
+      "x": 10,
+      "y": 10,
+      "width": 200,
+      "height": 150
+    }
+  ],
+  "groupBoxes": [],
+  "branchingNodes": [],
+  "customDomainNodes": [],
+  "customEdges": [],
+  "savedPositions": {},
+  "nodeColors": {
+    "byType": {
+      "vision": "#0A2920",
+      "goal": "#2E1A05",
+      "task": "#0D1E36",
+      "system": "#24130E",
+      "subsystem": "#1E1233",
+      "multi_in_single_out": "#0B2A30",
+      "single_in_multi_out": "#331016",
+      "fan_out": "#162712"
+    },
+    "byNodeId": {}
+  },
+  "deadlineOverrides": {}
+}

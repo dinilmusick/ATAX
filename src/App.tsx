@@ -27,7 +27,7 @@ function HayateCrest() {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('visions-goals');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('visions');
   const [refreshTick, setRefreshTick] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
@@ -62,10 +62,10 @@ export default function App() {
             </IconButton>
 
             <IconButton
-              label="Visions & Goals"
-              active={activeTab === 'visions-goals'}
+              label="Visions"
+              active={activeTab === 'visions'}
               variant="accent"
-              onClick={() => setActiveTab('visions-goals')}
+              onClick={() => setActiveTab('visions')}
             >
               <GitBranch className="w-4 h-4" />
             </IconButton>
@@ -106,7 +106,7 @@ export default function App() {
         {activeTab === 'systems' && (
           <SystemsGraphView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
         )}
-        {activeTab === 'visions-goals' && (
+        {activeTab === 'visions' && (
           <VisionsGoalsGraphView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
         )}
         {activeTab === 'skills' && (

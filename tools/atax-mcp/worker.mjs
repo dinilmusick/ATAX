@@ -4,6 +4,8 @@ import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 import {computeTools} from './compute-tools.mjs';
 import {inferenceTools} from './inference-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
+import {visualTools, visualResourceDefs} from './visual-tools.mjs';
+import {getVisualState} from './visual-store.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
@@ -60,7 +62,7 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
   tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
 ];
-TOOLS.push(...githubTools,...providerTools);
+TOOLS.push(...githubTools,...providerTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
@@ -259,6 +261,19 @@ async function routeRpc(msg,principal,env,fetcher){
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
       else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
       else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
+      else if(params.uri==='atax://visual/state')result=getVisualState();
+      else if(params.uri==='atax://visual/summary'){
+        const vState=getVisualState();
+        result={
+          updatedAt:vState.updatedAt,
+          stickyNotesCount:vState.stickyNotes.length,
+          groupBoxesCount:vState.groupBoxes.length,
+          branchingNodesCount:vState.branchingNodes.length,
+          customEdgesCount:vState.customEdges.length,
+          customDomainNodesCount:vState.customDomainNodes.length,
+          positionedNodesCount:Object.values(vState.savedPositions).reduce((acc,scope)=>acc+Object.keys(scope).length,0),
+        };
+      }
       else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
       else return err(id,-32002,'Unknown resource URI');
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});

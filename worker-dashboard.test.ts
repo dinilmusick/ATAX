@@ -163,3 +163,27 @@ test('handleConsentApi proxies details and approve/deny to Supabase GoTrue with 
   assert.equal(calls[1].method, 'POST');
   assert.equal(calls[1].body, JSON.stringify({ action: 'approve' }));
 });
+
+test('production Worker /api/substrate/visual-state responds to GET and POST', async () => {
+  const realWorker = createDashboardWorker();
+  const getRes = await realWorker.fetch(new Request('https://atax.example/api/substrate/visual-state'), {});
+  assert.equal(getRes.status, 200);
+  const state = await getRes.json() as { version: number; stickyNotes: unknown[] };
+  assert.equal(state.version, 1);
+  assert.ok(Array.isArray(state.stickyNotes));
+
+  const postRes = await realWorker.fetch(
+    new Request('https://atax.example/api/substrate/visual-state', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        stickyNotes: [{ id: 'test-sticky', scopeKey: 'root', text: 'Hi', color: '#FEF08A', x: 10, y: 10, width: 200, height: 150 }],
+      }),
+    }),
+    {}
+  );
+  assert.equal(postRes.status, 200);
+  const postState = await postRes.json() as { stickyNotes: Array<{ id: string }> };
+  assert.ok(postState.stickyNotes.some((n) => n.id === 'test-sticky'));
+});
+
