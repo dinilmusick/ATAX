@@ -32,31 +32,23 @@ function configuredAccounts(env,provider) {
   }
   return found;
 }
-export function availableAccounts(env,principal,provider) {
-  if(!PREFIX[provider])throw new Error('Unknown provider');
-  if(!isOwnerPrincipal(env,principal))return [];
-  return [...configuredAccounts(env,provider).keys()].sort();
+function parseComputeJsonEntries(env) {
+  if(typeof env?.[COMPUTE_JSON]!=='string'||!env[COMPUTE_JSON].trim())return [];
+  let parsed;
+  try{parsed=JSON.parse(env[COMPUTE_JSON]);}catch{throw new Error('Invalid FRNES compute account configuration');}
+  if(!Array.isArray(parsed))throw new Error('Invalid FRNES compute account configuration');
+  return parsed;
 }
-export function availableComputeAccounts(env,principal,provider) {
-  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))return [];
-  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'__';
-  return Object.keys(env||{}).filter(k=>k.startsWith(prefix)).map(k=>k.slice(prefix.length))
-    .filter(x=>ALIAS.test(x)&&typeof env[prefix+x]==='string').sort();
-}
-export function resolveComputeAccount(env,principal,provider,requested) {
-  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))throw new Error('Compute account unavailable or not authorized');
+function configuredComputeAccounts(env,provider) {
+  if(!PROVIDER_ID.test(provider))throw new Error('Invalid compute provider identifier');
   const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'__';
   const accounts=new Map();
-  if(typeof env[COMPUTE_JSON]==='string'&&env[COMPUTE_JSON].trim()){
-    let parsed;try{parsed=JSON.parse(env[COMPUTE_JSON]);}catch{throw new Error('Invalid FRNES compute account configuration');}
-    if(!Array.isArray(parsed))throw new Error('Invalid FRNES compute account configuration');
-    for(const item of parsed){
-      if(!item||typeof item!=='object'||item.providerId!==provider||typeof item.alias!=='string'||typeof item.token!=='string')continue;
-      const alias=item.alias.toUpperCase();
-      if(!ALIAS.test(alias)||!item.token.trim())continue;
-      if(accounts.has(alias))throw new Error('Duplicate compute provider account alias: '+alias);
-      accounts.set(alias,{alias,token:item.token});
-    }
+  for(const item of parseComputeJsonEntries(env)) {
+    if(!item||typeof item!=='object'||item.providerId!==provider||typeof item.alias!=='string'||typeof item.token!=='string')continue;
+    const alias=item.alias.toUpperCase();
+    if(!ALIAS.test(alias)||!item.token.trim())continue;
+    if(accounts.has(alias))throw new Error('Duplicate compute provider account alias: '+alias);
+    accounts.set(alias,{alias,token:item.token});
   }
   for(const key of Object.keys(env||{})) if(key.startsWith(prefix)) {
     const alias=key.slice(prefix.length);
@@ -65,6 +57,22 @@ export function resolveComputeAccount(env,principal,provider,requested) {
       accounts.set(alias,{alias,token:env[key]});
     }
   }
+  return accounts;
+}
+export function availableAccounts(env,principal,provider) {
+  if(!PREFIX[provider])throw new Error('Unknown provider');
+  if(!isOwnerPrincipal(env,principal))return [];
+  return [...configuredAccounts(env,provider).keys()].sort();
+}
+export function availableComputeAccounts(env,principal,provider) {
+  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))return [];
+  return [...configuredComputeAccounts(env,provider).keys()].sort();
+}
+export function resolveComputeAccount(env,principal,provider,requested) {
+  if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))throw new Error('Compute account unavailable or not authorized');
+  if(requested!==undefined && (typeof requested!=='string'||!ALIAS.test(requested.toUpperCase())))
+    throw new Error('Invalid compute account alias');
+  const accounts=configuredComputeAccounts(env,provider);
   const names=[...accounts.keys()];
   const alias=requested===undefined?(names.length===1?names[0]:null):String(requested).toUpperCase();
   if(alias&&accounts.has(alias))return accounts.get(alias);
@@ -85,17 +93,22 @@ export function resolveProviderAccount(env,principal,provider,requested) {
 function safeAccounts(env,principal){
   const standard=Object.keys(PREFIX).map(provider=>({provider,aliases:availableAccounts(env,principal,provider),kind:'provider'}));
   const computeProviders=new Set();
-  for(const key of Object.keys(env||{})) if(key.startsWith(COMPUTE_PREFIX)) {
-    const rest=key.slice(COMPUTE_PREFIX.length);
-    const provider=rest.split('__')[0].replace(/_/g,'-');
-    if(PROVIDER_ID.test(provider)) computeProviders.add(provider);
+  if(isOwnerPrincipal(env,principal)) {
+    for(const item of parseComputeJsonEntries(env)) {
+      if(item&&typeof item==='object'&&typeof item.providerId==='string'&&PROVIDER_ID.test(item.providerId)&&typeof item.alias==='string'&&ALIAS.test(item.alias.toUpperCase())&&typeof item.token==='string'&&item.token.trim()) {
+        computeProviders.add(item.providerId);
+      }
+    }
+    for(const key of Object.keys(env||{})) if(key.startsWith(COMPUTE_PREFIX)) {
+      const rest=key.slice(COMPUTE_PREFIX.length);
+      const provider=rest.split('__')[0].replace(/_/g,'-');
+      if(PROVIDER_ID.test(provider)) computeProviders.add(provider);
+    }
   }
   return {accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}]};
 }
 async function providerGet(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
-    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'
-  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'\n  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   let body;
   try{body=await res.json();}catch{throw new Error('Provider returned invalid JSON');}
