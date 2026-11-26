@@ -69,7 +69,7 @@ test('inspectSupabaseConnection validates ATAX_SUPABASE_URL and ATAX_SUPABASE_SE
   assert.equal(valid.hostLabel?.includes('sb_secret_mock_key_0123456789abcdef'), false);
 });
 
-test('validateProviderInput accepts standard and compute providers, including catalogued providers, and rejects invalid or reserved formats', () => {
+test('validateProviderInput accepts standard, compute, and inference providers, and rejects invalid or reserved formats', () => {
   const gh = validateProviderInput({
     provider: 'github',
     alias: 'personal',
@@ -88,13 +88,13 @@ test('validateProviderInput accepts standard and compute providers, including ca
   assert.equal(cf.provider, 'cloudflare');
   assert.equal(cf.alias, 'WORK');
 
-  const vercel = validateProviderInput({
-    provider: 'vercel',
-    alias: 'TEAM_PROD',
-    credential: 'vercel_secret_token_123456',
+  const groq = validateProviderInput({
+    provider: 'groq',
+    alias: 'TEAM_ALPHA',
+    credential: 'gsk_1234567890abcdef123456',
   });
-  assert.equal(vercel.provider, 'vercel');
-  assert.equal(vercel.alias, 'TEAM_PROD');
+  assert.equal(groq.provider, 'groq');
+  assert.equal(groq.alias, 'TEAM_ALPHA');
 
   const compute = validateProviderInput({
     provider: 'aws',
@@ -293,6 +293,67 @@ test('provider-specific compute probes validate authenticated payloads and disti
   assert.equal(badFly.ok, false);
   assert.equal(badFly.apiReachable, true);
   assert.equal(badFly.authVerified, false);
+});
+
+test('provider-specific AI inference probes validate authenticated payloads for all 9 Aiko inference providers', async () => {
+  const secretKey = 'sb_secret_probe_test_key_0123456789';
+  const inferenceProviders = [
+    'google',
+    'groq',
+    'cerebras',
+    'together',
+    'nvidia',
+    'openrouter',
+    'huggingface',
+    'anthropic',
+    'openai',
+  ];
+  const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const headers = (init?.headers || {}) as Record<string, string>;
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_instance_owner_subject_v1')) return Response.json('dinilmusick');
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_audit_provider_test_v1')) return new Response(null, { status: 204 });
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_runtime_config_v1')) {
+      return Response.json({
+        settings: { MCP_OWNER_SUBJECT: 'dinilmusick' },
+        accounts: inferenceProviders.map((provider) => ({
+          provider,
+          alias: 'TEAM_A',
+          token: `${provider}-token-1234567890`,
+        })),
+      });
+    }
+    if (url.startsWith('https://generativelanguage.googleapis.com/')) {
+      assert.equal(headers['x-goog-api-key'], 'google-token-1234567890');
+      return Response.json({ models: [{ name: 'models/gemini-2.5-flash' }] });
+    }
+    if (url.startsWith('https://api.anthropic.com/')) {
+      assert.equal(headers['x-api-key'], 'anthropic-token-1234567890');
+      assert.equal(headers['anthropic-version'], '2023-06-01');
+      return Response.json({ data: [{ id: 'claude-3-5-sonnet' }] });
+    }
+    if (url.startsWith('https://api.groq.com/') || url.startsWith('https://api.cerebras.ai/') || url.startsWith('https://integrate.api.nvidia.com/') || url.startsWith('https://api.openai.com/')) {
+      return Response.json({ data: [{ id: 'model-1' }] });
+    }
+    if (url.startsWith('https://api.together.xyz/')) return Response.json([{ id: 'together-model' }]);
+    if (url.startsWith('https://openrouter.ai/')) return Response.json({ data: { label: 'key-1' } });
+    if (url.startsWith('https://huggingface.co/')) return Response.json({ name: 'hf-user' });
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const vault = createVaultService(
+    { ATAX_SUPABASE_URL: 'https://abc.supabase.co', ATAX_SUPABASE_SECRET_KEY: secretKey },
+    fakeFetch
+  );
+
+  for (const provider of inferenceProviders) {
+    const res = await vault.testAccountConnection('dinilmusick', provider, 'TEAM_A');
+    assert.equal(res.ok, true, provider);
+    assert.equal(res.apiReachable, true, provider);
+    assert.equal(res.authVerified, true, provider);
+    assert.equal(res.inferenceSupported, true, provider);
+    assert.equal(res.computeSupported, false, provider);
+  }
 });
 
 // ---------------------------------------------------------------------------
