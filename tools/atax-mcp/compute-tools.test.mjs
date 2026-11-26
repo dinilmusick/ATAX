@@ -6,7 +6,7 @@ test('ATAX compute adapter never accepts non-HTTPS FRNES endpoints',async()=>{aw
 test('ATAX compute status resolves the selected provider account privately',async()=>{
  const requests=[];
  const fetcher=async(url,options)=>{requests.push({url,options});return Response.json({success:true,status:'ok'});};
- const env={FRNES_URL:'https://frnes.example',FRNES_SERVICE_TOKEN:'12345678901234567890',FRNES_KEY_fly_DEV:'fly-secret-value',MCP_SHARED_SUBJECT:'owner'};
+ const env={FRNES_URL:'https://frnes.example',FRNES_SERVICE_TOKEN:'12345678901234567890',FRNES_KEY_fly_DEV:'fly-secret-value',MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'test-hash'};
  const result=await computeTools.find(x=>x.name==='atax_compute_status').invoke({workspaceId:'ws',environmentId:'fly/DEV/app/machine',account:{providerId:'fly',alias:'DEV'}},null,{id:'owner',authMethod:'shared'},{env,fetcher});
  assert.equal(result.status,'ok'); assert.equal(requests.length,1);
  const body=JSON.parse(requests[0].options.body); assert.equal(body.accounts[0].token,'fly-secret-value');
