@@ -8,7 +8,7 @@ const outsider={id:'outsider',authMethod:'jwt'};
 const env={
   MCP_SHARED_SUBJECT:'owner',MCP_SHARED_TOKEN_SHA256:'test-digest',
   MCP_ATAX_OWNER_JWT_SUBJECT:'oauth-owner',
-  GH_KEY_PERSONAL:'github-personal-test', GH_KEY_WORK:'github-work-test', FRNES_KEY_fly_DEV:'fly-dev-test',
+  GH_KEY_PERSONAL:'github-personal-test', GH_KEY_WORK:'github-work-test', FRNES_KEY_fly__DEV:'fly-dev-test',
   CF_KEY_PERSONAL:'cloudflare-personal-test', CF_KEY_WORK:'cloudflare-work-test',
   CLOUDFLARE_ACCOUNT_ID_WORK:'abc12345',
 };
@@ -85,6 +85,6 @@ test('bad configuration, API failures and empty credentials fail closed',async()
 test('compute account resolution is owner-scoped and requires explicit alias when ambiguous',()=>{
   assert.deepEqual(availableComputeAccounts(env,owner,'fly'),['DEV']);
   assert.equal(resolveComputeAccount(env,owner,'fly','dev').token,'fly-dev-test');
-  assert.throws(()=>resolveComputeAccount({...env,FRNES_KEY_fly_WORK:'fly-work-test'},owner,'fly'),/Specify a compute account alias/);
+  assert.throws(()=>resolveComputeAccount({...env,FRNES_KEY_fly__WORK:'fly-work-test'},owner,'fly'),/Specify a compute account alias/);
   assert.throws(()=>resolveComputeAccount(env,outsider,'fly','DEV'),/not authorized/);
 });
