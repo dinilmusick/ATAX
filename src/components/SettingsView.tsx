@@ -1,5 +1,33 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {CheckCircle2,Cloud,Database,Eye,EyeOff,GitBranch,KeyRound,Lock,RefreshCw,RotateCw,ShieldCheck,Trash2,Unlock,Power} from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Cloud,
+  Cpu,
+  Database,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FolderPlus,
+  GitBranch,
+  KeyRound,
+  Lock,
+  Power,
+  RefreshCw,
+  RotateCw,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  Unlock,
+} from 'lucide-react';
+import {
+  COMPUTE_PROVIDERS,
+  INFERENCE_PROVIDERS,
+  INFRA_PROVIDERS,
+  normalizeGroupAlias,
+  type ProviderCatalogEntry,
+} from '../libraries/providerCatalog';
 import type {ProviderAccountSummary,ProviderTestResult,ProviderType,SettingsStatusResponse} from '../types/substrate';
 
 interface SettingsViewProps {
@@ -7,36 +35,14 @@ interface SettingsViewProps {
   onLoadingChange?: (loading:boolean)=>void;
 }
 
-const PROVIDERS:Array<{
-  id: Exclude<ProviderType,'vercel'>;
-  label:string;
-  accountIdLabel:string;
-  accountIdPlaceholder:string;
-  tokenPlaceholder:string;
-  hint:string;
-}>=[
-  {
-    id:'github',
-    label:'GitHub',
-    accountIdLabel:'GitHub Owner / Organization',
-    accountIdPlaceholder:'owner-or-org',
-    tokenPlaceholder:'github_pat_... or ghp_...',
-    hint:'Stored in Supabase Vault and used server-side for GitHub operations.',
-  },
-  {
-    id:'cloudflare',
-    label:'Cloudflare',
-    accountIdLabel:'Cloudflare Account ID',
-    accountIdPlaceholder:'32-character account identifier',
-    tokenPlaceholder:'Cloudflare API token...',
-    hint:'Stored in Supabase Vault and used server-side for Cloudflare operations.',
-  },
-];
+type SettingsCategoryTab = 'infra' | 'compute' | 'inference';
 
 function ProviderIcon({provider,className='w-4 h-4'}:{provider:ProviderType;className?:string}){
-  return provider==='github'
-    ? <GitBranch className={className}/>
-    : <Cloud className={className}/>;
+  if(provider==='github') return <GitBranch className={className}/>;
+  if(provider==='cloudflare') return <Cloud className={className}/>;
+  if(COMPUTE_PROVIDERS.some(p=>p.id===provider)) return <Cpu className={className}/>;
+  if(INFERENCE_PROVIDERS.some(p=>p.id===provider)) return <Sparkles className={className}/>;
+  return <Cloud className={className}/>;
 }
 
 async function jsonResponse<T>(response:Response):Promise<T>{
@@ -54,15 +60,32 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
   const [unlocking,setUnlocking]=useState(false);
   const [authError,setAuthError]=useState<string|null>(null);
 
-  const [activeProvider,setActiveProvider]=useState<Exclude<ProviderType,'vercel'>>('github');
+  const [categoryTab,setCategoryTab]=useState<SettingsCategoryTab>('compute');
+  const [activeInfraProvider,setActiveInfraProvider]=useState<string>('github');
   const [accounts,setAccounts]=useState<ProviderAccountSummary[]>([]);
   const [loadingAccounts,setLoadingAccounts]=useState(false);
+
+  // Infra form state
   const [aliasInput,setAliasInput]=useState('');
   const [accountIdInput,setAccountIdInput]=useState('');
   const [credentialInput,setCredentialInput]=useState('');
   const [showCredential,setShowCredential]=useState(false);
   const [saveSubmitting,setSaveSubmitting]=useState(false);
   const [saveFeedback,setSaveFeedback]=useState<{kind:'success'|'error';message:string}|null>(null);
+
+  // Group organization state (Compute & Inference)
+  const [newGroupInput,setNewGroupInput]=useState('');
+  const [customGroups,setCustomGroups]=useState<Record<'compute'|'inference',string[]>>({
+    compute:['DEFAULT'],
+    inference:['DEFAULT'],
+  });
+  const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
+  const [editingSlotKey,setEditingSlotKey]=useState<string|null>(null);
+  const [slotCredentials,setSlotCredentials]=useState<Record<string,string>>({});
+  const [slotAccountIds,setSlotAccountIds]=useState<Record<string,string>>({});
+  const [slotShowCreds,setSlotShowCreds]=useState<Record<string,boolean>>({});
+  const [groupFeedback,setGroupFeedback]=useState<{kind:'success'|'error';message:string}|null>(null);
+
   const [busyKey,setBusyKey]=useState<string|null>(null);
   const [confirmDeleteKey,setConfirmDeleteKey]=useState<string|null>(null);
   const [testResults,setTestResults]=useState<Record<string,ProviderTestResult>>({});
@@ -129,12 +152,14 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
     await fetch('/api/settings/auth/logout',{method:'POST'}).catch(()=>undefined);
     setAccounts([]);
     setCredentialInput('');
+    setSlotCredentials({});
     setPasskey('');
     setSaveFeedback(null);
+    setGroupFeedback(null);
     await loadStatus();
   };
 
-  const handleSave=async(event:React.FormEvent)=>{
+  const handleInfraSave=async(event:React.FormEvent)=>{
     event.preventDefault();
     setSaveFeedback(null);
     const alias=aliasInput.trim().toUpperCase();
@@ -153,7 +178,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          provider:activeProvider,
+          provider:activeInfraProvider,
           alias,
           accountId:accountIdInput.trim()||null,
           credential:credentialInput.trim(),
@@ -165,15 +190,51 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
       if(!res.ok) throw new Error(data.error||`Save failed (HTTP ${res.status})`);
       setCredentialInput('');
       setShowCredential(false);
-      setSaveFeedback({kind:'success',message:`Saved ${activeProvider} / ${alias} to Supabase Vault.`});
+      setSaveFeedback({kind:'success',message:`Saved ${activeInfraProvider} / ${alias} to Supabase Vault.`});
       await loadAccounts();
     }catch(err){
       setSaveFeedback({kind:'error',message:err instanceof Error?err.message:'Unable to save provider credential.'});
     }finally{setSaveSubmitting(false);}
   };
 
-  const rotateAccount=(account:ProviderAccountSummary)=>{
-    setActiveProvider(account.provider as Exclude<ProviderType,'vercel'>);
+  const handleSlotSave=async(groupAlias:string,provider:ProviderCatalogEntry)=>{
+    const slotKey=`${categoryTab}:${groupAlias}:${provider.id}`;
+    const cred=(slotCredentials[slotKey]||'').trim();
+    const acctId=(slotAccountIds[slotKey]||'').trim();
+    setGroupFeedback(null);
+    if(cred.length<16){
+      setGroupFeedback({kind:'error',message:`${provider.label} (${groupAlias}): API key must be at least 16 characters.`});
+      return;
+    }
+    setBusyKey(`${provider.id}:${groupAlias}`);
+    try{
+      const res=await fetch('/api/settings/providers',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          provider:provider.id,
+          alias:groupAlias,
+          accountId:acctId||null,
+          credential:cred,
+          enabled:true,
+        }),
+      });
+      const data=await jsonResponse<{error?:string}>(res);
+      if(res.status===401){await loadStatus();throw new Error('Instance authentication expired.');}
+      if(!res.ok) throw new Error(data.error||`Save failed (HTTP ${res.status})`);
+      setSlotCredentials(prev=>({...prev,[slotKey]:''}));
+      setSlotShowCreds(prev=>({...prev,[slotKey]:false}));
+      setEditingSlotKey(null);
+      setGroupFeedback({kind:'success',message:`Saved ${provider.label} for group ${groupAlias}.`});
+      await loadAccounts();
+    }catch(err){
+      setGroupFeedback({kind:'error',message:err instanceof Error?err.message:'Unable to save provider credential.'});
+    }finally{setBusyKey(null);}
+  };
+
+  const rotateInfraAccount=(account:ProviderAccountSummary)=>{
+    setCategoryTab('infra');
+    setActiveInfraProvider(account.provider);
     setAliasInput(account.alias);
     setAccountIdInput(account.accountId||'');
     setCredentialInput('');
@@ -186,6 +247,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
     const key=`${account.provider}:${account.alias}`;
     setBusyKey(key);
     setSaveFeedback(null);
+    setGroupFeedback(null);
     try{
       const res=await fetch(`/api/settings/providers/${encodeURIComponent(account.provider)}/${encodeURIComponent(account.alias)}/enabled`,{
         method:'PATCH',
@@ -196,8 +258,11 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
       if(res.status===401){await loadStatus();throw new Error('Instance authentication expired.');}
       if(!res.ok) throw new Error(data.error||'Failed to update provider state.');
       await loadAccounts();
-    }catch(err){setSaveFeedback({kind:'error',message:err instanceof Error?err.message:'Unable to update provider state.'});}
-    finally{setBusyKey(null);}
+    }catch(err){
+      const message=err instanceof Error?err.message:'Unable to update provider state.';
+      setSaveFeedback({kind:'error',message});
+      setGroupFeedback({kind:'error',message});
+    }finally{setBusyKey(null);}
   };
 
   const deleteAccount=async(account:ProviderAccountSummary)=>{
@@ -209,10 +274,15 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
       if(res.status===401){await loadStatus();throw new Error('Instance authentication expired.');}
       if(!res.ok) throw new Error(data.error||'Failed to revoke provider credential.');
       setConfirmDeleteKey(null);
-      setSaveFeedback({kind:'success',message:`Revoked ${account.provider} / ${account.alias}.`});
+      const message=`Revoked ${account.provider} / ${account.alias}.`;
+      setSaveFeedback({kind:'success',message});
+      setGroupFeedback({kind:'success',message});
       await loadAccounts();
-    }catch(err){setSaveFeedback({kind:'error',message:err instanceof Error?err.message:'Unable to revoke provider credential.'});}
-    finally{setBusyKey(null);}
+    }catch(err){
+      const message=err instanceof Error?err.message:'Unable to revoke provider credential.';
+      setSaveFeedback({kind:'error',message});
+      setGroupFeedback({kind:'error',message});
+    }finally{setBusyKey(null);}
   };
 
   const testAccount=async(account:ProviderAccountSummary)=>{
@@ -233,8 +303,43 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
     }finally{setBusyKey(null);}
   };
 
-  const activeProviderMeta=useMemo(()=>PROVIDERS.find(p=>p.id===activeProvider)!,[activeProvider]);
-  const providerAccounts=accounts.filter(account=>account.provider===activeProvider);
+  const handleCreateGroup=(event:React.FormEvent)=>{
+    event.preventDefault();
+    if(categoryTab==='infra') return;
+    setGroupFeedback(null);
+    const normalized=normalizeGroupAlias(newGroupInput);
+    if(!/^[A-Z][A-Z0-9_]{0,47}$/.test(normalized)){
+      setGroupFeedback({kind:'error',message:'Group name must start with a letter after normalizing (e.g. alice@gmail.com or TEAM_ALPHA).'});
+      return;
+    }
+    setCustomGroups(prev=>({
+      ...prev,
+      [categoryTab]:prev[categoryTab].includes(normalized)?prev[categoryTab]:[normalized,...prev[categoryTab]],
+    }));
+    setCollapsedGroups(prev=>({...prev,[`${categoryTab}:${normalized}`]:false}));
+    setNewGroupInput('');
+    setGroupFeedback({kind:'success',message:`Opened group "${normalized}". Add keys for the providers you have access to; the rest stay disabled.`});
+  };
+
+  const activeInfraMeta=useMemo(()=>INFRA_PROVIDERS.find(p=>p.id===activeInfraProvider)??INFRA_PROVIDERS[0],[activeInfraProvider]);
+  const infraAccounts=useMemo(()=>accounts.filter(account=>account.provider===activeInfraProvider),[accounts,activeInfraProvider]);
+
+  const activeGroupProviders=useMemo(()=>{
+    if(categoryTab==='compute') return COMPUTE_PROVIDERS;
+    if(categoryTab==='inference') return INFERENCE_PROVIDERS;
+    return [];
+  },[categoryTab]);
+
+  const activeCategoryProviderIds=useMemo(()=>new Set(activeGroupProviders.map(p=>p.id)),[activeGroupProviders]);
+
+  const groupAliases=useMemo(()=>{
+    if(categoryTab==='infra') return [];
+    const seen=new Set<string>(customGroups[categoryTab]);
+    for(const acct of accounts){
+      if(activeCategoryProviderIds.has(acct.provider)) seen.add(acct.alias);
+    }
+    return [...seen];
+  },[accounts,activeCategoryProviderIds,categoryTab,customGroups]);
 
   return (
     <div className="space-y-4 pb-6">
@@ -242,7 +347,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
         <div>
           <h1 className="font-display text-xl font-bold tracking-tight text-[#F7F3EC]">Vault &amp; Environment Settings</h1>
           <p className="text-xs text-[#B9AA9D] mt-0.5 max-w-2xl">
-            One ATAX instance passkey protects the management plane. Provider credentials remain server-side in Supabase Vault.
+            Organize infrastructure, cloud compute, and AI inference credentials into named groups. Credentials remain server-side in Supabase Vault and rotate by usage-based weights.
           </p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
@@ -270,7 +375,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
             {status?.backend.reachable?'Supabase Data API reachable':'Backend unavailable'}
           </span>
           <span className="text-[#7D6C61]">·</span>
-          <span className="text-[#A89688]">Providers: GitHub + Cloudflare</span>
+          <span className="text-[#A89688]">Providers: Infra (2) · Cloud Compute (5) · AI Inference (9)</span>
         </div>
       </section>
 
@@ -311,97 +416,336 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
             </div>
           </section>
 
-          <section className="border border-[#3F2E27] bg-[#1A110E] rounded-sm overflow-hidden">
-            <div className="flex flex-wrap gap-2 p-3 border-b border-[#3F2E27]">
-              {PROVIDERS.map(provider=>(
-                <button
-                  key={provider.id}
-                  type="button"
-                  onClick={()=>setActiveProvider(provider.id)}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-sm border ${activeProvider===provider.id?'border-[#DF6B3B] bg-[#291711] text-[#F7F3EC]':'border-[#3F2E27] text-[#A89688]'}`}
-                >
-                  <ProviderIcon provider={provider.id}/>{provider.label}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={()=>setCategoryTab('compute')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-sm border ${categoryTab==='compute'?'border-[#DF6B3B] bg-[#291711] text-[#F7F3EC]':'border-[#3F2E27] bg-[#1A110E] text-[#A89688]'}`}
+            >
+              <Cpu className="w-3.5 h-3.5 text-[#DF6B3B]"/>
+              Cloud Compute Groups ({COMPUTE_PROVIDERS.length})
+            </button>
+            <button
+              type="button"
+              onClick={()=>setCategoryTab('inference')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-sm border ${categoryTab==='inference'?'border-[#DF6B3B] bg-[#291711] text-[#F7F3EC]':'border-[#3F2E27] bg-[#1A110E] text-[#A89688]'}`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#DF6B3B]"/>
+              AI Inference Groups ({INFERENCE_PROVIDERS.length})
+            </button>
+            <button
+              type="button"
+              onClick={()=>setCategoryTab('infra')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-sm border ${categoryTab==='infra'?'border-[#DF6B3B] bg-[#291711] text-[#F7F3EC]':'border-[#3F2E27] bg-[#1A110E] text-[#A89688]'}`}
+            >
+              <GitBranch className="w-3.5 h-3.5 text-[#DF6B3B]"/>
+              Infrastructure ({INFRA_PROVIDERS.length})
+            </button>
+          </div>
 
-            <div className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2 border border-[#3F2E27] bg-[#211613] rounded-sm"><ProviderIcon provider={activeProvider} className="w-5 h-5 text-[#DF6B3B]"/></div>
-                <div>
-                  <h2 className="text-sm font-semibold text-[#F7F3EC]">{activeProviderMeta.label} provider account registry</h2>
-                  <p className="text-xs text-[#A89688] mt-0.5">{activeProviderMeta.hint}</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleSave} className="mt-4 grid md:grid-cols-3 gap-3">
-                <label className="text-xs text-[#B9AA9D]">
-                  Account Alias
-                  <input value={aliasInput} onChange={e=>setAliasInput(e.target.value)} className="mt-1 w-full px-3 py-2 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder="PRIMARY"/>
-                </label>
-                <label className="text-xs text-[#B9AA9D]">
-                  {activeProviderMeta.accountIdLabel}
-                  <input value={accountIdInput} onChange={e=>setAccountIdInput(e.target.value)} className="mt-1 w-full px-3 py-2 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder={activeProviderMeta.accountIdPlaceholder}/>
-                </label>
-                <label className="text-xs text-[#B9AA9D]">
-                  Credential
-                  <div className="relative mt-1">
-                    <input ref={credentialRef} type={showCredential?'text':'password'} autoComplete="new-password" value={credentialInput} onChange={e=>setCredentialInput(e.target.value)} className="w-full px-3 py-2 pr-9 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder={activeProviderMeta.tokenPlaceholder}/>
-                    <button type="button" onClick={()=>setShowCredential(v=>!v)} className="absolute right-2 top-2 text-[#8F7B70]">{showCredential?<EyeOff className="w-4 h-4"/>:<Eye className="w-4 h-4"/>}</button>
-                  </div>
-                </label>
-                <div className="md:col-span-3 flex items-center gap-2">
-                  <button type="submit" disabled={saveSubmitting} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium bg-[#C94A1B] text-white rounded-sm disabled:opacity-50">
-                    <KeyRound className="w-3.5 h-3.5"/>Save / Rotate Credential
+          {categoryTab==='infra'?(
+            <section className="border border-[#3F2E27] bg-[#1A110E] rounded-sm overflow-hidden">
+              <div className="flex flex-wrap gap-2 p-3 border-b border-[#3F2E27]">
+                {INFRA_PROVIDERS.map(provider=>(
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={()=>setActiveInfraProvider(provider.id)}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-sm border ${activeInfraProvider===provider.id?'border-[#DF6B3B] bg-[#291711] text-[#F7F3EC]':'border-[#3F2E27] text-[#A89688]'}`}
+                  >
+                    <ProviderIcon provider={provider.id}/>{provider.label}
                   </button>
-                  <button type="button" onClick={()=>{setAliasInput('');setAccountIdInput('');setCredentialInput('');setSaveFeedback(null);}} className="px-3 py-2 text-xs border border-[#3F2E27] text-[#A89688] rounded-sm">Clear</button>
-                </div>
-              </form>
+                ))}
+              </div>
 
-              {saveFeedback&&<div className={`mt-3 text-xs ${saveFeedback.kind==='success'?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>{saveFeedback.message}</div>}
-
-              <div className="mt-5 border-t border-[#3F2E27] pt-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] font-mono text-[#A89688]">REGISTERED ACCOUNTS</div>
-                  {loadingAccounts&&<RefreshCw className="w-3.5 h-3.5 animate-spin text-[#8F7B70]"/>}
+              <div className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 border border-[#3F2E27] bg-[#211613] rounded-sm"><ProviderIcon provider={activeInfraProvider} className="w-5 h-5 text-[#DF6B3B]"/></div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#F7F3EC]">{activeInfraMeta.label} provider account registry</h2>
+                    <p className="text-xs text-[#A89688] mt-0.5">{activeInfraMeta.hint}</p>
+                  </div>
                 </div>
-                {providerAccounts.length===0&&!loadingAccounts&&<div className="mt-3 text-xs text-[#7D6C61]">No {activeProviderMeta.label} accounts registered.</div>}
-                <div className="mt-3 space-y-2">
-                  {providerAccounts.map(account=>{
-                    const key=`${account.provider}:${account.alias}`;
-                    const result=testResults[key];
-                    return (
-                      <div key={key} className="border border-[#3F2E27] bg-[#160E0C] rounded-sm p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2 text-sm text-[#F7F3EC]">
-                              <span className="font-mono">{account.alias}</span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${account.enabled?'border-green-700 text-green-300':'border-[#6A4E42] text-[#A89688]'}`}>{account.enabled?'ENABLED':'DISABLED'}</span>
-                            </div>
-                            <div className="text-[11px] text-[#8F7B70] mt-1">Provider account ID: {account.accountId||'not supplied'}</div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button type="button" disabled={busyKey===key} onClick={()=>void testAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><CheckCircle2 className="w-3.5 h-3.5"/>Test</button>
-                            <button type="button" disabled={busyKey===key} onClick={()=>rotateAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><RotateCw className="w-3.5 h-3.5"/>Rotate</button>
-                            <button type="button" disabled={busyKey===key} onClick={()=>void toggleAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><Power className="w-3.5 h-3.5"/>{account.enabled?'Disable':'Enable'}</button>
-                            {confirmDeleteKey===key?(
-                              <>
-                                <button type="button" onClick={()=>void deleteAccount(account)} className="px-2.5 py-1.5 text-[11px] border border-[#C83214] text-[#FF9A7B] rounded-sm">Confirm Revoke</button>
-                                <button type="button" onClick={()=>setConfirmDeleteKey(null)} className="px-2.5 py-1.5 text-[11px] border border-[#3F2E27] text-[#A89688] rounded-sm">Cancel</button>
-                              </>
-                            ):(
-                              <button type="button" disabled={busyKey===key} onClick={()=>setConfirmDeleteKey(key)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#FF9A7B] rounded-sm"><Trash2 className="w-3.5 h-3.5"/>Revoke</button>
-                            )}
-                          </div>
-                        </div>
-                        {result&&<div className={`mt-2 text-[11px] ${result.ok?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>{result.summary} · HTTP {result.statusCode}</div>}
+
+                <form onSubmit={handleInfraSave} className="mt-4 grid md:grid-cols-3 gap-3">
+                  <label className="text-xs text-[#B9AA9D]">
+                    Account Alias
+                    <input value={aliasInput} onChange={e=>setAliasInput(e.target.value)} className="mt-1 w-full px-3 py-2 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder="PRIMARY"/>
+                  </label>
+                  <label className="text-xs text-[#B9AA9D]">
+                    {activeInfraMeta.accountIdLabel}
+                    <input value={accountIdInput} onChange={e=>setAccountIdInput(e.target.value)} className="mt-1 w-full px-3 py-2 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder={activeInfraMeta.accountIdPlaceholder}/>
+                  </label>
+                  <div className="text-xs text-[#B9AA9D]">
+                    <label>
+                      Credential
+                      <div className="relative mt-1">
+                        <input ref={credentialRef} type={showCredential?'text':'password'} autoComplete="new-password" value={credentialInput} onChange={e=>setCredentialInput(e.target.value)} className="w-full px-3 py-2 pr-9 border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm" placeholder={activeInfraMeta.tokenPlaceholder}/>
+                        <button type="button" onClick={()=>setShowCredential(v=>!v)} className="absolute right-2 top-2 text-[#8F7B70]">{showCredential?<EyeOff className="w-4 h-4"/>:<Eye className="w-4 h-4"/>}</button>
                       </div>
-                    );
-                  })}
+                    </label>
+                    <a
+                      href={activeInfraMeta.apiKeyUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-[#DF6B3B] hover:underline"
+                    >
+                      {activeInfraMeta.apiKeyLinkLabel}<ExternalLink className="w-3 h-3"/>
+                    </a>
+                  </div>
+                  <div className="md:col-span-3 flex items-center gap-2">
+                    <button type="submit" disabled={saveSubmitting} className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium bg-[#C94A1B] text-white rounded-sm disabled:opacity-50">
+                      <KeyRound className="w-3.5 h-3.5"/>Save / Rotate Credential
+                    </button>
+                    <button type="button" onClick={()=>{setAliasInput('');setAccountIdInput('');setCredentialInput('');setSaveFeedback(null);}} className="px-3 py-2 text-xs border border-[#3F2E27] text-[#A89688] rounded-sm">Clear</button>
+                  </div>
+                </form>
+
+                {saveFeedback&&<div className={`mt-3 text-xs ${saveFeedback.kind==='success'?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>{saveFeedback.message}</div>}
+
+                <div className="mt-5 border-t border-[#3F2E27] pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[11px] font-mono text-[#A89688]">REGISTERED ACCOUNTS</div>
+                    {loadingAccounts&&<RefreshCw className="w-3.5 h-3.5 animate-spin text-[#8F7B70]"/>}
+                  </div>
+                  {infraAccounts.length===0&&!loadingAccounts&&<div className="mt-3 text-xs text-[#7D6C61]">No {activeInfraMeta.label} accounts registered.</div>}
+                  <div className="mt-3 space-y-2">
+                    {infraAccounts.map(account=>{
+                      const key=`${account.provider}:${account.alias}`;
+                      const result=testResults[key];
+                      return (
+                        <div key={key} className="border border-[#3F2E27] bg-[#160E0C] rounded-sm p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 text-sm text-[#F7F3EC]">
+                                <span className="font-mono">{account.alias}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${account.enabled?'border-green-700 text-green-300':'border-[#6A4E42] text-[#A89688]'}`}>{account.enabled?'ENABLED':'DISABLED'}</span>
+                              </div>
+                              <div className="text-[11px] text-[#8F7B70] mt-1">Provider account ID: {account.accountId||'not supplied'}</div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button type="button" disabled={busyKey===key} onClick={()=>void testAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><CheckCircle2 className="w-3.5 h-3.5"/>Test</button>
+                              <button type="button" disabled={busyKey===key} onClick={()=>rotateInfraAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><RotateCw className="w-3.5 h-3.5"/>Rotate</button>
+                              <button type="button" disabled={busyKey===key} onClick={()=>void toggleAccount(account)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm"><Power className="w-3.5 h-3.5"/>{account.enabled?'Disable':'Enable'}</button>
+                              {confirmDeleteKey===key?(
+                                <>
+                                  <button type="button" onClick={()=>void deleteAccount(account)} className="px-2.5 py-1.5 text-[11px] border border-[#C83214] text-[#FF9A7B] rounded-sm">Confirm Revoke</button>
+                                  <button type="button" onClick={()=>setConfirmDeleteKey(null)} className="px-2.5 py-1.5 text-[11px] border border-[#3F2E27] text-[#A89688] rounded-sm">Cancel</button>
+                                </>
+                              ):(
+                                <button type="button" disabled={busyKey===key} onClick={()=>setConfirmDeleteKey(key)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] border border-[#4A362D] text-[#FF9A7B] rounded-sm"><Trash2 className="w-3.5 h-3.5"/>Revoke</button>
+                              )}
+                            </div>
+                          </div>
+                          {result&&<div className={`mt-2 text-[11px] ${result.ok?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>{result.summary} · HTTP {result.statusCode}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
+          ):(
+            <section className="space-y-4">
+              <div className="border border-[#3F2E27] bg-[#1A110E] p-4 rounded-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#F7F3EC]">
+                      {categoryTab==='compute'?'Cloud Compute Account Groups':'AI Inference Account Groups'}
+                    </h2>
+                    <p className="text-xs text-[#A89688] mt-0.5">
+                      {categoryTab==='compute'
+                        ?'Name a group (e.g. an email alias like ALICE_GMAIL or TEAM_A) and enable the compute providers you have keys for. ATAX rotates enabled accounts by usage weight.'
+                        :'Name a group and add free-tier or paid AI inference keys. External MCP agents rotate enabled accounts by usage weight and fail over automatically on 429s.'}
+                    </p>
+                  </div>
+                  <form onSubmit={handleCreateGroup} className="flex items-center gap-2 shrink-0">
+                    <input
+                      value={newGroupInput}
+                      onChange={e=>setNewGroupInput(e.target.value)}
+                      placeholder="Group name or email (e.g. dev@team.io)"
+                      className="w-64 px-3 py-1.5 text-xs border border-[#4A362D] bg-[#160E0C] text-[#F7F3EC] rounded-sm outline-none focus:border-[#DF6B3B]"
+                    />
+                    <button type="submit" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#C94A1B] text-white rounded-sm">
+                      <FolderPlus className="w-3.5 h-3.5"/>Add Group
+                    </button>
+                  </form>
+                </div>
+                {groupFeedback&&<div className={`mt-2.5 text-xs ${groupFeedback.kind==='success'?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>{groupFeedback.message}</div>}
+              </div>
+
+              {loadingAccounts&&<div className="text-xs text-[#A89688] flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin"/>Loading groups...</div>}
+
+              <div className="space-y-3">
+                {groupAliases.map(groupAlias=>{
+                  const collapseKey=`${categoryTab}:${groupAlias}`;
+                  const isCollapsed=Boolean(collapsedGroups[collapseKey]);
+                  const groupAccounts=accounts.filter(a=>a.alias===groupAlias&&activeCategoryProviderIds.has(a.provider));
+                  const enabledCount=groupAccounts.filter(a=>a.enabled).length;
+                  return (
+                    <div key={collapseKey} className="border border-[#3F2E27] bg-[#1A110E] rounded-sm overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={()=>setCollapsedGroups(prev=>({...prev,[collapseKey]:!isCollapsed}))}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-[#211613] border-b border-[#3F2E27] text-left hover:bg-[#261915] transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {isCollapsed?<ChevronRight className="w-4 h-4 text-[#A89688]"/>:<ChevronDown className="w-4 h-4 text-[#DF6B3B]"/>}
+                          <span className="font-mono text-sm font-semibold text-[#F7F3EC]">{groupAlias}</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded border border-[#4A362D] text-[#D8CFC2]">
+                            {enabledCount} / {activeGroupProviders.length} enabled
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-[#8F7B70]">
+                          {groupAccounts.length} configured
+                        </span>
+                      </button>
+
+                      {!isCollapsed&&(
+                        <div className="divide-y divide-[#2E211C]">
+                          {activeGroupProviders.map(provider=>{
+                            const acct=groupAccounts.find(a=>a.provider===provider.id);
+                            const acctKey=`${provider.id}:${groupAlias}`;
+                            const slotKey=`${categoryTab}:${groupAlias}:${provider.id}`;
+                            const isEditing=!acct||editingSlotKey===slotKey;
+                            const result=testResults[acctKey];
+                            const showSlotCred=Boolean(slotShowCreds[slotKey]);
+
+                            return (
+                              <div key={slotKey} className="p-3.5 bg-[#160E0C]">
+                                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                                  <div className="flex items-start gap-2.5 min-w-0">
+                                    <div className="p-1.5 border border-[#3F2E27] bg-[#1A110E] rounded-sm shrink-0 mt-0.5">
+                                      <ProviderIcon provider={provider.id} className="w-4 h-4 text-[#DF6B3B]"/>
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-xs font-semibold text-[#F7F3EC]">{provider.label}</span>
+                                        {acct?(
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${acct.enabled?'border-green-700 text-green-300':'border-[#6A4E42] text-[#A89688]'}`}>
+                                            {acct.enabled?'ENABLED':'DISABLED'}
+                                          </span>
+                                        ):(
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded border border-[#3F2E27] text-[#7D6C61]">
+                                            NOT CONFIGURED
+                                          </span>
+                                        )}
+                                        {provider.freeTierNote&&(
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#211613] text-[#B9AA9D]">
+                                            {provider.freeTierNote}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-[#8F7B70] mt-0.5">{provider.hint}</div>
+                                    </div>
+                                  </div>
+
+                                  {acct&&!isEditing&&(
+                                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                      <button type="button" disabled={busyKey===acctKey} onClick={()=>void testAccount(acct)} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm">
+                                        <CheckCircle2 className="w-3.5 h-3.5"/>Test
+                                      </button>
+                                      <button type="button" disabled={busyKey===acctKey} onClick={()=>{setEditingSlotKey(slotKey);setSlotAccountIds(prev=>({...prev,[slotKey]:acct.accountId||''}));}} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm">
+                                        <RotateCw className="w-3.5 h-3.5"/>Rotate Key
+                                      </button>
+                                      <button type="button" disabled={busyKey===acctKey} onClick={()=>void toggleAccount(acct)} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[#4A362D] text-[#D8CFC2] rounded-sm">
+                                        <Power className="w-3.5 h-3.5"/>{acct.enabled?'Disable':'Enable'}
+                                      </button>
+                                      {confirmDeleteKey===acctKey?(
+                                        <>
+                                          <button type="button" onClick={()=>void deleteAccount(acct)} className="px-2.5 py-1 text-[11px] border border-[#C83214] text-[#FF9A7B] rounded-sm">Confirm Revoke</button>
+                                          <button type="button" onClick={()=>setConfirmDeleteKey(null)} className="px-2.5 py-1 text-[11px] border border-[#3F2E27] text-[#A89688] rounded-sm">Cancel</button>
+                                        </>
+                                      ):(
+                                        <button type="button" disabled={busyKey===acctKey} onClick={()=>setConfirmDeleteKey(acctKey)} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[#4A362D] text-[#FF9A7B] rounded-sm">
+                                          <Trash2 className="w-3.5 h-3.5"/>Revoke
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {isEditing&&(
+                                  <div className="mt-3 pl-8 space-y-2">
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      {provider.accountIdLabel&&(
+                                        <input
+                                          value={slotAccountIds[slotKey]||''}
+                                          onChange={e=>setSlotAccountIds(prev=>({...prev,[slotKey]:e.target.value}))}
+                                          placeholder={provider.accountIdPlaceholder||provider.accountIdLabel}
+                                          aria-label={`${provider.label} ${groupAlias} account ID`}
+                                          className="sm:w-52 px-2.5 py-1.5 text-xs border border-[#4A362D] bg-[#1A110E] text-[#F7F3EC] rounded-sm outline-none focus:border-[#DF6B3B]"
+                                        />
+                                      )}
+                                      <div className="relative flex-1">
+                                        <input
+                                          type={showSlotCred?'text':'password'}
+                                          autoComplete="new-password"
+                                          value={slotCredentials[slotKey]||''}
+                                          onChange={e=>setSlotCredentials(prev=>({...prev,[slotKey]:e.target.value}))}
+                                          placeholder={provider.tokenPlaceholder}
+                                          aria-label={`${provider.label} ${groupAlias} API key`}
+                                          className="w-full px-2.5 py-1.5 pr-8 text-xs border border-[#4A362D] bg-[#1A110E] text-[#F7F3EC] rounded-sm outline-none focus:border-[#DF6B3B]"
+                                        />
+                                        <button type="button" onClick={()=>setSlotShowCreds(prev=>({...prev,[slotKey]:!showSlotCred}))} className="absolute right-2 top-1.5 text-[#8F7B70]">
+                                          {showSlotCred?<EyeOff className="w-3.5 h-3.5"/>:<Eye className="w-3.5 h-3.5"/>}
+                                        </button>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={busyKey===acctKey}
+                                        onClick={()=>void handleSlotSave(groupAlias,provider)}
+                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#C94A1B] text-white rounded-sm disabled:opacity-50 shrink-0"
+                                      >
+                                        <KeyRound className="w-3.5 h-3.5"/>{acct?'Save Rotation':'Save & Enable'}
+                                      </button>
+                                      {acct&&(
+                                        <button type="button" onClick={()=>setEditingSlotKey(null)} className="px-2.5 py-1.5 text-xs border border-[#3F2E27] text-[#A89688] rounded-sm shrink-0">
+                                          Cancel
+                                        </button>
+                                      )}
+                                    </div>
+                                    <a
+                                      href={provider.apiKeyUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-[11px] text-[#DF6B3B] hover:underline"
+                                    >
+                                      {provider.apiKeyLinkLabel}<ExternalLink className="w-3 h-3"/>
+                                    </a>
+                                  </div>
+                                )}
+
+                                {!isEditing&&(
+                                  <div className="mt-1.5 pl-8 flex flex-wrap items-center gap-3">
+                                    <a
+                                      href={provider.apiKeyUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-[11px] text-[#DF6B3B] hover:underline"
+                                    >
+                                      {provider.apiKeyLinkLabel}<ExternalLink className="w-3 h-3"/>
+                                    </a>
+                                    {acct?.accountId&&<span className="text-[11px] text-[#8F7B70]">Account ID: {acct.accountId}</span>}
+                                  </div>
+                                )}
+
+                                {result&&(
+                                  <div className={`mt-2 pl-8 text-[11px] ${result.ok?'text-[#8CD48C]':'text-[#FF9A7B]'}`}>
+                                    {result.summary} · HTTP {result.statusCode}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
