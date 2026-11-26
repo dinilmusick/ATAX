@@ -382,10 +382,24 @@ export function createVaultService(
       };
     }
 
-    const probeUrl =
-      provider === 'github'
-        ? 'https://api.github.com/user'
-        : 'https://api.cloudflare.com/client/v4/user/tokens/verify';
+    const probeUrls:Record<string,string|undefined>={
+      github:'https://api.github.com/user',
+      cloudflare:'https://api.cloudflare.com/client/v4/user/tokens/verify',
+      fly:'https://api.machines.dev/v1/apps?org_slug=personal',
+      northflank:'https://api.northflank.com/v1/projects',
+      koyeb:'https://app.koyeb.com/v1/apps',
+      render:'https://api.render.com/v1/services?limit=1',
+    };
+    const probeUrl=probeUrls[provider];
+    if(!probeUrl){
+      const result:ProviderTestResult={
+        ok:false,provider,alias,statusCode:501,
+        summary:'No live provider probe is implemented for this provider yet.',
+        checkedAt:new Date().toISOString(),
+      };
+      try{await db.rpc('atax_mcp_audit_provider_test_v1',{provider_in:provider,alias_in:alias,ok_in:false,status_code_in:501,actor_subject_in:owner});}catch{}
+      return result;
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -431,13 +445,16 @@ export function createVaultService(
           summary: `Cloudflare token status: ${cfStatus}`,
           checkedAt: new Date().toISOString(),
         };
+      } else if (['fly','northflank','koyeb','render'].includes(provider)) {
+        result = {
+          ok: true, provider, alias, statusCode: res.status,
+          summary: 'Provider credential verified by live API probe.',
+          checkedAt: new Date().toISOString(),
+        };
       } else {
         result = {
-          ok: true,
-          provider,
-          alias,
-          statusCode: res.status,
-          summary: 'Token verified',
+          ok: false, provider, alias, statusCode: 501,
+          summary: 'No live provider probe is implemented for this provider yet.',
           checkedAt: new Date().toISOString(),
         };
       }
