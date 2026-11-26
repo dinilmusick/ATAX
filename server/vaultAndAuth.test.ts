@@ -69,7 +69,7 @@ test('inspectSupabaseConnection validates ATAX_SUPABASE_URL and ATAX_SUPABASE_SE
   assert.equal(valid.hostLabel?.includes('sb_secret_mock_key_0123456789abcdef'), false);
 });
 
-test('validateProviderInput accepts standard and compute providers, including catalogued providers, and rejects invalid formats', () => {
+test('validateProviderInput accepts standard and compute providers, including catalogued providers, and rejects invalid or reserved formats', () => {
   const gh = validateProviderInput({
     provider: 'github',
     alias: 'personal',
@@ -104,13 +104,15 @@ test('validateProviderInput accepts standard and compute providers, including ca
   assert.equal(compute.provider, 'aws');
   assert.equal(compute.alias, 'PROD');
 
-  assert.throws(() =>
-    validateProviderInput({
-      provider: 'NOT A PROVIDER',
-      alias: 'PROD',
-      credential: '12345678901234567',
-    })
-  );
+  for (const bad of ['NOT A PROVIDER', 'constructor', 'prototype', '__proto__']) {
+    assert.throws(() =>
+      validateProviderInput({
+        provider: bad,
+        alias: 'PROD',
+        credential: '12345678901234567',
+      })
+    );
+  }
 
   assert.throws(() =>
     validateProviderInput({
@@ -233,9 +235,64 @@ test('createVaultService calls singleton instance owner and PostgREST Vault RPCs
 
   const probe = await vault.testAccountConnection('dinilmusick', 'github', 'PERSONAL');
   assert.equal(probe.ok, true);
+  assert.equal(probe.authVerified, true);
+  assert.equal(probe.apiReachable, true);
   assert.equal(probe.summary, 'Verified GitHub account @dinilmusick');
   assert.equal(auditedTest, true);
   assert.equal(JSON.stringify(probe).includes('synthetic-github-credential-value'), false);
+});
+
+test('provider-specific compute probes validate authenticated payloads and distinguish reachability vs auth vs compute support', async () => {
+  const secretKey = 'sb_secret_probe_test_key_0123456789';
+  let malformedMode = false;
+  const fakeFetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_instance_owner_subject_v1')) return Response.json('dinilmusick');
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_audit_provider_test_v1')) return new Response(null, { status: 204 });
+    if (url.endsWith('/rest/v1/rpc/atax_mcp_runtime_config_v1')) {
+      return Response.json({
+        settings: { MCP_OWNER_SUBJECT: 'dinilmusick' },
+        accounts: [
+          { provider: 'fly', alias: 'DEV', token: 'fly-token-1234567890' },
+          { provider: 'northflank', alias: 'DEV', token: 'nf-token-1234567890' },
+          { provider: 'render', alias: 'DEV', token: 'rnd-token-1234567890' },
+          { provider: 'railway', alias: 'DEV', token: 'rw-token-1234567890' },
+          { provider: 'koyeb', alias: 'DEV', token: 'ky-token-1234567890' },
+        ],
+      });
+    }
+    if (malformedMode) return Response.json({ ok: true });
+    if (url.startsWith('https://api.machines.dev/')) return Response.json({ apps: [{ name: 'a' }] });
+    if (url.startsWith('https://api.northflank.com/')) return Response.json({ data: { projects: [{ id: 'p' }] } });
+    if (url.startsWith('https://api.render.com/')) return Response.json([{ service: { id: 's' } }]);
+    if (url.startsWith('https://backboard.railway.com/')) return Response.json({ data: { me: { id: 'u1', name: 'Dev' } } });
+    if (url.startsWith('https://app.koyeb.com/')) return Response.json({ apps: [] });
+    return new Response('Not found', { status: 404 });
+  }) as typeof fetch;
+
+  const vault = createVaultService(
+    { ATAX_SUPABASE_URL: 'https://abc.supabase.co', ATAX_SUPABASE_SECRET_KEY: secretKey },
+    fakeFetch
+  );
+
+  for (const p of ['fly', 'northflank', 'render', 'railway']) {
+    const res = await vault.testAccountConnection('dinilmusick', p, 'DEV');
+    assert.equal(res.ok, true, p);
+    assert.equal(res.apiReachable, true, p);
+    assert.equal(res.authVerified, true, p);
+    assert.equal(res.computeSupported, true, p);
+  }
+
+  const koyeb = await vault.testAccountConnection('dinilmusick', 'koyeb', 'DEV');
+  assert.equal(koyeb.ok, true);
+  assert.equal(koyeb.authVerified, true);
+  assert.equal(koyeb.computeSupported, false);
+
+  malformedMode = true;
+  const badFly = await vault.testAccountConnection('dinilmusick', 'fly', 'DEV');
+  assert.equal(badFly.ok, false);
+  assert.equal(badFly.apiReachable, true);
+  assert.equal(badFly.authVerified, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -254,25 +311,21 @@ test('Phase1 regression: testAccountConnection rejects undefined owner before ma
     fakeFetch
   );
 
-  // undefined — the original bug: testProvider called testAccountConnection(undefined, ...)
   await assert.rejects(
     () => vault.testAccountConnection(undefined as unknown as string, 'github', 'PERSONAL'),
     (err: unknown) => err instanceof VaultError && err.statusCode === 503 && err.message.toLowerCase().includes('owner')
   );
 
-  // null
   await assert.rejects(
     () => vault.testAccountConnection(null as unknown as string, 'github', 'PERSONAL'),
     (err: unknown) => err instanceof VaultError && err.statusCode === 503
   );
 
-  // empty string
   await assert.rejects(
     () => vault.testAccountConnection('', 'github', 'PERSONAL'),
     (err: unknown) => err instanceof VaultError && err.statusCode === 503
   );
 
-  // No Supabase RPC should have been reached — the guard fires synchronously
   assert.equal(rpcCalled.some(u => u.includes('/rpc/')), false,
     'Supabase RPCs must NOT be called when owner subject is missing');
 });
@@ -308,14 +361,12 @@ test('Phase1 regression: account isolation — only the requested alias credenti
     fakeFetch
   );
 
-  // Test PERSONAL
   usedTokens.length = 0;
   const r1 = await vault.testAccountConnection('dinilmusick', 'github', 'PERSONAL');
   assert.equal(r1.ok, true);
   assert.equal(usedTokens.length, 1);
   assert.equal(usedTokens[0], 'token-personal-acct-unique', 'PERSONAL alias must use PERSONAL token only');
 
-  // Test WORK — must NOT use PERSONAL token
   usedTokens.length = 0;
   const r2 = await vault.testAccountConnection('dinilmusick', 'github', 'WORK');
   assert.equal(r2.ok, true);
