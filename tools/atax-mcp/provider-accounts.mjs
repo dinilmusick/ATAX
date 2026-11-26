@@ -170,7 +170,22 @@ async function providerGet(fetcher,url,token) {
   try{body=await res.json();}catch{throw new Error('Provider returned invalid JSON');}
   return body;
 }
+async function providerGetTextOrJson(fetcher,url,token) {
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
+    authorization:'Bearer '+token,accept:'application/json, text/plain;q=0.9','user-agent':'atax-mcp-control-plane'
+  }});
+  if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
+  const raw=await res.text();
+  try{return {kind:'json',data:JSON.parse(raw)};}catch{return {kind:'text',data:raw};}
+}
 const limited = (items,count=50)=>Array.isArray(items)?items.slice(0,count):[];
+function resolveCloudflareAccountId(ctx,selected,requestedAccountId) {
+  const configured=ctx.env['CLOUDFLARE_ACCOUNT_ID_'+selected.alias];
+  const id=requestedAccountId||configured;
+  if(!id||!ID.test(id))throw new Error('Cloudflare account ID required; use atax_cloudflare_accounts_list to discover it');
+  if(configured && id!==configured)throw new Error('Cloudflare account ID differs from configured account binding');
+  return id;
+}
 async function cloudflareAccounts(a,_db,p,ctx) {
   const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
   const payload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts?page=1&per_page=50',selected.token);
@@ -179,16 +194,86 @@ async function cloudflareAccounts(a,_db,p,ctx) {
 }
 async function cloudflareWorkers(a,_db,p,ctx) {
   const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
-  const configured=ctx.env['CLOUDFLARE_ACCOUNT_ID_'+selected.alias];
-  const id=a.account_id||configured;
-  if(!id||!ID.test(id))throw new Error('Cloudflare account ID required; use atax_cloudflare_accounts_list to discover it');
-  if(configured && id!==configured)throw new Error('Cloudflare account ID differs from configured account binding');
+  const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
   const payload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/workers/scripts',selected.token);
   if(payload.success!==true)throw new Error('Cloudflare Workers query failed');
-  return {account:selected.alias,cloudflare_account_id:id,scripts:limited(payload.result).map(x=>({id:x.id,modified_on:x.modified_on}))};
+  return {account:selected.alias,cloudflare_account_id:id,scripts:limited(payload.result).map(x=>({id:x.id,tag:x.tag??null,modified_on:x.modified_on}))};
+}
+async function cloudflareWorkerBuilds(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
+  let workerTag=a.worker_tag;
+  if(!workerTag) {
+    if(!a.script_id||!ID.test(a.script_id))throw new Error('Provide worker_tag or script_id');
+    const scriptsPayload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/workers/scripts',selected.token);
+    if(scriptsPayload.success!==true||!Array.isArray(scriptsPayload.result))throw new Error('Cloudflare Workers query failed');
+    const found=scriptsPayload.result.find(x=>x&&x.id===a.script_id);
+    if(!found||!found.tag||!ID.test(found.tag))throw new Error('Cloudflare Worker script tag not found');
+    workerTag=found.tag;
+  } else if(!ID.test(workerTag)) {
+    throw new Error('Invalid worker_tag');
+  }
+  const limit=a.limit??20;
+  const payload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/builds/workers/'+encodeURIComponent(workerTag)+'/builds',selected.token);
+  if(payload.success!==true)throw new Error('Cloudflare Workers Builds query failed');
+  return {
+    account:selected.alias,
+    cloudflare_account_id:id,
+    worker_tag:workerTag,
+    builds:limited(payload.result,limit).map(b=>({
+      build_uuid:b.build_uuid,
+      status:b.status,
+      build_outcome:b.build_outcome??null,
+      branch:b.build_trigger_metadata?.branch??null,
+      commit_hash:b.build_trigger_metadata?.commit_hash??null,
+      created_on:b.created_on??null,
+      stopped_on:b.stopped_on??null,
+    })),
+  };
+}
+async function cloudflareBuildLogs(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
+  if(!a.build_uuid||!ID.test(a.build_uuid))throw new Error('Valid build_uuid required');
+  const tailLines=a.tail_lines??200;
+  const raw=await providerGetTextOrJson(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/builds/builds/'+encodeURIComponent(a.build_uuid)+'/logs',selected.token);
+  let lines=[];
+  if(raw.kind==='json') {
+    const payload=raw.data;
+    if(payload.success===false)throw new Error('Cloudflare build logs query failed');
+    const candidate=payload.result?.lines??payload.result?.logs??payload.result;
+    if(Array.isArray(candidate)) {
+      lines=candidate.map(entry=>typeof entry==='string'?entry:Array.isArray(entry)?entry.join(' '):JSON.stringify(entry));
+    } else if(typeof candidate==='string') {
+      lines=candidate.split(/\r?\n/);
+    }
+  } else {
+    lines=String(raw.data).split(/\r?\n/);
+  }
+  const nonEmpty=lines.filter(l=>l!==undefined&&l!==null&&l!=='');
+  const truncated=nonEmpty.length>tailLines;
+  const sliced=nonEmpty.slice(-tailLines);
+  const bounded=[];
+  let totalBytes=0;
+  for(let i=sliced.length-1;i>=0;i--) {
+    const line=String(sliced[i]).slice(0,2000);
+    if(totalBytes+line.length>32768)break;
+    bounded.unshift(line);
+    totalBytes+=line.length+1;
+  }
+  return {
+    account:selected.alias,
+    cloudflare_account_id:id,
+    build_uuid:a.build_uuid,
+    truncated:truncated||bounded.length<sliced.length,
+    line_count:bounded.length,
+    lines:bounded,
+  };
 }
 export const providerTools=[
   tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
   tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
-  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers)
+  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),
+  tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),
+  tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs)
 ];
