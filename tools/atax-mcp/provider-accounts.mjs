@@ -108,7 +108,9 @@ function safeAccounts(env,principal){
   return {accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}]};
 }
 async function providerGet(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'\n  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
+    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'
+  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   let body;
   try{body=await res.json();}catch{throw new Error('Provider returned invalid JSON');}
