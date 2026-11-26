@@ -7,7 +7,10 @@ const config={settings:{
 },accounts:[
   {provider:'github',alias:'PERSONAL',token:'github-mock-token-longer-than-16',accountId:null},
   {provider:'cloudflare',alias:'WORK',token:'cf-mock-token-longer-than-16',accountId:'acct_100'},
-  {provider:'vercel',alias:'FUTURE',token:'vercel-mock-token-longer-than-16',accountId:null}
+  {provider:'vercel',alias:'FUTURE',token:'vercel-mock-token-longer-than-16',accountId:null},
+  {provider:'fly',alias:'TEAM_A',token:'fly-mock-token-longer-than-16',accountId:null},
+  {provider:'groq',alias:'TEAM_A',token:'groq-mock-token-longer-than-16',accountId:null},
+  {provider:'google',alias:'TEAM_A',token:'google-mock-token-longer-than-16',accountId:null},
 ]};
 const open=async ()=>({rpc:async()=>config});
 test('only DB-derived policy and Vault credentials enter the MCP process',async()=>{
@@ -18,6 +21,9 @@ test('only DB-derived policy and Vault credentials enter the MCP process',async(
   assert.equal(r.GH_KEY_PERSONAL,config.accounts[0].token);
   assert.equal(r.CF_KEY_WORK,config.accounts[1].token);
   assert.equal(r.CLOUDFLARE_ACCOUNT_ID_WORK,'acct_100');
+  assert.equal(r.FRNES_KEY_fly__TEAM_A,config.accounts[3].token);
+  assert.equal(r.AI_KEY_groq__TEAM_A,config.accounts[4].token);
+  assert.equal(r.AI_KEY_google__TEAM_A,config.accounts[5].token);
   assert.equal(r.GH_KEY_EVIL,undefined);
   assert.equal(r.VERCEL_TOKEN_FUTURE,undefined);
   assert.ok(r.__ledgerDb);
