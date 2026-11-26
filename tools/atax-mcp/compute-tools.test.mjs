@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {computeTools} from './compute-tools.mjs';
 import {providerTools} from './provider-accounts.mjs';
+import {getAccountUsage, resetAccountUsage} from './weighted-rotation.mjs';
 
 const findCompute=(name)=>computeTools.find(x=>x.name===name);
 const owner={id:'owner',authMethod:'shared'};
@@ -43,6 +44,7 @@ test('ATAX compute adapter rejects redirects and FRNES authentication failures',
 });
 
 test('ATAX compute execute -> status -> destroy lifecycle isolates accounts and blocks forged environmentIds',async()=>{
+  resetAccountUsage();
   const requests=[];
   const fetcher=async(url,options)=>{
     requests.push({url,body:JSON.parse(options.body)});
@@ -60,6 +62,7 @@ test('ATAX compute execute -> status -> destroy lifecycle isolates accounts and 
   },null,owner,{env:baseEnv,fetcher});
   assert.equal(execRes.environmentId,'render/B/srv-1/job-1');
   assert.equal(requests[0].body.accounts[0].token,'render-b-secret-value');
+  assert.equal(getAccountUsage('render','B').successfulCalls,1);
 
   // Forged environmentId belonging to render/B cannot be polled or destroyed with render/A or fly/DEV
   await assert.rejects(findCompute('atax_compute_status').invoke({
@@ -87,6 +90,32 @@ test('ATAX compute execute -> status -> destroy lifecycle isolates accounts and 
   },null,owner,{env:baseEnv,fetcher});
   assert.equal(destroyRes.status,'cancelled');
   assert.equal(requests.length,3);
+  resetAccountUsage();
+});
+
+test('ATAX compute_execute discovers configured accounts when omitted and rotates by usage weight',async()=>{
+  resetAccountUsage();
+  const seenOrders=[];
+  const fetcher=async(_url,options)=>{
+    const body=JSON.parse(options.body);
+    seenOrders.push(body.accounts.map(a=>`${a.providerId}:${a.alias}`));
+    const first=body.accounts[0];
+    return Response.json({success:true,provider:first.providerId,environmentId:`${first.providerId}/${first.alias}/app/job-1`,status:'queued'});
+  };
+  await findCompute('atax_compute_execute').invoke({
+    workspaceId:'ws',
+    repository:'dinilmusick/Frnes',
+    ref:'main',
+    command:'pnpm test',
+    requirement:{workload:'container'},
+    providerIds:['fly'],
+  },null,owner,{env:baseEnv,fetcher});
+  assert.equal(seenOrders[0].length,2);
+  assert.ok(seenOrders[0].includes('fly:DEV'));
+  assert.ok(seenOrders[0].includes('fly:PROD'));
+  const totalSuccess=getAccountUsage('fly','DEV').successfulCalls+getAccountUsage('fly','PROD').successfulCalls;
+  assert.equal(totalSuccess,1);
+  resetAccountUsage();
 });
 
 test('ATAX compute rejects unknown provider accounts and lists multi-provider accounts without leaking tokens',async()=>{
