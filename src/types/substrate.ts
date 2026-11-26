@@ -1,6 +1,6 @@
 export type ActiveTab = 'systems' | 'visions-goals' | 'skills' | 'settings';
 
-export type ProviderType = 'github' | 'cloudflare' | 'vercel';
+export type ProviderType = string;
 
 export interface ProviderAccountSummary {
   id: string;
@@ -35,6 +35,10 @@ export interface ProviderTestResult {
   statusCode: number;
   summary: string;
   checkedAt: string;
+  apiReachable?: boolean;
+  authVerified?: boolean;
+  computeSupported?: boolean;
+  inferenceSupported?: boolean;
 }
 
 export type SystemRelationType =
