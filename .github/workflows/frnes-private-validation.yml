@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   validate:
-    if: github.event.commits[0].added == true
+    if: contains(join(github.event.commits.*.added, ','), 'ci/frnes-private-validation.trigger') || contains(join(github.event.commits.*.modified, ','), 'ci/frnes-private-validation.trigger')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Frnes private target
