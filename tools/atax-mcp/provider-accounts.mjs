@@ -38,7 +38,7 @@ export function availableAccounts(env,principal,provider) {
 }
 export function availableComputeAccounts(env,principal,provider) {
   if(!PROVIDER_ID.test(provider)||!isOwnerPrincipal(env,principal))return [];
-  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'_';
+  const prefix=COMPUTE_PREFIX+provider.replace(/-/g,'_')+'__';
   return Object.keys(env||{}).filter(k=>k.startsWith(prefix)).map(k=>k.slice(prefix.length))
     .filter(x=>ALIAS.test(x)&&typeof env[prefix+x]==='string').sort();
 }
@@ -75,7 +75,7 @@ function safeAccounts(env,principal){
   const computeProviders=new Set();
   for(const key of Object.keys(env||{})) if(key.startsWith(COMPUTE_PREFIX)) {
     const rest=key.slice(COMPUTE_PREFIX.length);
-    const provider=rest.split('_').slice(0,-1).join('_').replace(/_/g,'-');
+    const provider=rest.split('__')[0].replace(/_/g,'-');
     if(PROVIDER_ID.test(provider)) computeProviders.add(provider);
   }
   return {accounts:[...standard,{provider:'compute',kind:'compute',providers:[...computeProviders].sort().map(provider=>({provider,aliases:availableComputeAccounts(env,principal,provider)}))}]};
