@@ -128,8 +128,8 @@ export function validateProviderInput(input: UpsertSecretInput): ValidatedUpsert
   if (providerRaw === 'vercel') {
     throw new VaultError('Vercel provider adapter is not implemented.', 501);
   }
-  if (!VALID_PROVIDERS.has(providerRaw as ProviderType)) {
-    throw new VaultError('Unsupported provider. Choose github or cloudflare.', 400);
+  if (!VALID_PROVIDERS.test(providerRaw)) {
+    throw new VaultError('Invalid provider identifier.', 400);
   }
 
   const alias = typeof input.alias === 'string' ? input.alias.trim().toUpperCase() : '';
@@ -168,8 +168,8 @@ export function validateProviderKey(providerRaw: string, aliasRaw: string): {
   if (provider === 'vercel') {
     throw new VaultError('Vercel provider adapter is not implemented.', 501);
   }
-  if (!VALID_PROVIDERS.has(provider as ProviderType)) {
-    throw new VaultError('Unsupported provider.', 400);
+  if (!VALID_PROVIDERS.test(provider)) {
+    throw new VaultError('Invalid provider identifier.', 400);
   }
   const alias = typeof aliasRaw === 'string' ? aliasRaw.trim().toUpperCase() : '';
   if (!ALIAS_REGEX.test(alias)) {
