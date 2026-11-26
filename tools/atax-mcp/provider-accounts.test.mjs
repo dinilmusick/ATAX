@@ -25,7 +25,7 @@ test('single shared or pinned OAuth owner discovers named accounts; outsiders ne
   assert.equal(isOwnerPrincipal(env,outsider),false);
   assert.deepEqual(availableAccounts(env,outsider,'github'),[]);
   assert.deepEqual(availableAccounts(env,outsider,'cloudflare'),[]);
-  assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[]]);
+  assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[],undefined]);
   const listed=await invoke('atax_provider_accounts_list',{},oauthOwner);
   assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare','compute']);
   assert.deepEqual(listed.accounts[2].providers,[{provider:'fly',aliases:['DEV']}]);
