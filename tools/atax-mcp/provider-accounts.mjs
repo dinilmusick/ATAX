@@ -369,6 +369,13 @@ async function cloudflarePagesGet(a,_db,p,ctx) {
   const depRes=await providerRequest(ctx.fetcher,depUrl,selected.token);
   const depData=depRes.ok&&depRes.data?.success?depRes.data.result:null;
   const latest=Array.isArray(depData)?depData[0]:depData;
+  let logs=null;
+  if(latest?.id) {
+    const logsRes=await providerRequest(ctx.fetcher,baseUrl+'/deployments/'+encodeURIComponent(latest.id)+'/history/logs',selected.token);
+    if(logsRes.ok&&logsRes.data?.success&&Array.isArray(logsRes.data.result?.data)) {
+      logs=logsRes.data.result.data.slice(-80).map(entry=>`${entry.ts||''} ${entry.line||''}`.trim());
+    }
+  }
   return {
     operation:'cloudflare_pages_get',
     account:selected.alias,
@@ -382,6 +389,7 @@ async function cloudflarePagesGet(a,_db,p,ctx) {
       latest_stage:latest.latest_stage,
       stages:latest.stages,
       created_on:latest.created_on,
+      logs,
     }:null,
   };
 }
