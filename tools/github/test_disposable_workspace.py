@@ -389,7 +389,7 @@ class FmrlTests(unittest.TestCase):
         self.assertIn('("FMRL_EXECUTION_MODE", args.mode)', source)
         self.assertIn('not full workflow parity', source)
         controller = (ROOT / '..' / '..' / '.github' / 'workflows' / 'private-repo-ci.yml').read_text()
-        self.assertIn('--mode "$TARGET_MODE" --branch "$TARGET_BRANCH" > /tmp/fmrl.json', controller)
+        self.assertIn('--mode "$TARGET_MODE" --branch "$TARGET_BRANCH" --command "$SKILL_COMMAND" --install "$SKILL_INSTALL" --working-directory "$SKILL_WORKDIR" --output-path "$SKILL_OUTPUT" > /tmp/fmrl.json', controller)
         self.assertIn('no raw source logs or artifacts', controller)
         self.assertIn("assert mode in ('direct','repair','artifact')", controller)
 
