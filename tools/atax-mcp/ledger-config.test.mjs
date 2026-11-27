@@ -9,6 +9,7 @@ const config={settings:{
   {provider:'cloudflare',alias:'WORK',token:'cf-mock-token-longer-than-16',accountId:'acct_100'},
   {provider:'vercel',alias:'FUTURE',token:'vercel-mock-token-longer-than-16',accountId:'team_200'},
   {provider:'neon',alias:'PRIMARY',token:'neon-mock-token-longer-than-16',accountId:'org-300'},
+  {provider:'supabase',alias:'MAIN',token:'supabase-mock-token-longer-than-16',accountId:'org-supa-400'},
   {provider:'fly',alias:'TEAM_A',token:'fly-mock-token-longer-than-16',accountId:null},
   {provider:'groq',alias:'TEAM_A',token:'groq-mock-token-longer-than-16',accountId:null},
   {provider:'google',alias:'TEAM_A',token:'google-mock-token-longer-than-16',accountId:null},
@@ -26,9 +27,11 @@ test('only DB-derived policy and Vault credentials enter the MCP process',async(
   assert.equal(r.VERCEL_TEAM_ID_FUTURE,'team_200');
   assert.equal(r.NEON_KEY_PRIMARY,config.accounts[3].token);
   assert.equal(r.NEON_ORG_ID_PRIMARY,'org-300');
-  assert.equal(r.FRNES_KEY_fly__TEAM_A,config.accounts[4].token);
-  assert.equal(r.AI_KEY_groq__TEAM_A,config.accounts[5].token);
-  assert.equal(r.AI_KEY_google__TEAM_A,config.accounts[6].token);
+  assert.equal(r.SUPABASE_KEY_MAIN,config.accounts[4].token);
+  assert.equal(r.SUPABASE_ORG_SLUG_MAIN,'org-supa-400');
+  assert.equal(r.FRNES_KEY_fly__TEAM_A,config.accounts[5].token);
+  assert.equal(r.AI_KEY_groq__TEAM_A,config.accounts[6].token);
+  assert.equal(r.AI_KEY_google__TEAM_A,config.accounts[7].token);
   assert.equal(r.GH_KEY_EVIL,undefined);
   assert.ok(r.__ledgerDb);
 });
@@ -53,5 +56,6 @@ test('restricted socket configuration cannot hydrate any maintainer provider cre
   assert.equal(r.GH_KEY_PERSONAL,undefined);
   assert.equal(r.NEON_KEY_PRIMARY,undefined);
   assert.equal(r.VERCEL_KEY_FUTURE,undefined);
+  assert.equal(r.SUPABASE_KEY_MAIN,undefined);
   assert.equal(r.MCP_SHARED_TOKEN_SHA256,undefined);
 });
