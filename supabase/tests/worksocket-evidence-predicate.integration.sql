@@ -8,7 +8,7 @@ DECLARE
   rejected_contradictory_verdict boolean := false;
   error_text text;
 BEGIN
-  PERFORM public.task_ledger_create_tree(
+  SELECT public.task_ledger_create_tree(
     'worksocket-evidence-test',
     'worksocket-evidence-test',
     jsonb_build_object(
@@ -19,14 +19,11 @@ BEGIN
       'completion_parameters',jsonb_build_array(
         jsonb_build_object('id','evidence','description','Nonempty evidence receipt')
       )
-    )
-  );
-
-  SELECT id INTO test_task_id
-  FROM public.tasks
-  WHERE task_name='worksocket-evidence-gate-test'
-  ORDER BY updated_at DESC
-  LIMIT 1;
+    ),
+    NULL,
+    'worksocket-evidence-test',
+    'worker'
+  ) INTO test_task_id;
   IF test_task_id IS NULL THEN
     RAISE EXCEPTION 'Evidence-gate fixture task was not created';
   END IF;
