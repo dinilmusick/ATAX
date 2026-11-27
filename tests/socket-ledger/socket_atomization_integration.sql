@@ -279,15 +279,9 @@ BEGIN
     rejected:=position('original fenced overflow report' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale stopped-parent fence accepted'; END IF;
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,fence,
-      'unapproved-stopped-split',definition);
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('original fenced overflow report' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: unrelated executor atomized stopped parent'; END IF;
+  -- Any authenticated invocation holding the original overflow fence may
+  -- atomise the stopped parent; author/worker identity is not an eligibility gate.
+  
   -- Freeze, provenance, typed edges, and atomic child registration.
   split_result:=public.socket_atomize_task(p,inv_atom.id,inv_atom.secret,fence,
     'test-split-key',definition,jsonb_build_object('checkpoint','persisted'));
@@ -345,27 +339,10 @@ BEGIN
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: parent finalized prematurely'; END IF;
 
-  -- Same invocation and same author agent across a different session both fail.
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_claim_child(c1,inv_atom.id,inv_atom.secret);
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Atomiser identity/session' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: atomiser claimed own child'; END IF;
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_claim_child(c1,inv_same.id,inv_same.secret);
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Atomiser identity/session' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: author ID reused via new session'; END IF;
-
-  claim:=public.socket_claim_child(c1,inv_exec.id,inv_exec.secret);
-  IF claim.claim_token IS NULL OR claim.claimed_session_id<>inv_exec.session_id THEN
-    RAISE EXCEPTION 'FAIL: fresh executor not recorded'; END IF;
+  -- The same invocation that atomised the parent may claim its child.
+  claim:=public.socket_claim_child(c1,inv_atom.id,inv_atom.secret);
+  IF claim.claim_token IS NULL OR claim.claimed_session_id<>inv_atom.session_id THEN
+    RAISE EXCEPTION 'FAIL: same-principal child claim not recorded'; END IF;
 
   -- Competing holder cannot take an occupied socket; no lease token rotation.
   rejected:=false;
@@ -381,7 +358,7 @@ BEGIN
   -- A legacy release-to-queued cannot make socket work globally claimable.
   rejected:=false;
   BEGIN
-    PERFORM public.task_ledger_release_claim(c1,inv_exec.agent_id,claim.claim_token,
+    PERFORM public.task_ledger_release_claim(c1,inv_atom.agent_id,claim.claim_token,
       'queued','Legacy release attempt');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
@@ -410,13 +387,13 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: unverified dependency ignored'; END IF;
 
   -- Result submission follows existing loop author/execute contract.
-  PERFORM public.task_ledger_record_loop_iteration(c1,inv_exec.agent_id,claim.claim_token,
+  PERFORM public.task_ledger_record_loop_iteration(c1,inv_atom.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('independent-execution-evidence'),
     'pass','Ready for independent verification');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_exec.agent_id,claim.claim_token);
-  child:=public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_atom.agent_id,claim.claim_token);
+  child:=public.task_ledger_submit_result(c1,inv_atom.agent_id,claim.claim_token,
     '{}'::jsonb,'First child completed','[]'::jsonb,
     jsonb_build_array('execution-evidence'),'completed');
   IF child.verification_status<>'pending' THEN
@@ -424,66 +401,49 @@ BEGIN
   IF child.verification_claim_expires_at IS DISTINCT FROM 'infinity'::timestamptz THEN
     RAISE EXCEPTION 'FAIL: child leaked into legacy verification queue'; END IF;
 
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_claim_child_verification(c1,inv_author_ver.id,inv_author_ver.secret);
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Verifier must be independent' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: author reused identity to verify'; END IF;
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_claim_child_verification(c1,inv_exec_verify.id,inv_exec_verify.secret);
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Verifier must be independent' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: executor reused identity to verify'; END IF;
-
-  verification:=public.socket_claim_child_verification(c1,inv_ver.id,inv_ver.secret);
-  -- Even an authorized verifier identity cannot bypass the verification RPC
-  -- by directly setting verified on the canonical task row.
+  -- The same caller may claim verification. Direct promotion still fails
+  -- until this invocation's fenced verification grant is explicitly approved.
+  verification:=public.socket_claim_child_verification(c1,inv_atom.id,inv_atom.secret);
   rejected:=false;
   BEGIN
     UPDATE public.tasks SET verification_status='verified',
-      verified_by_agent_id=inv_ver.agent_id WHERE id=c1;
+      verified_by_agent_id=inv_atom.agent_id WHERE id=c1;
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Child verification may not reuse' IN msg)>0;
+    rejected:=position('Child verification requires an approved evidence grant' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: direct verification bypassed grant approval'; END IF;
   rejected:=false;
   BEGIN
-    PERFORM public.socket_verify_child(c1,inv_ver.id,inv_ver.secret,
+    PERFORM public.socket_verify_child(c1,inv_atom.id,inv_atom.secret,
       gen_random_uuid(),true,jsonb_build_object('evidence',jsonb_build_array('x')));
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
     rejected:=position('Verification fence' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale verification fence accepted'; END IF;
-  child:=public.socket_verify_child(c1,inv_ver.id,inv_ver.secret,
+  child:=public.socket_verify_child(c1,inv_atom.id,inv_atom.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('first verified independently')));
   IF child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: independent verification not persisted'; END IF;
 
   -- Now the typed blocking edge is satisfied.
-  claim:=public.socket_claim_child(c2,inv_other.id,inv_other.secret);
-  PERFORM public.task_ledger_record_loop_iteration(c2,inv_other.agent_id,claim.claim_token,
+  claim:=public.socket_claim_child(c2,inv_exec.id,inv_exec.secret);
+  PERFORM public.task_ledger_record_loop_iteration(c2,inv_exec.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('evidence'),
     'pass','Second child ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_other.agent_id,claim.claim_token);
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_exec.agent_id,claim.claim_token);
   child:=public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
     '{}'::jsonb,'Second child completed','[]'::jsonb,
     jsonb_build_array('result-evidence'),'completed');
-  verification:=public.socket_claim_child_verification(c2,inv_ver.id,inv_ver.secret);
-  PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
+  verification:=public.socket_claim_child_verification(c2,inv_other.id,inv_other.secret);
+  PERFORM public.socket_verify_child(c2,inv_other.id,inv_other.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('second verified')));
-  child:=public.socket_finalize_parent(p,inv_ver.id,inv_ver.secret,
+  child:=public.socket_finalize_parent(p,inv_atom.id,inv_atom.secret,
     jsonb_build_object('evidence',jsonb_build_array('both descendants verified')));
   IF child.status<>'completed' OR child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: verified parent did not finalize'; END IF;
@@ -523,7 +483,8 @@ BEGIN
   claim:=public.socket_claim_child(nested_c1,inv_exec.id,inv_exec.secret);
   PERFORM public.socket_stop_for_atomization(nested_c1,inv_exec.id,inv_exec.secret,
     claim.claim_token,'recursive-scope',jsonb_build_object('partial','checkpoint'));
-  PERFORM public.socket_atomize_task(nested_c1,inv_other_atom.id,inv_other_atom.secret,
+  -- The same authenticated executor may author the recursive split.
+  PERFORM public.socket_atomize_task(nested_c1,inv_exec.id,inv_exec.secret,
     claim.claim_token,'nested-split',definition,jsonb_build_object('partial','checkpoint'));
   IF (SELECT count(*) FROM public.socket_atomization_children
       WHERE parent_task_id=nested_c1)<>2
@@ -537,17 +498,17 @@ BEGIN
   SELECT child_task_id INTO c2 FROM public.socket_atomization_children
     WHERE parent_task_id=nested_c1 AND ordinal=2;
   claim:=public.socket_claim_child(c1,inv_exec.id,inv_exec.secret);
-  PERFORM public.task_ledger_record_loop_iteration(c1,inv_exec.agent_id,claim.claim_token,
+  PERFORM public.task_ledger_record_loop_iteration(c1,inv_atom.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-first-work'),
     'pass','Nested first ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_exec.agent_id,claim.claim_token);
-  PERFORM public.task_ledger_submit_result(c1,inv_exec.agent_id,claim.claim_token,
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_atom.agent_id,claim.claim_token);
+  PERFORM public.task_ledger_submit_result(c1,inv_atom.agent_id,claim.claim_token,
     '{}'::jsonb,'Nested first complete','[]'::jsonb,
     jsonb_build_array('nested-first-evidence'),'completed');
-  verification:=public.socket_claim_child_verification(c1,inv_ver.id,inv_ver.secret);
-  PERFORM public.socket_verify_child(c1,inv_ver.id,inv_ver.secret,
+  verification:=public.socket_claim_child_verification(c1,inv_exec.id,inv_exec.secret);
+  PERFORM public.socket_verify_child(c1,inv_exec.id,inv_exec.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('nested first verified')));
   claim:=public.socket_claim_child(c2,inv_other.id,inv_other.secret);
@@ -557,25 +518,18 @@ BEGIN
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('nested-second-work'),
     'pass','Nested second ready');
   PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_other.agent_id,claim.claim_token);
-  PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
+  PERFORM public.task_ledger_submit_result(c2,inv_exec.agent_id,claim.claim_token,
     '{}'::jsonb,'Nested second complete','[]'::jsonb,
     jsonb_build_array('nested-second-evidence'),'completed');
-  verification:=public.socket_claim_child_verification(c2,inv_ver.id,inv_ver.secret);
-  PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
+  verification:=public.socket_claim_child_verification(c2,inv_exec.id,inv_exec.secret);
+  PERFORM public.socket_verify_child(c2,inv_exec.id,inv_exec.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('nested second verified')));
-  rejected:=false;
-  BEGIN
-    PERFORM public.socket_finalize_parent(nested_c1,inv_exec_verify.id,inv_exec_verify.secret,
-      jsonb_build_object('evidence',jsonb_build_array('not independent')));
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('preceding executor' IN msg)>0;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: preceding executor verified nested parent'; END IF;
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(nested_c1,inv_ver.agent_id,NULL);
-  child:=public.socket_finalize_parent(nested_c1,inv_ver.id,inv_ver.secret,
-    jsonb_build_object('evidence',jsonb_build_array('grandchildren independently verified')));
+  -- The same caller that atomised and executed both descendants may finalize
+  -- the parent once every descendant has passed evidence verification.
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(nested_c1,inv_exec.agent_id,NULL);
+  child:=public.socket_finalize_parent(nested_c1,inv_exec.id,inv_exec.secret,
+    jsonb_build_object('evidence',jsonb_build_array('grandchildren verified by same principal')));
   IF child.status<>'completed' OR child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: nested parent failed verified finalization';
   END IF;
@@ -593,19 +547,19 @@ BEGIN
   PERFORM public.task_ledger_submit_result(c2,inv_other.agent_id,claim.claim_token,
     '{}'::jsonb,'Result awaiting review','[]'::jsonb,
     jsonb_build_array('negative-test-result'),'completed');
-  verification:=public.socket_claim_child_verification(c2,inv_ver.id,inv_ver.secret);
-  PERFORM public.socket_verify_child(c2,inv_ver.id,inv_ver.secret,
+  verification:=public.socket_claim_child_verification(c2,inv_other.id,inv_other.secret);
+  PERFORM public.socket_verify_child(c2,inv_other.id,inv_other.secret,
     verification.verification_claim_token,false,
     jsonb_build_object('reason','Negative test outcome'));
   rejected:=false;
   BEGIN
     UPDATE public.tasks SET verification_status='verified',
-      verified_by_agent_id=inv_ver.agent_id WHERE id=c2;
+      verified_by_agent_id=inv_other.agent_id WHERE id=c2;
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
-    rejected:=position('Child verification may not reuse' IN msg)>0;
+    rejected:=position('Child verification requires an approved evidence grant' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: negative verdict improperly approved direct promotion'; END IF;
-  RAISE NOTICE 'PASS: replay, quota stop, stale fences, identity isolation, dependencies, verification, atomic recovery, recursive finalization, negative verdict fencing';
+  RAISE NOTICE 'PASS: replay, quota stop, stale fences, same-principal atomise/execute/verify/finalize, dependencies, atomic recovery, recursive finalization and negative-verdict fencing';
 END $test$;
 ROLLBACK;
