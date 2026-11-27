@@ -59,6 +59,17 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     tokenPlaceholder: 'Vercel access token...',
     hint: 'Used server-side for full Vercel account, project, deployment, env var, and domain management.',
   },
+  {
+    id: 'supabase',
+    label: 'Supabase',
+    category: 'infra',
+    apiKeyUrl: 'https://supabase.com/dashboard/account/tokens',
+    apiKeyLinkLabel: 'Get Supabase Access Token',
+    accountIdLabel: 'Organization Slug (optional)',
+    accountIdPlaceholder: 'org-slug',
+    tokenPlaceholder: 'sbp_...',
+    hint: 'Used server-side to manage Supabase organizations, projects, SQL queries, Edge Functions, and advisors.',
+  },
 
   // Cloud Compute (FRNES)
   {
