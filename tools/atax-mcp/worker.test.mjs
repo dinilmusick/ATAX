@@ -175,6 +175,25 @@ test('suitability routing derives caller attribution and never grants execution 
   assert.equal(Object.hasOwn(params,'claim_token_in'),false);
 });
 
+test('claim wrappers derive actor and authorized capabilities server-side',async()=>{
+  const global=await call('atax_task_claim_next',{lease_seconds:60});
+  const globalParams=global.payload.result.structuredContent.result.params;
+  assert.equal(global.payload.result.structuredContent.result.rpc,'atax_mcp_task_claim_next_v1');
+  assert.equal(globalParams.actor_id_in,'test-external-agent');
+  assert.equal(globalParams.lease_seconds_in,60);
+  assert.equal(Object.hasOwn(globalParams,'capabilities_in'),false);
+
+  const goal=await call('atax_goal_claim_task',{goal_key:'test-goal',lease_seconds:90});
+  const goalParams=goal.payload.result.structuredContent.result.params;
+  assert.equal(goal.payload.result.structuredContent.result.rpc,'atax_mcp_goal_claim_task_v1');
+  assert.equal(goalParams.actor_id_in,'test-external-agent');
+  assert.equal(goalParams.goal_key_in,'test-goal');
+  assert.equal(Object.hasOwn(goalParams,'capabilities_in'),false);
+
+  const spoof=await call('atax_task_claim_next',{capabilities:['atax:admin']});
+  assert.equal(spoof.payload.result.isError,true);
+});
+
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
   const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const claim_token='11111111-2222-4333-8444-555555555555';
