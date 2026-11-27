@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.agent_intelligence_profiles (
 CREATE TABLE IF NOT EXISTS public.agent_routing_evaluations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
-  requested_by_agent_id text NOT NULL,
+  requested_by_actor text NOT NULL,
   candidate_agent_id text REFERENCES public.agent_registry(agent_id) ON DELETE SET NULL,
   result_kind text NOT NULL CHECK (result_kind IN ('candidate','no_candidates')),
   suitability_score numeric(6,5),
@@ -60,7 +60,7 @@ FOR EACH ROW EXECUTE FUNCTION public.reject_agent_routing_evaluation_mutation();
 
 CREATE OR REPLACE FUNCTION public.atax_worker_suitability_v1(
   task_id_in uuid,
-  evaluator_agent_id_in text,
+  requested_by_actor_in text,
   limit_in integer DEFAULT 10
 )
 RETURNS jsonb
@@ -75,8 +75,8 @@ DECLARE
   evaluated integer:=0;
   limit_value integer:=greatest(1,least(coalesce(limit_in,10),30));
 BEGIN
-  IF task_id_in IS NULL OR nullif(btrim(evaluator_agent_id_in),'') IS NULL THEN
-    RAISE EXCEPTION 'Task ID and authenticated evaluator attribution are required';
+  IF task_id_in IS NULL OR nullif(btrim(requested_by_actor_in),'') IS NULL THEN
+    RAISE EXCEPTION 'Task ID and requesting actor attribution are required';
   END IF;
 
   SELECT * INTO task_out FROM public.tasks WHERE id=task_id_in;
@@ -218,11 +218,11 @@ BEGIN
     LIMIT limit_value
   LOOP
     INSERT INTO public.agent_routing_evaluations(
-      task_id,requested_by_agent_id,candidate_agent_id,result_kind,
+      task_id,requested_by_actor,candidate_agent_id,result_kind,
       suitability_score,capability_complete,component_scores,evidence
     )
     VALUES(
-      task_id_in,evaluator_agent_id_in,candidate.agent_id,'candidate',
+      task_id_in,requested_by_actor_in,candidate.agent_id,'candidate',
       candidate.suitability_score,
       candidate.matched_count=candidate.required_count,
       jsonb_build_object(
@@ -286,10 +286,10 @@ BEGIN
 
   IF evaluated=0 THEN
     INSERT INTO public.agent_routing_evaluations(
-      task_id,requested_by_agent_id,candidate_agent_id,result_kind,
+      task_id,requested_by_actor,candidate_agent_id,result_kind,
       component_scores,evidence
     )
-    VALUES(task_id_in,evaluator_agent_id_in,NULL,'no_candidates','{}'::jsonb,
+    VALUES(task_id_in,requested_by_actor_in,NULL,'no_candidates','{}'::jsonb,
       jsonb_build_object('enabled_registry_entries',(
         SELECT count(*) FROM public.agent_registry WHERE enabled=true
       )));
