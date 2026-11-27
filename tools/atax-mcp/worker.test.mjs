@@ -455,6 +455,9 @@ test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools wit
   assert.ok(fetched.includes('atax_neon_database_create'));
   assert.ok(fetched.includes('atax_vercel_projects_list'));
   assert.ok(fetched.includes('atax_vercel_deployment_create'));
+  assert.ok(fetched.includes('atax_github_job_logs_get'));
+  assert.ok(fetched.includes('atax_browser_render'));
+  assert.ok(fetched.includes('atax_browser_test_dispatch'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_neon_projects_list'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_vercel_projects_list'));
@@ -502,4 +505,48 @@ test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools wit
   assert.ok(!JSON.stringify(vercelRes).includes('vercel-work-secret-456'));
   const vercelAmbiguous=await makeGitCall('atax_vercel_projects_list',{},{env:cfg,fetcher:vercelFetcher});
   assert.equal(vercelAmbiguous.isError,true);
+});
+
+test('GitHub job step logs and browser rendering/testing tools work and strip ANSI/secrets',async()=>{
+  const cfg={...gitEnv,
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read',
+    CF_KEY_WORK:'cf-browser-secret-1234',
+    CLOUDFLARE_ACCOUNT_ID_WORK:'acct_cf_123',
+  };
+  const seen=[];
+  const mockFetcher=async(url,opts={})=>{
+    seen.push({url,opts});
+    if(url==='https://api.github.com/repos/dinilmusick/ATAX/actions/jobs/555/logs'){
+      return new Response(null,{status:302,headers:{location:'https://pipelines.actions.githubusercontent.com/logs/555'}});
+    }
+    if(url==='https://pipelines.actions.githubusercontent.com/logs/555'){
+      return new Response('\x1b[31m2026-11-27T15:34:50Z FAIL test_a\x1b[0m\n2026-11-27T15:34:51Z Error: assertion failed\n');
+    }
+    if(url==='https://api.cloudflare.com/client/v4/accounts/acct_cf_123/browser-rendering/content'){
+      return Response.json({success:true,result:'<html><body><h1>ATAX Ready</h1></body></html>'});
+    }
+    if(url==='https://api.github.com/repos/dinilmusick/ATAX/actions/workflows/browser-probe.yml/dispatches'){
+      return new Response(null,{status:204});
+    }
+    return upstream(url,opts);
+  };
+
+  const logs=await makeGitCall('atax_github_job_logs_get',{repository:'dinilmusick/ATAX',job_id:555,tail_lines:10},{env:cfg,fetcher:mockFetcher});
+  assert.equal(logs.isError,undefined);
+  assert.equal(logs.structuredContent.result.line_count,2);
+  assert.ok(logs.structuredContent.result.lines[0].includes('FAIL test_a'));
+  assert.ok(!logs.structuredContent.result.lines[0].includes('\x1b[31m'));
+  const redirectReq=seen.find(x=>x.url.includes('pipelines.actions'));
+  assert.equal(redirectReq.opts.headers.authorization,undefined);
+
+  const rendered=await makeGitCall('atax_browser_render',{account:'WORK',url:'https://atax.example/app',mode:'content'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(rendered.isError,undefined);
+  assert.equal(rendered.structuredContent.result.result,'<html><body><h1>ATAX Ready</h1></body></html>');
+  const badUrl=await makeGitCall('atax_browser_render',{account:'WORK',url:'http://127.0.0.1:3000'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(badUrl.isError,true);
+
+  const dispatched=await makeGitCall('atax_browser_test_dispatch',{target_url:'https://atax.example/app',assert_text:'ATAX Ready'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(dispatched.isError,undefined);
+  assert.equal(dispatched.structuredContent.result.workflow,'browser-probe.yml');
+  assert.equal(dispatched.structuredContent.result.status,'dispatched');
 });
