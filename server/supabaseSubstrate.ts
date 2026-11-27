@@ -1165,6 +1165,7 @@ export function createSubstrateService(
       eventsRes,
       agentsRes,
       invocationsRes,
+      profilesRes,
     ] = await Promise.all([
       api.selectAll(
         'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,status,verification_status,task_role,execution_model,loop_script_status,claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,required_capabilities,updated_at&status=not.in.(cancelled,abandoned)&order=updated_at.desc&limit=3000'
@@ -1187,6 +1188,9 @@ export function createSubstrateService(
       ),
       api.selectAll(
         'socket_invocations?select=id,agent_id,role,registered_at,expires_at,model_id&order=registered_at.desc&limit=500'
+      ),
+      api.selectAll(
+        'agent_intelligence_profiles?select=agent_id,display_name,agent_type,declared_capabilities,domain_affinities,tool_familiarity,resource_capacity,model_families,updated_at&order=updated_at.desc&limit=500'
       ),
     ]);
 
@@ -1336,6 +1340,28 @@ export function createSubstrateService(
           lastSeenAt: typeof row.registered_at === 'string' ? row.registered_at : null,
           expiresAt: typeof row.expires_at === 'string' ? row.expires_at : null,
           source: 'socket_invocation',
+        });
+      }
+    }
+    if (profilesRes.ok) {
+      for (const row of profilesRes.rows) {
+        const affinities = asRecord(row.domain_affinities);
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, null, row.updated_at) || 'Intelligence profile',
+          name: String(row.display_name || row.agent_id || 'Worker profile'),
+          role: String(row.agent_type || 'mcp-external'),
+          enabled: true,
+          capabilities: asArray(row.declared_capabilities).map(String),
+          lastSeenAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+          expiresAt: null,
+          source: 'intelligence_profile',
+          domainAffinities: Object.fromEntries(
+            Object.entries(affinities).map(([key,value]) => [key, Number(value)])
+              .filter(([,value]) => Number.isFinite(value))
+          ),
+          toolFamiliarity: asArray(row.tool_familiarity).map(String),
+          resourceCapacity: asRecord(row.resource_capacity),
+          modelFamilies: asArray(row.model_families).map(String),
         });
       }
     }
