@@ -102,28 +102,57 @@ async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=
   return {status:res.status,ok:true,data};
 }
 function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (HTTP ${res.status}${res.message?`: ${res.message}`:''})`);return res.data;}
-async function jobFailureReceipts(fetcher,repo,job,token) {
-  const url=`${API}/repos/${repo}/actions/jobs/${job.id}/logs`;
+async function fetchJobLogLines(fetcher,repo,jobId,token,{throwOnError=false}={}) {
+  const url=`${API}/repos/${repo}/actions/jobs/${jobId}/logs`;
   try{
     let res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
       accept:'application/vnd.github+json','x-github-api-version':'2022-11-28',
       'user-agent':'atax-mcp-control-plane',authorization:`Bearer ${token}`}});
     if(res.status>=300&&res.status<400){
       const loc=res.headers?.get?.('location')||'';
-      if(!loc||!/^https:\/\//.test(loc))return [];
+      if(!loc||!/^https:\/\//.test(loc)){
+        if(throwOnError)throw new Error('GitHub job logs redirect location invalid');
+        return [];
+      }
       res=await fetcher(loc,{method:'GET',redirect:'follow',headers:{'user-agent':'atax-mcp-control-plane'}});
     }
-    if(!res.ok)return [];
-    const text=await res.text();
-    const receipts=[];
-    for(const raw of text.split(/\r?\n/)){
-      const line=raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').replace(/^\S+Z\s+/,'').trim();
-      if(!FMRL_RECEIPT.test(line)||receipts.includes(line))continue;
-      receipts.push(line.slice(0,500));
-      if(receipts.length>=16)break;
+    if(!res.ok){
+      if(throwOnError)throw new Error(`GitHub job logs lookup failed (HTTP ${res.status})`);
+      return [];
     }
-    return receipts;
-  }catch{return [];}
+    const text=await res.text();
+    return text.split(/\r?\n/).map(raw=>raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').replace(/^\S+Z\s+/,'').trimEnd());
+  }catch(err){
+    if(throwOnError)throw err;
+    return [];
+  }
+}
+function boundedTailLines(lines,{tailLines=200,maxBytes=32768,filter=''}={}) {
+  const nonEmpty=lines.filter(l=>l!==undefined&&l!==null&&l.trim()!=='');
+  const needle=filter?String(filter).toLowerCase():'';
+  const filtered=needle?nonEmpty.filter(l=>l.toLowerCase().includes(needle)):nonEmpty;
+  const truncated=filtered.length>tailLines;
+  const sliced=filtered.slice(-tailLines);
+  const bounded=[];
+  let totalBytes=0;
+  for(let i=sliced.length-1;i>=0;i--) {
+    const line=String(sliced[i]).slice(0,2000);
+    if(totalBytes+line.length>maxBytes)break;
+    bounded.unshift(line);
+    totalBytes+=line.length+1;
+  }
+  return {truncated:truncated||bounded.length<sliced.length,line_count:bounded.length,lines:bounded};
+}
+async function jobFailureReceipts(fetcher,repo,job,token) {
+  const lines=await fetchJobLogLines(fetcher,repo,job.id,token);
+  const receipts=[];
+  for(const raw of lines){
+    const line=raw.trim();
+    if(!FMRL_RECEIPT.test(line)||receipts.includes(line))continue;
+    receipts.push(line.slice(0,500));
+    if(receipts.length>=16)break;
+  }
+  return receipts;
 }
 async function repositoryInfo(repo,ctx,token) {
   const data=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}`,token),'GitHub repository lookup');
@@ -259,7 +288,18 @@ async function listWorkflowRuns(a,_db,p,ctx){
       const jobsData=requireOk(await githubRequest(ctx.fetcher,jobsUrl,selected.token),'Workflow jobs lookup');
       for(const j of (jobsData.jobs||[])){
         const entry={id:j.id,name:j.name,status:j.status,conclusion:j.conclusion,steps:(j.steps||[]).map(s=>({name:s.name,status:s.status,conclusion:s.conclusion}))};
-        if(j.conclusion==='failure')entry.failure_receipts=await jobFailureReceipts(ctx.fetcher,repo,j,selected.token);
+        if(j.conclusion==='failure'){
+          const logLines=await fetchJobLogLines(ctx.fetcher,repo,j.id,selected.token);
+          const receipts=[];
+          for(const raw of logLines){
+            const line=raw.trim();
+            if(!FMRL_RECEIPT.test(line)||receipts.includes(line))continue;
+            receipts.push(line.slice(0,500));
+            if(receipts.length>=16)break;
+          }
+          entry.failure_receipts=receipts;
+          entry.failure_log_tail=boundedTailLines(logLines,{tailLines:80,maxBytes:8192}).lines;
+        }
         jobs.push(entry);
       }
     }catch{}
@@ -271,6 +311,15 @@ async function listWorkflowRuns(a,_db,p,ctx){
   const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token),'Workflow runs list');
   const runs=(data.workflow_runs||[]).map(r=>({id:r.id,name:r.name,event:r.event,status:r.status,conclusion:r.conclusion,head_sha:r.head_sha,head_branch:r.head_branch,html_url:r.html_url,created_at:r.created_at}));
   return {operation:'workflow_runs_list',account:selected.alias,repository:repo,runs};
+}
+async function getJobLogs(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  if(!Number.isInteger(a.job_id)||a.job_id<1)throw new Error('Valid job_id is required');
+  const lines=await fetchJobLogLines(ctx.fetcher,repo,a.job_id,selected.token,{throwOnError:true});
+  const bounded=boundedTailLines(lines,{tailLines:a.tail_lines??200,maxBytes:32768,filter:a.filter||''});
+  return {operation:'github_job_logs_get',account:selected.alias,repository:repo,job_id:a.job_id,...bounded};
 }
 async function getCheckRuns(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
@@ -532,8 +581,11 @@ export const githubTools=[
     'Dispatch a GitHub Actions workflow (e.g. lint.yml, build.yml, test.yml) on any accessible repository using the authenticated GitHub token.',
     'atax:github:create',one('Workflow dispatch',{repository:s('GitHub owner/name repository',205),workflow:s('Workflow filename (e.g. lint.yml, build.yml) or ID',100),ref:s('Git branch or commit SHA (default main)',120),inputs:{type:'object',description:'Optional workflow inputs object'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','workflow']),dispatchWorkflow),
   tool('atax_github_workflow_runs',
-    'List or inspect GitHub Actions workflow runs for a repository, reporting execution status, conclusion (success, failure), jobs, steps, safe FMRL failure receipts (failing gate, failure categories) for failed jobs, and URL.',
+    'List or inspect GitHub Actions workflow runs for a repository, reporting execution status, conclusion (success, failure), jobs, steps, failure_receipts and failure_log_tail for failed jobs, and URL.',
     'atax:github:read',one('Workflow runs lookup',{repository:s('GitHub owner/name repository',205),workflow:s('Optional workflow filename filter (e.g. ci.yml, lint.yml)',100),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional exact run ID to inspect in detail'},status:s('Optional status filter (e.g. completed, in_progress, queued)',50),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository']),listWorkflowRuns),
+  tool('atax_github_job_logs_get',
+    'Read bounded, ANSI-stripped step logs for a GitHub Actions job_id without needing a browser.',
+    'atax:github:read',one('Job logs lookup',{repository:s('GitHub owner/name repository',205),job_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'GitHub Actions job ID'},tail_lines:{type:'integer',minimum:1,maximum:500,description:'Number of trailing non-empty lines to return (default 200)'},filter:{type:'string',maxLength:200,description:'Optional case-insensitive substring filter'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','job_id']),getJobLogs),
   tool('atax_github_check_runs',
     'Inspect GitHub check runs (automated linting, type-checking, test outcomes, build status) and failure annotations for an exact commit SHA or ref.',
     'atax:github:read',one('Check runs lookup',{repository:s('GitHub owner/name repository',205),ref:s('Git commit SHA or branch name',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','ref']),getCheckRuns),
