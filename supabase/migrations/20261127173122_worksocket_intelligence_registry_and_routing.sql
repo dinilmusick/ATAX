@@ -41,7 +41,22 @@ ALTER TABLE public.agent_routing_evaluations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.agent_intelligence_profiles FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON public.agent_routing_evaluations FROM PUBLIC,anon,authenticated;
 GRANT ALL ON public.agent_intelligence_profiles TO service_role;
-GRANT ALL ON public.agent_routing_evaluations TO service_role;
+GRANT SELECT,INSERT ON public.agent_routing_evaluations TO service_role;
+REVOKE UPDATE,DELETE,TRUNCATE ON public.agent_routing_evaluations FROM service_role;
+
+CREATE OR REPLACE FUNCTION public.reject_agent_routing_evaluation_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path=public,pg_temp
+AS $guard$
+BEGIN
+  RAISE EXCEPTION 'Routing evaluation evidence is append-only';
+END
+$guard$;
+DROP TRIGGER IF EXISTS agent_routing_evaluations_append_only ON public.agent_routing_evaluations;
+CREATE TRIGGER agent_routing_evaluations_append_only
+BEFORE UPDATE OR DELETE ON public.agent_routing_evaluations
+FOR EACH ROW EXECUTE FUNCTION public.reject_agent_routing_evaluation_mutation();
 
 CREATE OR REPLACE FUNCTION public.atax_worker_suitability_v1(
   task_id_in uuid,
@@ -130,15 +145,17 @@ BEGIN
         WHERE pe.executor_id=ar.agent_id
       ) predicate_stats ON true
       LEFT JOIN LATERAL (
-        SELECT count(DISTINCT u.task_id) context_samples,
-          avg(least(1,
-            coalesce(sum(u.token_count),0)::numeric/nullif(b.max_total,0)
-          )) avg_context_fraction
-        FROM public.socket_usage_events u
-        JOIN public.socket_invocations i ON i.id=u.invocation_id
-        JOIN public.socket_task_budgets b ON b.task_id=u.task_id
-        WHERE i.agent_id=ar.agent_id
-        GROUP BY u.task_id,b.max_total
+        SELECT count(*) context_samples,
+          coalesce(avg(task_usage.context_fraction),0) avg_context_fraction
+        FROM (
+          SELECT u.task_id,
+            least(1,sum(u.token_count)::numeric/nullif(b.max_total,0)) context_fraction
+          FROM public.socket_usage_events u
+          JOIN public.socket_invocations i ON i.id=u.invocation_id
+          JOIN public.socket_task_budgets b ON b.task_id=u.task_id
+          WHERE i.agent_id=ar.agent_id
+          GROUP BY u.task_id,b.max_total
+        ) task_usage
       ) context_stats ON true
       LEFT JOIN LATERAL (
         SELECT count(*) required_count,
