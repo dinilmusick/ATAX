@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type {
   WorkSocketSubstrateResponse,
+  WorkSocketSuitabilityResponse,
   WorkSocketTaskRecord,
 } from '../types/substrate';
 
@@ -165,6 +166,10 @@ export function WorkSocketsView({ refreshTick = 0, onLoadingChange }: WorkSocket
   const [statusFilter, setStatusFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [suitabilityTaskId, setSuitabilityTaskId] = useState<string | null>(null);
+  const [suitability, setSuitability] = useState<WorkSocketSuitabilityResponse | null>(null);
+  const [suitabilityLoading, setSuitabilityLoading] = useState(false);
+  const [suitabilityError, setSuitabilityError] = useState<string | null>(null);
 
   const fetchWorkSockets = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -195,6 +200,25 @@ export function WorkSocketsView({ refreshTick = 0, onLoadingChange }: WorkSocket
     void fetchWorkSockets(controller.signal);
     return () => controller.abort();
   }, [fetchWorkSockets, refreshTick]);
+
+  const fetchSuitability = useCallback(async (taskId: string) => {
+    setSuitabilityTaskId(taskId);
+    setSuitability(null);
+    setSuitabilityError(null);
+    setSuitabilityLoading(true);
+    try {
+      const response = await fetch(`/api/substrate/worksockets/${encodeURIComponent(taskId)}/suitability`);
+      const payload = await response.json() as WorkSocketSuitabilityResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || `Suitability evaluation failed (HTTP ${response.status})`);
+      }
+      setSuitability(payload);
+    } catch (err) {
+      setSuitabilityError(err instanceof Error ? err.message : 'Unable to evaluate worker suitability.');
+    } finally {
+      setSuitabilityLoading(false);
+    }
+  }, []);
 
   const tasks = snapshot?.tasks || [];
   const workers = snapshot?.workers || [];
@@ -370,7 +394,98 @@ export function WorkSocketsView({ refreshTick = 0, onLoadingChange }: WorkSocket
                         </span>
                       </div>
                     </button>
+                    <div className="flex justify-end border-t border-[#30211B] bg-[#170F0D] px-4 py-2">
+                      <button
+                        type="button"
+                        onClick={() => void fetchSuitability(task.id)}
+                        disabled={suitabilityLoading && suitabilityTaskId === task.id}
+                        className="inline-flex items-center gap-2 border border-[#684331] bg-[#241814] hover:bg-[#332019] disabled:opacity-50 text-[#E8CDB7] px-2.5 py-1.5 text-[10px] font-mono rounded-sm"
+                      >
+                        {suitabilityLoading && suitabilityTaskId === task.id
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <Cpu className="w-3 h-3" />}
+                        Assess suitability
+                      </button>
+                    </div>
                     {isExpanded && <TaskDetails task={task} />}
+                    {suitabilityTaskId === task.id && (
+                      <div className="border-t border-[#382821] bg-[#170F0D] p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-[10px] font-mono uppercase tracking-wider text-[#DF6B3B]">
+                              Explainable suitability · {suitability?.candidate_count ?? 0} candidates
+                            </h4>
+                            <p className="text-[10px] text-[#89776B] mt-1">
+                              Suitability ranks possible fits; it never grants authorization or claims this task.
+                            </p>
+                          </div>
+                          {suitability && (
+                            <span className="text-[9px] font-mono text-[#806E62]">
+                              {formatWhen(suitability.evaluated_at)}
+                            </span>
+                          )}
+                        </div>
+                        {suitabilityLoading && (
+                          <div className="flex items-center gap-2 text-[11px] font-mono text-[#B9AA9D]">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Evaluating registered capability and evidence signals…
+                          </div>
+                        )}
+                        {suitabilityError && (
+                          <p role="alert" className="text-[11px] text-[#F2A28F] font-mono">{suitabilityError}</p>
+                        )}
+                        {!suitabilityLoading && suitability && suitability.candidates.length === 0 && (
+                          <p className="text-[11px] text-[#A99688]">
+                            No registered, enabled worker candidates. No synthetic candidate or fallback score was generated.
+                          </p>
+                        )}
+                        {suitability?.candidates.map((candidate, index) => (
+                          <div key={candidate.evaluation_id} className="border border-[#382821] bg-[#1B120F] p-3 rounded-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-[11px] font-semibold text-[#F7F3EC] truncate">
+                                  {index + 1}. {candidate.agent_name}
+                                </div>
+                                <div className="text-[9px] font-mono text-[#89776B] mt-0.5">
+                                  {candidate.agent_type} · {candidate.agent_id}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-mono font-bold text-[#F5C979]">
+                                  {(candidate.suitability_score * 100).toFixed(1)}%
+                                </div>
+                                <div className={`text-[9px] font-mono ${candidate.capability_complete ? 'text-[#9BE2B2]' : 'text-[#F2A28F]'}`}>
+                                  {candidate.capability_complete ? 'capability-complete' : 'missing required capabilities'}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mt-3">
+                              {Object.entries(candidate.components).map(([key, value]) => (
+                                <div key={key} className="min-w-0">
+                                  <div className="flex items-center justify-between gap-1 text-[8px] font-mono text-[#A99688]">
+                                    <span className="truncate">{key.replaceAll('_', ' ')}</span>
+                                    <span>{(value * 100).toFixed(0)}</span>
+                                  </div>
+                                  <div className="h-1 bg-[#120C0A] mt-1 overflow-hidden">
+                                    <div className="h-full bg-[#B66C42]" style={{ width: `${Math.max(0, Math.min(100, value * 100))}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[9px] font-mono text-[#806E62]">
+                              <span>claims {candidate.evidence.claim_count ?? 0}</span>
+                              <span>verified {candidate.evidence.verified_count ?? 0}</span>
+                              <span>predicate pass {candidate.evidence.predicate_passed_count ?? 0}/{candidate.evidence.predicate_count ?? 0}</span>
+                              <span>context samples {candidate.evidence.context_samples ?? 0}</span>
+                              <span>latency {candidate.evidence.average_latency_ms ? `${Math.round(candidate.evidence.average_latency_ms)}ms` : 'n/a'}</span>
+                              <span>tools {candidate.evidence.matched_tools ?? 0}/{candidate.evidence.required_tools ?? 0}</span>
+                            </div>
+                          </div>
+                        ))}
+                        <p className="text-[9px] font-mono text-[#806E62]">
+                          {suitability?.authorization_note || 'A canonical claim RPC is still required. Ranking never authorizes execution.'}
+                        </p>
+                      </div>
+                    )}
                   </article>
                 );
               })}
