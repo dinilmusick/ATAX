@@ -116,6 +116,19 @@ BEGIN
     RAISE EXCEPTION 'GitHub WORK rotation/reenable failed';
   END IF;
 
+  PERFORM public.atax_mcp_upsert_provider_v1(
+    'synthetic_owner','neon','PRIMARY','synthetic-neon-token-123456',
+    'synthetic_owner','org-123',true);
+  PERFORM public.atax_mcp_upsert_provider_v1(
+    'synthetic_owner','vercel','PRIMARY','synthetic-vercel-token-123456',
+    'synthetic_owner','team_123',true);
+  PERFORM public.atax_mcp_set_provider_enabled_v1(
+    'synthetic_owner','neon','PRIMARY',false,'synthetic_owner');
+  PERFORM public.atax_mcp_delete_provider_v1(
+    'synthetic_owner','neon','PRIMARY','synthetic_owner');
+  PERFORM public.atax_mcp_delete_provider_v1(
+    'synthetic_owner','vercel','PRIMARY','synthetic_owner');
+
   BEGIN
     PERFORM public.atax_mcp_provider_summary_v1('attacker_owner');
     RAISE EXCEPTION 'Cross-owner provider lookup was accepted';
@@ -134,11 +147,11 @@ BEGIN
 
   BEGIN
     PERFORM public.atax_mcp_upsert_provider_v1(
-      'synthetic_owner','vercel','PRIMARY','synthetic-vercel-token-123456',
+      'synthetic_owner','INVALID PROVIDER','PRIMARY','synthetic-invalid-token-123456',
       'synthetic_owner',NULL,true);
-    RAISE EXCEPTION 'Unimplemented Vercel provider was accepted';
+    RAISE EXCEPTION 'Invalid provider format was accepted';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM='Unimplemented Vercel provider was accepted' THEN RAISE; END IF;
+    IF SQLERRM='Invalid provider format was accepted' THEN RAISE; END IF;
   END;
 
   PERFORM public.atax_mcp_delete_provider_v1(
