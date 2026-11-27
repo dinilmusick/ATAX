@@ -89,6 +89,45 @@ CREATE TRIGGER tasks_enforce_socket_tool_scope
 BEFORE UPDATE ON public.tasks
 FOR EACH ROW EXECUTE FUNCTION public.enforce_socket_task_tool_scope();
 
+CREATE OR REPLACE FUNCTION public.socket_json_scope_is_subset(
+  allowed_scope jsonb,
+  requested_scope jsonb
+)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path=public,pg_temp
+AS $scope$
+DECLARE
+  item record;
+  allowed_value jsonb;
+BEGIN
+  IF requested_scope IS NULL OR requested_scope='null'::jsonb THEN
+    RETURN true;
+  END IF;
+  IF allowed_scope IS NULL OR jsonb_typeof(allowed_scope) IS DISTINCT FROM jsonb_typeof(requested_scope) THEN
+    RETURN false;
+  END IF;
+  CASE jsonb_typeof(requested_scope)
+    WHEN 'object' THEN
+      FOR item IN SELECT key,value FROM jsonb_each(requested_scope) LOOP
+        IF NOT (allowed_scope ? item.key) THEN RETURN false; END IF;
+        allowed_value:=allowed_scope->item.key;
+        IF NOT public.socket_json_scope_is_subset(allowed_value,item.value) THEN
+          RETURN false;
+        END IF;
+      END LOOP;
+      RETURN true;
+    WHEN 'array' THEN
+      RETURN allowed_scope @> requested_scope;
+    WHEN 'number' THEN
+      RETURN (requested_scope#>>'{}')::numeric <= (allowed_scope#>>'{}')::numeric;
+    ELSE
+      RETURN allowed_scope IS NOT DISTINCT FROM requested_scope;
+  END CASE;
+END
+$scope$;
+
 DO $migration$
 DECLARE
   fn regprocedure:=to_regprocedure('public.atax_socket_execute_v1(jsonb)');
@@ -122,13 +161,34 @@ BEGIN
   END IF;
   source_definition:=replace(source_definition,old_fragment,new_fragment);
 
-  old_fragment:=$old$     AND enabled AND expires_at>statement_timestamp();$old$;
-  new_fragment:=$new$     AND enabled AND expires_at>statement_timestamp()
-     AND (claim_generation IS NULL OR claim_generation=v_task.claim_generation);$new$;
+  old_fragment:=$old$  ELSIF v_operation='workflow_request' THEN
+     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
+       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
+       v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
+       v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$old$;
+  new_fragment:=$new$  ELSIF v_operation='workflow_request' THEN
+     IF NOT EXISTS (
+       SELECT 1 FROM public.socket_task_authority authority
+       WHERE authority.task_id=v_task_id
+         AND v_workflow.target_repository=ANY(authority.repository_scope)
+     ) THEN
+       RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
+     END IF;
+     IF v_payload->'inputs' ? 'resources' AND NOT public.socket_json_scope_is_subset(
+       (SELECT authority.resource_scope FROM public.socket_task_authority authority
+         WHERE authority.task_id=v_task_id),
+       v_payload->'inputs'->'resources'
+     ) THEN
+       RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
+     END IF;
+     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
+       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
+       v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
+       v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$new$;
   matches:=(length(source_definition)-length(replace(source_definition,old_fragment,'')))/
     greatest(length(old_fragment),1);
   IF matches<>1 THEN
-    RAISE EXCEPTION 'Claim generation migration drift in capability lookup: % matches',matches;
+    RAISE EXCEPTION 'Task authority migration drift in workflow dispatch: % matches',matches;
   END IF;
   source_definition:=replace(source_definition,old_fragment,new_fragment);
   EXECUTE source_definition;
