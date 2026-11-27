@@ -229,7 +229,11 @@ async function runCall(name,args,principal,env,fetcher){
     const safeResult=safeText===rawText?result:JSON.parse(safeText);
     return {content:[{type:'text',text:safeText}],structuredContent:{result:safeResult}};
   }
-  catch{return {isError:true,content:[{type:'text',text:'Canonical operation denied or unavailable'}]};}
+  catch(err){
+    const rawMessage=err instanceof Error?err.message:String(err||'Canonical operation denied or unavailable');
+    const safeMessage=scrubSecrets(rawMessage,env).slice(0,500)||'Canonical operation denied or unavailable';
+    return {isError:true,content:[{type:'text',text:safeMessage}]};
+  }
 }
 async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(msg)||msg.jsonrpc!=='2.0'||(msg.id!==undefined && !(typeof msg.id==='number'||typeof msg.id==='string'||msg.id===null)))return err(null,-32600,'Invalid request');
