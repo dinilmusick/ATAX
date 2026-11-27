@@ -87,7 +87,7 @@ test('MCP initialize, protocol negotiation, ping and stateless GET contract',asy
 test('tools: list includes access-controlled read and lifecycle tools',async()=>{
   const res=await post('tools/list'); const payload=await res.json();
   const names=payload.result.tools.map(t=>t.name);
-  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_record_checkpoint_predicate','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
+  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_record_checkpoint_predicate','atax_task_suitability','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
   const reduced={...env,MCP_SHARED_SCOPES:'atax:read'};
   const filtered=await(await post('tools/list',{}, {env:reduced})).json();
   assert.ok(filtered.result.tools.every(t=>!t.name.includes('task_')&&!t.name.includes('verification_')));
@@ -153,6 +153,18 @@ test('MCP socket command uses the pinned fallback profile and exact UTF-8 wire m
   assert.equal(command.budgetProfile.overhead,8);
   assert.equal(command.inboundTokens,new TextEncoder().encode(command.requestWire).byteLength+8);
   assert.ok(command.budgetProfile.maxUsableTokens<=3276);
+});
+
+test('suitability routing derives caller attribution and never grants execution authority',async()=>{
+  const taskId='0e579631-22b2-4d0d-8b6f-6f8e0644ed69';
+  const result=await call('atax_task_suitability',{task_id:taskId,limit:7});
+  const params=result.payload.result.structuredContent.result.params;
+  assert.equal(result.payload.result.structuredContent.result.rpc,'atax_worker_suitability_v1');
+  assert.equal(params.task_id_in,taskId);
+  assert.equal(params.evaluator_agent_id_in,'test-external-agent');
+  assert.equal(params.limit_in,7);
+  assert.equal(Object.hasOwn(params,'agent_id_in'),false);
+  assert.equal(Object.hasOwn(params,'claim_token_in'),false);
 });
 
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
