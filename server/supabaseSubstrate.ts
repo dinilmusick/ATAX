@@ -1159,6 +1159,7 @@ export function createSubstrateService(
       goalsRes,
       systemsRes,
       budgetsRes,
+      authorityRes,
       cursorsRes,
       childrenRes,
       predicatesRes,
@@ -1174,6 +1175,9 @@ export function createSubstrateService(
       api.selectAll('systems?select=id,system_key'),
       api.selectAll(
         'socket_task_budgets?select=task_id,max_input,max_output,max_total,input_used,output_used'
+      ),
+      api.selectAll(
+        'socket_task_authority?select=task_id,parent_task_id,allowed_socket_capabilities,allowed_tool_scopes,repository_scope,resource_scope,authority_version'
       ),
       api.selectAll('socket_context_cursors?select=task_id,next_offset'),
       api.selectAll('socket_atomization_children?select=parent_task_id,child_task_id,ordinal'),
@@ -1206,6 +1210,9 @@ export function createSubstrateService(
     );
     const budgetByTask = new Map<string, Record<string, unknown>>(
       (budgetsRes.ok ? budgetsRes.rows : []).map((row) => [String(row.task_id), row])
+    );
+    const authorityByTask = new Map<string, Record<string, unknown>>(
+      (authorityRes.ok ? authorityRes.rows : []).map((row) => [String(row.task_id), row])
     );
     const cursorByTask = new Map<string, number>(
       (cursorsRes.ok ? cursorsRes.rows : []).map((row) => [String(row.task_id), Number(row.next_offset || 0)])
@@ -1301,6 +1308,17 @@ export function createSubstrateService(
             inputUsed: Number(budget.input_used || 0),
             outputUsed: Number(budget.output_used || 0),
           } : null,
+          authority: authorityByTask.has(id) ? (() => {
+            const authority = authorityByTask.get(id)!;
+            return {
+              parentTaskId: authority.parent_task_id ? String(authority.parent_task_id) : null,
+              allowedSocketCapabilities: asArray(authority.allowed_socket_capabilities).map(String),
+              allowedToolScopes: asArray(authority.allowed_tool_scopes).map(String),
+              repositoryScope: asArray(authority.repository_scope).map(String),
+              resourceScope: asRecord(authority.resource_scope),
+              authorityVersion: Number(authority.authority_version || 1),
+            };
+          })() : null,
           nextContextOffset: cursorByTask.get(id) || 0,
           childCount: childCountByParent.get(id) || 0,
           predicates: predicatesByTask.get(id) || [],
