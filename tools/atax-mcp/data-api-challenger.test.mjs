@@ -97,8 +97,8 @@ test('Challenger 1.1: Non-allowlisted RPC invocations are rejected pre-flight wi
   assert.equal(fetchCallCount, 0, 'Fetcher was invoked despite pre-flight rejection!');
 });
 
-test('Challenger 1.2: All 35 canonical RPCs are permitted by allowlist', () => {
-  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 35, 'CANONICAL_RPC_ALLOWLIST must contain exactly 35 functions');
+test('Challenger 1.2: All 36 canonical RPCs are permitted by allowlist', () => {
+  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 36, 'CANONICAL_RPC_ALLOWLIST must contain exactly 36 functions');
   for (const rpcName of CANONICAL_RPC_ALLOWLIST) {
     assert.doesNotThrow(() => assertAllowedRpc(rpcName), `Canonical RPC was incorrectly rejected: ${rpcName}`);
   }
