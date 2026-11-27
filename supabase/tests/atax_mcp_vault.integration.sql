@@ -99,7 +99,7 @@ BEGIN
   IF NOT (obj->'accounts' @> '[{"provider":"github","alias":"PRIMARY","token":"rotated-synthetic-token-1234567890"}]'::jsonb)
   THEN RAISE EXCEPTION 'Vault rotation not effective'; END IF;
   PERFORM public.atax_mcp_set_provider_enabled_v1(
-    'synthetic_owner','github','WORK',false,'synthetic_admin');
+    'synthetic_owner','github','WORK',false,'synthetic_owner');
   SELECT public.atax_mcp_runtime_config_v1() INTO obj;
   IF obj->'accounts' @> '[{"provider":"github","alias":"WORK"}]'::jsonb THEN
     RAISE EXCEPTION 'Disabled GitHub WORK account still served';
@@ -142,9 +142,9 @@ BEGIN
   END;
 
   PERFORM public.atax_mcp_delete_provider_v1(
-    'synthetic_owner','github','WORK','synthetic_admin');
+    'synthetic_owner','github','WORK','synthetic_owner');
   PERFORM public.atax_mcp_delete_provider_v1(
-    'synthetic_owner','cloudflare','WORK','synthetic_admin');
+    'synthetic_owner','cloudflare','WORK','synthetic_owner');
   IF EXISTS (
     SELECT 1 FROM atax_private.provider_accounts
     WHERE owner_subject='synthetic_owner'
