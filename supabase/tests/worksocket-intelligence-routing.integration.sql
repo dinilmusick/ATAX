@@ -13,6 +13,9 @@ DECLARE
   second_scores jsonb;
   task_status_before text;
   task_claim_before uuid;
+  required_caps text[];
+  task_kind text;
+  candidate_present boolean;
   task_actor_before text;
 BEGIN
   SELECT id,status,claim_token,claimed_by_agent_id
@@ -25,6 +28,19 @@ BEGIN
     RAISE NOTICE 'SKIP: no goal-linked task available for suitability integration fixture';
     RETURN;
   END IF;
+
+  SELECT coalesce(required_capabilities,'{}'::text[]),coalesce(nullif(task_type,''),'default')
+    INTO required_caps,task_kind FROM public.tasks WHERE id=fixture_task;
+  PERFORM public.atax_worker_intelligence_profile_upsert_v1(
+    'worksocket-profile-test','WorkSocket Profile Fixture','mcp-external',
+    required_caps,jsonb_build_object(task_kind,0.95),
+    ARRAY['test:tool-familiarity']::text[],
+    CASE WHEN jsonb_typeof((SELECT target->'resources' FROM public.tasks WHERE id=fixture_task))='object'
+      THEN (SELECT target->'resources' FROM public.tasks WHERE id=fixture_task)
+      ELSE '{}'::jsonb END,
+    ARRAY['unknown']::text[],
+    jsonb_build_object('source','rollback-only integration fixture')
+  );
 
   first_result:=public.atax_worker_suitability_v1(fixture_task,actor,10);
   second_result:=public.atax_worker_suitability_v1(fixture_task,actor,10);
@@ -63,6 +79,13 @@ BEGIN
   IF first_ids IS DISTINCT FROM second_ids
      OR first_scores IS DISTINCT FROM second_scores THEN
     RAISE EXCEPTION 'Suitability ordering or component scores are not deterministic';
+  END IF;
+  SELECT EXISTS(
+    SELECT 1 FROM jsonb_array_elements(first_result->'candidates') candidate(item)
+    WHERE item->>'agent_id'='worksocket-profile-test'
+  ) INTO candidate_present;
+  IF NOT candidate_present THEN
+    RAISE EXCEPTION 'Authenticated principal profile was not included as a suitability candidate: %',first_result;
   END IF;
 
   IF EXISTS (
