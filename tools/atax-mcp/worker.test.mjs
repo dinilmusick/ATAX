@@ -87,7 +87,7 @@ test('MCP initialize, protocol negotiation, ping and stateless GET contract',asy
 test('tools: list includes access-controlled read and lifecycle tools',async()=>{
   const res=await post('tools/list'); const payload=await res.json();
   const names=payload.result.tools.map(t=>t.name);
-  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
+  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_record_checkpoint_predicate','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
   const reduced={...env,MCP_SHARED_SCOPES:'atax:read'};
   const filtered=await(await post('tools/list',{}, {env:reduced})).json();
   assert.ok(filtered.result.tools.every(t=>!t.name.includes('task_')&&!t.name.includes('verification_')));
@@ -120,6 +120,21 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   assert.equal(hp.heartbeat_context_in.next_action,'Continue');
   const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for independent verification',evidence:[{url:'test://result'}]});
   assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
+
+  const predicate=await call('atax_task_record_checkpoint_predicate',{
+    task_id:sampleTaskId,claim_token:sampleClaimToken,checkpoint_index:0,
+    predicate_key:'builtin.evidence_present',predicate_version:1,
+    inputs:{evidence:['observed']},result:true,passed:true,
+    evidence:[{type:'test',receipt:'passed'}]
+  });
+  const pp=predicate.payload.result.structuredContent.result.params;
+  assert.equal(predicate.payload.result.structuredContent.result.rpc,'record_checkpoint_predicate_result');
+  assert.equal(pp.executor_id_in,'test-external-agent');
+  assert.equal(pp.fencing_token_in,sampleClaimToken);
+  assert.equal(pp.checkpoint_index_in,0);
+  assert.equal(pp.predicate_key_in,'builtin.evidence_present');
+  assert.equal(pp.passed_in,true);
+  assert.deepEqual(pp.inputs_in,{evidence:['observed']});
 });
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
   const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
