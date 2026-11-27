@@ -408,6 +408,7 @@ export function createVaultService(
       cloudflare: { url: 'https://api.cloudflare.com/client/v4/user/tokens/verify', method: 'GET' },
       neon: { url: 'https://console.neon.tech/api/v2/users/me', method: 'GET' },
       vercel: { url: 'https://api.vercel.com/v2/user', method: 'GET' },
+      supabase: { url: 'https://api.supabase.com/v1/organizations', method: 'GET' },
       fly: { url: 'https://api.machines.dev/v1/apps?org_slug=personal', method: 'GET' },
       northflank: { url: 'https://api.northflank.com/v1/projects', method: 'GET' },
       koyeb: { url: 'https://app.koyeb.com/v1/apps', method: 'GET' },
@@ -542,6 +543,19 @@ export function createVaultService(
           alias,
           statusCode: res.status,
           summary: `Verified Vercel account @${String(u.username || u.email || u.id)}.`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'supabase' && Array.isArray(data)) {
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Supabase account (${data.length} organization(s) accessible).`,
           checkedAt: new Date().toISOString(),
           apiReachable: true,
           authVerified: true,
