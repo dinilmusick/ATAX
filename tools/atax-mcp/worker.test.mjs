@@ -161,7 +161,7 @@ test('suitability routing derives caller attribution and never grants execution 
   const params=result.payload.result.structuredContent.result.params;
   assert.equal(result.payload.result.structuredContent.result.rpc,'atax_worker_suitability_v1');
   assert.equal(params.task_id_in,taskId);
-  assert.equal(params.evaluator_agent_id_in,'test-external-agent');
+  assert.equal(params.requested_by_actor_in,'test-external-agent');
   assert.equal(params.limit_in,7);
   assert.equal(Object.hasOwn(params,'agent_id_in'),false);
   assert.equal(Object.hasOwn(params,'claim_token_in'),false);
