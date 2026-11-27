@@ -128,6 +128,18 @@ WHERE id = true;
 - **Connected with 0 tools**: Check `MCP_ATAX_OWNER_JWT_SUBJECT` in `atax_private.mcp_server_settings` — ensure it matches the exact UUID in **Authentication → Users** with no `< >` brackets.
 - **Inspecting live Worker errors**: Run `npx wrangler tail --config wrangler.toml --format pretty` while clicking **Connect**.
 
+## Agent strategy-first workflow
+
+The remote MCP server is intentionally strategy-first. For substantive or ambiguous user objectives, agents should first call atax_intro_documentation, then atax_strategy_resolve to locate the request in the live System → Vision → Target → Goal → Task graph. Reuse existing strategic nodes whenever possible; only create missing Vision/Target/Goal structure when the objective is genuinely new. Decompose substantive goals into bounded 1–4 action tasks, execute externally, persist evidence, independently verify, and reassess the graph.
+
+### Preemptive documentation without context bloat
+
+ATAX maintains preemptive strategic guidance as durable state. State-changing MCP actions refresh the guidance, but ordinary tool responses do not include the guidance payload. They only advertise atax_preemptive_guidance_get. Agents should retrieve it when the next strategic move is unclear. The same guidance is also exposed as atax://guidance/preemptive and the atax-introduction MCP prompt.
+
+### Private-repository CI
+
+For private repositories, agents must prefer the disposable FMRL System inside ATAX rather than dispatching or rerunning private GitHub Actions. Direct private-repository workflow dispatch/rerun is blocked by the MCP gateway. Use atax_fmrl_create_run_dispose, poll atax_fmrl_get_status to terminal state, and require independent cleanup verification before accepting CI evidence.
+
 ## Resume or create work
 
 For an unfinished goal, ask a new chat to **“Start finishing an unfinished goal.”** The Universal Task Router loads the unfinished-goal list and resumes by readable goal key.
