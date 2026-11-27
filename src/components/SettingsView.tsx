@@ -39,7 +39,8 @@ type SettingsCategoryTab = 'infra' | 'compute' | 'inference';
 
 function ProviderIcon({provider,className='w-4 h-4'}:{provider:ProviderType;className?:string}){
   if(provider==='github') return <GitBranch className={className}/>;
-  if(provider==='cloudflare') return <Cloud className={className}/>;
+  if(provider==='cloudflare'||provider==='vercel') return <Cloud className={className}/>;
+  if(provider==='neon') return <Database className={className}/>;
   if(COMPUTE_PROVIDERS.some(p=>p.id===provider)) return <Cpu className={className}/>;
   if(INFERENCE_PROVIDERS.some(p=>p.id===provider)) return <Sparkles className={className}/>;
   return <Cloud className={className}/>;
@@ -375,7 +376,7 @@ export function SettingsView({refreshTick=0,onLoadingChange}:SettingsViewProps){
             {status?.backend.reachable?'Supabase Data API reachable':'Backend unavailable'}
           </span>
           <span className="text-[#7D6C61]">·</span>
-          <span className="text-[#A89688]">Providers: Infra (2) · Cloud Compute (5) · AI Inference (9)</span>
+          <span className="text-[#A89688]">Providers: Infra ({INFRA_PROVIDERS.length}) · Cloud Compute ({COMPUTE_PROVIDERS.length}) · AI Inference ({INFERENCE_PROVIDERS.length})</span>
         </div>
       </section>
 
