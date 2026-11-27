@@ -68,7 +68,7 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_claim_verification_for_task(uuid,text,integer)'),
-        $old$AND t.claimed_by_agent_id IS DISTINCT FROM verifier_agent_id_in$new$,
+        $old$AND t.claimed_by_agent_id IS DISTINCT FROM verifier_agent_id_in$old$,
         $new$$new$
       ),
       (
@@ -146,7 +146,7 @@ $new$
       ),
       (
         to_regprocedure('public.socket_verify_child(uuid,uuid,uuid,uuid,boolean,jsonb)'),
-        $old$Independent verification needs nonempty evidence$new$,
+        $old$Independent verification needs nonempty evidence$old$,
         $new$Verification requires nonempty evidence$new$
       ),
       (
@@ -207,12 +207,12 @@ $new$
       ),
       (
         to_regprocedure('public.socket_guard_task_transition()'),
-        $old$Child verification may not reuse atomiser/executor identity$new$,
+        $old$Child verification may not reuse atomiser/executor identity$old$,
         $new$Child verification requires an approved evidence grant$new$
       ),
       (
         to_regprocedure('public.socket_guard_task_transition()'),
-        $old$Parent completion needs independent authenticated finalizer$new$,
+        $old$Parent completion needs independent authenticated finalizer$old$,
         $new$Parent completion requires an authenticated finalization grant$new$
       )
     ) AS changes(signature,old_fragment,new_fragment)
@@ -241,4 +241,3 @@ COMMENT ON FUNCTION public.task_ledger_claim_next(text,text,text,text[],integer)
 
 COMMENT ON FUNCTION public.task_ledger_verify_result(uuid,text,boolean,jsonb) IS
 'Task verification accepts or rejects only under the existing workspace scope and evidence/predicate gates. Verifier identity need not differ from executor identity.';
-
