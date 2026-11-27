@@ -26,9 +26,9 @@ security definer
 set search_path = pg_catalog, public
 as $function$
 declare
-  skill_id bigint;
-  version_id uuid;
-  source_id bigint;
+  v_skill_id bigint;
+  v_version_id uuid;
+  v_source_id bigint;
   skill_slug text := lower(coalesce(payload->>'slug',''));
   skill_name text := coalesce(payload->>'name','');
   version_text text := coalesce(payload->>'version','1.0.0');
@@ -38,101 +38,110 @@ declare
   asset jsonb;
   asset_count integer := 0;
 begin
-  if skill_slug !~ '^[a-z0-9]+(?:-[a-z0-9]+)*$' or length(skill_slug) > 120 then
-    raise exception 'invalid skill slug';
-  end if;
+  if skill_slug !~ '^[a-z0-9]+(?:-[a-z0-9]+)*(slug_in text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $function$
+  select coalesce(jsonb_build_object(
+    'skill',to_jsonb(s),
+    'version',to_jsonb(v),
+    'assets',coalesce((
+      select jsonb_agg(to_jsonb(a) order by a.asset_path)
+      from public.skill_assets a where a.version_id=v.id
+    ),'[]'::jsonb)
+  ),jsonb_build_object('status','not_found','code','SKILL_NOT_FOUND'))
+  from public.skills s
+  join public.skill_versions v on v.id=s.current_version_id and v.is_published=true
+  where s.slug=slug_in and s.status='active'
+  limit 1;
+$function$;
+
+create or replace function public.atax_mcp_skills_search_v2(query_in text)
+returns setof jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $function$
+  select jsonb_build_object(
+    'id',s.id,'name',s.name,'slug',s.slug,'description',s.description,
+    'status',s.status,'current_version_id',s.current_version_id,
+    'version',v.version,
+    'executable',coalesce((v.manifest->'executable') is not null,false),
+    'asset_count',(select count(*) from public.skill_assets a where a.version_id=v.id)
+  )
+  from public.skills s
+  join public.skill_versions v on v.id=s.current_version_id and v.is_published=true
+  where s.status='active'
+    and (
+      nullif(btrim(query_in),'') is null
+      or lower(s.name) like '%'||lower(btrim(query_in))||'%'
+      or lower(s.slug) like '%'||lower(btrim(query_in))||'%'
+      or lower(coalesce(s.description,'')) like '%'||lower(btrim(query_in))||'%'
+      or lower(v.instructions) like '%'||lower(btrim(query_in))||'%'
+    )
+  order by s.name;
+$function$;
+
+create or replace function public.atax_mcp_skill_executable_spec_v2(slug_in text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog, public
+as $function$
+declare m jsonb; e jsonb;
+begin
+  select v.manifest into m
+  from public.skills s join public.skill_versions v on v.id=s.current_version_id
+  where s.slug=slug_in and s.status='active' and v.is_published=true;
+  if m is null then return jsonb_build_object('status','not_found','code','SKILL_NOT_FOUND'); end if;
+  e:=m->'executable';
+  if e is null or jsonb_typeof(e)<>'object' then return jsonb_build_object('status','not_executable','code','SKILL_NOT_EXECUTABLE'); end if;
+  return public.atax_mcp_skill_executable_spec_v1(slug_in);
+end;
+$function$;
+
+grant execute on function public.atax_mcp_skill_register_v1(jsonb) to service_role;
+grant execute on function public.atax_mcp_skill_get_v2(text) to anon,authenticated,service_role;
+grant execute on function public.atax_mcp_skills_search_v1(text) to anon,authenticated,service_role;
+grant execute on function public.atax_mcp_skill_executable_spec_v2(text) to anon,authenticated,service_role;
+
+notify pgrst,'reload schema';
+ or length(skill_slug) > 120 then raise exception 'invalid skill slug'; end if;
   if length(skill_name) not between 1 and 200 then raise exception 'invalid skill name'; end if;
   if length(version_text) > 64 then raise exception 'invalid skill version'; end if;
   if length(instructions_text) > 200000 then raise exception 'skill instructions too large'; end if;
   if jsonb_typeof(manifest) <> 'object' then raise exception 'skill manifest must be an object'; end if;
 
   insert into public.skill_sources(source_type,name,uri,repository,owner,license,metadata)
-  values(
-    coalesce(nullif(source->>'source_type',''),'github'),
-    coalesce(nullif(source->>'name',''),skill_name),
-    nullif(source->>'uri',''),
-    nullif(source->>'repository',''),
-    nullif(source->>'owner',''),
-    nullif(source->>'license',''),
-    coalesce(source->'metadata','{}'::jsonb)
-  )
-  on conflict do nothing
-  returning id into source_id;
+  values(coalesce(nullif(source->>'source_type',''),'github'),coalesce(nullif(source->>'name',''),skill_name),nullif(source->>'uri',''),nullif(source->>'repository',''),nullif(source->>'owner',''),nullif(source->>'license',''),coalesce(source->'metadata','{}'::jsonb))
+  returning id into v_source_id;
 
-  if source_id is null then
-    select id into source_id from public.skill_sources
-    where coalesce(repository,'')=coalesce(nullif(source->>'repository',''),'')
-      and coalesce(uri,'')=coalesce(nullif(source->>'uri',''),'')
-      and name=coalesce(nullif(source->>'name',''),skill_name)
-    order by id desc limit 1;
-  end if;
-
-  insert into public.skills(name,slug,description,source_id,status,metadata,updated_at)
-  values(skill_name,skill_slug,coalesce(payload->>'description',''),source_id,'active',coalesce(payload->'metadata','{}'::jsonb),now())
-  on conflict (slug) do update set
-    name=excluded.name,
-    description=excluded.description,
-    source_id=excluded.source_id,
-    status='active',
-    metadata=public.skills.metadata || excluded.metadata,
-    updated_at=now()
-  returning id into skill_id;
-
-  if skill_id is null then select id into skill_id from public.skills where slug=skill_slug; end if;
+  insert into public.skills(name,instructions,slug,description,source_id,status,metadata,updated_at)
+  values(skill_name,instructions_text,skill_slug,coalesce(payload->>'description',''),v_source_id,'active',coalesce(payload->'metadata','{}'::jsonb),now())
+  on conflict(slug) do update set name=excluded.name,instructions=excluded.instructions,description=excluded.description,source_id=excluded.source_id,status='active',metadata=public.skills.metadata||excluded.metadata,updated_at=now()
+  returning id into v_skill_id;
 
   insert into public.skill_versions(skill_id,version,instructions,manifest,changelog,is_published,published_at)
-  values(skill_id,version_text,instructions_text,manifest,payload->>'changelog',true,now())
-  on conflict (skill_id,version) do update set
-    instructions=excluded.instructions,
-    manifest=excluded.manifest,
-    changelog=excluded.changelog,
-    is_published=true,
-    published_at=now()
-  returning id into version_id;
+  values(v_skill_id,version_text,instructions_text,manifest,payload->>'changelog',true,now())
+  on conflict(skill_id,version) do update set instructions=excluded.instructions,manifest=excluded.manifest,changelog=excluded.changelog,is_published=true,published_at=now()
+  returning id into v_version_id;
 
-  if version_id is null then
-    select id into version_id from public.skill_versions where skill_id=skill_id and version=version_text;
-  end if;
-
-  update public.skills set current_version_id=version_id,updated_at=now() where id=skill_id;
+  update public.skills set current_version_id=v_version_id,updated_at=now() where id=v_skill_id;
 
   for asset in select value from jsonb_array_elements(coalesce(payload->'assets','[]'::jsonb)) loop
-    if length(coalesce(asset->>'path',''))=0 or length(asset->>'path')>1000 then
-      raise exception 'invalid skill asset path';
-    end if;
-    insert into public.skill_assets(
-      version_id,asset_path,asset_type,content_text,source_uri,source_sha256,executable,mode,metadata
-    )
-    values(
-      version_id,
-      asset->>'path',
-      coalesce(nullif(asset->>'asset_type',''),'other'),
-      asset->>'content',
-      nullif(asset->>'source_uri',''),
-      nullif(asset->>'source_sha256',''),
-      coalesce((asset->>'executable')::boolean,false),
-      nullif(asset->>'mode',''),
-      coalesce(asset->'metadata','{}'::jsonb)
-    )
-    on conflict(version_id,asset_path) do update set
-      asset_type=excluded.asset_type,
-      content_text=excluded.content_text,
-      source_uri=excluded.source_uri,
-      source_sha256=excluded.source_sha256,
-      executable=excluded.executable,
-      mode=excluded.mode,
-      metadata=excluded.metadata;
+    if length(coalesce(asset->>'path',''))=0 or length(asset->>'path')>1000 then raise exception 'invalid skill asset path'; end if;
+    insert into public.skill_assets(version_id,asset_path,asset_type,content_text,source_uri,source_sha256,executable,mode,metadata)
+    values(v_version_id,asset->>'path',coalesce(nullif(asset->>'asset_type',''),'other'),asset->>'content',nullif(asset->>'source_uri',''),nullif(asset->>'source_sha256',''),coalesce((asset->>'executable')::boolean,false),nullif(asset->>'mode',''),coalesce(asset->'metadata','{}'::jsonb))
+    on conflict(version_id,asset_path) do update set asset_type=excluded.asset_type,content_text=excluded.content_text,source_uri=excluded.source_uri,source_sha256=excluded.source_sha256,executable=excluded.executable,mode=excluded.mode,metadata=excluded.metadata;
     asset_count := asset_count + 1;
   end loop;
 
-  return jsonb_build_object(
-    'status','ok',
-    'skill_id',skill_id,
-    'skill_slug',skill_slug,
-    'version_id',version_id,
-    'version',version_text,
-    'asset_count',asset_count
-  );
+  return jsonb_build_object('status','ok','skill_id',v_skill_id,'skill_slug',skill_slug,'version_id',v_version_id,'version',version_text,'asset_count',asset_count);
 end;
 $function$;
 
