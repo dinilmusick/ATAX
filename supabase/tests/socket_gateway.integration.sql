@@ -4,6 +4,8 @@ BEGIN;
 DO $test$
 DECLARE
   t uuid; fence uuid:=gen_random_uuid(); inv public.socket_invocations;
+  cursor_task uuid; cursor_fence uuid:=gen_random_uuid(); cursor_command jsonb;
+  cursor_result jsonb; cursor_resumed jsonb; cursor_stale jsonb; cursor_used bigint;
   principal text:='test-socket-rpc-'||left(gen_random_uuid()::text,8);
   session_key text:='test-rpc-session-'||left(gen_random_uuid()::text,8);
   budget jsonb:=jsonb_build_object('modelId','unknown',
@@ -70,6 +72,51 @@ BEGIN
      OR result2->>'code'<>'CAPABILITY_REVOKED'
      OR used2-used1<>2*(octet_length(input)+8)
   THEN RAISE EXCEPTION 'FAIL: denied authenticated retries must be charged cumulatively: %, %, %',result1,result2,used2-used1; END IF;
+
+  -- A separate task proves monotonic paging and resume without resetting or
+  -- fabricating the earlier task's usage counters.
+  INSERT INTO public.tasks(agent_id,agent_name,task_name,status,task_role,
+    claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claim_token,
+    claim_expires_at,task_definition)
+  VALUES('test-rpc-origin','test-rpc-origin','Context cursor RPC test','running','execution',
+    principal,principal,session_key,cursor_fence,now()+interval '1 hour',
+    jsonb_build_object('name','Context cursor test','general_pattern','page → observe → continue',
+      'actions',jsonb_build_array(jsonb_build_object('description','Pull bounded context'))))
+  RETURNING id INTO cursor_task;
+  INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
+    VALUES(cursor_task,1000,800,2000);
+  INSERT INTO public.socket_gateway_capabilities(invocation_id,task_id,capability,enabled,expires_at)
+    VALUES(inv.id,cursor_task,'socket:context:read',true,now()+interval '1 hour');
+  input:='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"atax_socket_context_pull"}}';
+  cursor_command:=jsonb_build_object('operation','context_pull',
+    'capability','socket:context:read','principalId',principal,'sessionId',session_key,
+    'taskId',cursor_task::text,'claimToken',cursor_fence::text,
+    'requestWire',input,'replyId',2,'inboundTokens',octet_length(input)+8,
+    'payload',jsonb_build_object('limit',1,'cursor','0'),'budgetProfile',budget);
+  cursor_result:=public.atax_socket_execute_v1(cursor_command);
+  IF cursor_result->>'status'<>'ok'
+     OR cursor_result->'data'->>'next_cursor'<>'1' THEN
+    RAISE EXCEPTION 'FAIL: first context page did not advance cursor: %',cursor_result;
+  END IF;
+  cursor_stale:=public.atax_socket_execute_v1(cursor_command);
+  IF cursor_stale->>'code'<>'STALE_CURSOR' THEN
+    RAISE EXCEPTION 'FAIL: repeated context page cursor was accepted: %',cursor_stale;
+  END IF;
+  cursor_command:=jsonb_set(cursor_command,'{payload}','{"limit":1}'::jsonb);
+  cursor_resumed:=public.atax_socket_execute_v1(cursor_command);
+  IF cursor_resumed->>'status'<>'ok'
+     OR cursor_resumed->'data'->>'next_cursor'<>'2' THEN
+    RAISE EXCEPTION 'FAIL: omitted context cursor did not resume from canonical next offset: %',cursor_resumed;
+  END IF;
+  cursor_command:=jsonb_set(cursor_command,'{payload}','{"limit":1,"cursor":"invalid"}'::jsonb);
+  cursor_stale:=public.atax_socket_execute_v1(cursor_command);
+  IF cursor_stale->>'code'<>'INVALID_ARGUMENTS' THEN
+    RAISE EXCEPTION 'FAIL: malformed context cursor was accepted: %',cursor_stale;
+  END IF;
+  SELECT next_offset INTO cursor_used FROM public.socket_context_cursors WHERE task_id=cursor_task;
+  IF cursor_used<>2 THEN
+    RAISE EXCEPTION 'FAIL: stale/malformed context cursor mutated the cursor: %',cursor_used;
+  END IF;
 
   command:=jsonb_set(command,'{operation}','"protocol"'::jsonb);
   command:=jsonb_set(command,'{capability}','"socket:protocol"'::jsonb);
