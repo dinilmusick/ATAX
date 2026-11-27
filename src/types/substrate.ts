@@ -356,7 +356,11 @@ export interface WorkSocketWorkerRecord {
   capabilities: string[];
   lastSeenAt: string | null;
   expiresAt: string | null;
-  source: 'agent_registry' | 'socket_invocation';
+  source: 'agent_registry' | 'socket_invocation' | 'intelligence_profile';
+  domainAffinities?: Record<string, number>;
+  toolFamiliarity?: string[];
+  resourceCapacity?: Record<string, unknown>;
+  modelFamilies?: string[];
 }
 
 export interface WorkSocketSubstrateResponse {
