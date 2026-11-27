@@ -301,7 +301,8 @@ jobs:
                 key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
                 if re.search(pat,output,re.I))
               if codes: summary+=' codes='+','.join(codes[:8])
-              assertions=re.findall(r'(?m)^AssertionError(?: \\[ERR_ASSERTION\\])?:\\s*([^\\n]{1,180})',output)
+              clean_out=re.sub(r'\\x1b\\[[0-9;]*m','',output)
+              assertions=re.findall(r'AssertionError(?:\\s*\\[ERR_ASSERTION\\])?:\\s*([^\\r\\n]{1,180})',clean_out,re.I)
               if assertions:
                   safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',assertions[-1])
                   summary=(summary+' | assert='+safe_msg) if summary else ('assert='+safe_msg)
