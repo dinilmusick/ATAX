@@ -111,12 +111,6 @@ test('strategy-first orientation and on-demand guidance are exposed without cont
   assert.equal(guidance.payload.result.structuredContent.result.rpc,'atax_mcp_preemptive_guidance_get_v1');
   assert.equal(guidance.payload.result.structuredContent.guidance.retrieval_tool,'atax_preemptive_guidance_get');
 });
-test('private GitHub workflow execution is blocked in favor of disposable FMRL',async()=>{
-  const out=await call('atax_github_workflow_dispatch',{repository:'private-owner/private-repo',workflow:'ci.yml',ref:'main'},{env:{...env,MCP_SHARED_SCOPES:'atax:read atax:write atax:github:create'}});
-  assert.equal(out.status,200);
-  assert.equal(out.payload.result.isError,true);
-  assert.match(out.payload.result.content[0].text,/FMRL/i);
-});
 test('canonical read invokes real named Supabase RPC and skills REST, not arbitrary SQL',async()=>{
   const before=requests.length;
   const c=await call('atax_context');assert.equal(c.status,200);
@@ -337,6 +331,11 @@ const makeGitCall=async(name,args={},config={})=>{
   const payload=await res.json();return payload.result;
 };
 
+test('private GitHub workflow execution is blocked in favor of disposable FMRL',async()=>{
+  const outcome=await makeGitCall('atax_github_workflow_dispatch',{repository:'dinilmusick/private-repo',workflow:'ci.yml',ref:'main'});
+  assert.equal(outcome.isError,true);
+  assert.match(outcome.content[0].text,/FMRL/i);
+});
 test('first-class Github tools are documented discoverable, and separately scope gated',async()=>{
   const names=(await (await post('tools/list',{}, {env:gitEnv})).json()).result.tools.map(x=>x.name);
   for(const item of ['atax_github_workflows_guide','atax_github_repository_create','atax_github_repository_inspect','atax_fmrl_create_run_dispose','atax_fmrl_get_status'])assert.ok(names.includes(item),item);
