@@ -527,6 +527,22 @@ export function WorkSocketsView({ refreshTick = 0, onLoadingChange }: WorkSocket
                       ))}
                     </div>
                   )}
+                  {worker.source === 'intelligence_profile' && (
+                    <div className="mt-2 space-y-1.5 text-[9px] font-mono text-[#A99688]">
+                      {worker.domainAffinities && Object.keys(worker.domainAffinities).length > 0 && (
+                        <div>domains: {Object.entries(worker.domainAffinities).map(([domain,score]) => `${domain} ${Math.round(score*100)}%`).join(' · ')}</div>
+                      )}
+                      {worker.toolFamiliarity && worker.toolFamiliarity.length > 0 && (
+                        <div>tools: {worker.toolFamiliarity.join(' · ')}</div>
+                      )}
+                      {worker.modelFamilies && worker.modelFamilies.length > 0 && (
+                        <div>models: {worker.modelFamilies.join(' · ')}</div>
+                      )}
+                      {worker.resourceCapacity && Object.keys(worker.resourceCapacity).length > 0 && (
+                        <div>resources: {Object.entries(worker.resourceCapacity).map(([key,value]) => `${key}=${String(value)}`).join(' · ')}</div>
+                      )}
+                    </div>
+                  )}
                   <div className="text-[9px] font-mono text-[#806E62] mt-2">
                     {worker.source === 'socket_invocation' ? 'expires ' + formatWhen(worker.expiresAt) : 'seen ' + formatWhen(worker.lastSeenAt)}
                   </div>
