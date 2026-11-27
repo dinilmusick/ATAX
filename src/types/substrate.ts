@@ -107,7 +107,8 @@ export interface SettingsStatusResponse {
   providers: {
     github: boolean;
     cloudflare: boolean;
-    vercel: false;
+    neon: boolean;
+    vercel: boolean;
   };
 }
 
