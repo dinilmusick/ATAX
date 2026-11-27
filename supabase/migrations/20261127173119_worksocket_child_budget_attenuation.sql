@@ -31,9 +31,9 @@ BEGIN
   END IF;
   source_definition:=replace(source_definition,old_fragment,new_fragment);
 
-  old_fragment := $old$       RAISE EXCEPTION 'Child % requires 1-4 actions, one outcome, IO contracts, independent verification and a ready loop',v_i;
-     END IF;
-     SELECT jsonb_agg(jsonb_build_object('id','cp-'||n,'description',$old$;
+  old_fragment := $old$      RAISE EXCEPTION 'Child % requires 1-4 actions, one outcome, IO contracts, independent verification and a ready loop',v_i;
+    END IF;
+    SELECT jsonb_agg(jsonb_build_object('id','cp-'||n,'description',$old$;
   new_fragment := $new$       RAISE EXCEPTION 'Child % requires 1-4 actions, one outcome, IO contracts, independent verification and a ready loop',v_i;
      END IF;
      v_child_budget:=coalesce(v_child->'budget','{}'::jsonb);
@@ -63,9 +63,9 @@ BEGIN
   source_definition:=replace(source_definition,old_fragment,new_fragment);
 
   old_fragment := $old$VALUES(v_id,
-       coalesce((v_child->'budget'->>'input')::bigint,v_budget.max_input),
-       coalesce((v_child->'budget'->>'output')::bigint,v_budget.max_output),
-       coalesce((v_child->'budget'->>'total')::bigint,v_budget.max_total));$old$;
+      coalesce((v_child->'budget'->>'input')::bigint,v_budget.max_input),
+      coalesce((v_child->'budget'->>'output')::bigint,v_budget.max_output),
+      coalesce((v_child->'budget'->>'total')::bigint,v_budget.max_total));$old$;
   new_fragment := $new$VALUES(v_id,v_child_input,v_child_output,v_child_total);$new$;
   match_count := (length(source_definition)-length(replace(source_definition,old_fragment,''))) /
     greatest(length(old_fragment),1);
