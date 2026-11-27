@@ -115,12 +115,12 @@ class FmrlTests(unittest.TestCase):
         self.assertNotIn("a"*40, workflow)
         self.assertNotIn("%%TARGET_SOURCE%%", workflow)
         self.assertEqual(run.call_args_list[0].kwargs["input"], "source-read")
-        self.assertEqual(run.call_count, 6)
+        self.assertEqual(run.call_count, 11)
         self.assertEqual([item.args[0][3] for item in run.call_args_list],
-                         ["PRIVATE_REPO_TOKEN","FMRL_TARGET_REPOSITORY","FMRL_TARGET_REF",
+                         ["PRIVATE_REPO_TOKEN","FMRL_SOURCE_VISIBILITY","FMRL_SKILL_COMMAND","FMRL_SKILL_INSTALL","FMRL_SKILL_WORKDIR","FMRL_SKILL_OUTPUT","FMRL_TARGET_REPOSITORY","FMRL_TARGET_REF",
                           "FMRL_TARGET_EVENT","FMRL_TARGET_WORKFLOW","FMRL_EXECUTION_MODE"])
         self.assertEqual([item.kwargs["input"] for item in run.call_args_list],
-                         ["source-read","dinilmusick/KONE","a"*40,"push","-","direct"])
+                         ["source-read","private","","","","","dinilmusick/KONE","a"*40,"push","-","direct"])
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "secret-writer")
         self.assertNotEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "management")
         self.assertNotIn("CODING_REPO_TOKEN", run.call_args.kwargs["env"])
@@ -199,7 +199,7 @@ class FmrlTests(unittest.TestCase):
                                             "--target", "FMRL-unit-test", "--ref", "a"*40]), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(MODULE.main(), 0)
-        self.assertEqual(run.call_count, 7)
+        self.assertEqual(run.call_count, 12)
         sleep.assert_called_once_with(3)
 
 
@@ -385,13 +385,13 @@ class FmrlTests(unittest.TestCase):
     def test_direct_mode_is_default_but_legacy_nested_executor_is_explicitly_opt_in(self):
         import inspect
         source = inspect.getsource(MODULE.main)
-        self.assertIn('choices=("direct", "act", "repair", "artifact"), default="direct"', source)
+        self.assertIn('choices=("direct", "act", "repair", "artifact", "skill"), default="direct"', source)
         self.assertIn('("FMRL_EXECUTION_MODE", args.mode)', source)
         self.assertIn('not full workflow parity', source)
         controller = (ROOT / '..' / '..' / '.github' / 'workflows' / 'private-repo-ci.yml').read_text()
-        self.assertIn('--mode "$TARGET_MODE" --branch "$TARGET_BRANCH" > /tmp/fmrl.json', controller)
+        self.assertIn('--mode "$TARGET_MODE" --branch "$TARGET_BRANCH" --command "$SKILL_COMMAND" --install "$SKILL_INSTALL" --working-directory "$SKILL_WORKDIR" --output-path "$SKILL_OUTPUT" > /tmp/fmrl.json', controller)
         self.assertIn('no raw source logs or artifacts', controller)
-        self.assertIn("assert mode in ('direct','repair','artifact')", controller)
+        self.assertIn("assert mode in ('direct','repair','artifact','skill')", controller)
 
 
     def test_public_bridge_workflow_static_and_no_private_target_in_git(self):
