@@ -1,4 +1,4 @@
-export type ActiveTab = 'systems' | 'visions' | 'skills' | 'settings';
+export type ActiveTab = 'systems' | 'visions' | 'worksockets' | 'skills' | 'settings';
 
 export type BranchingNodeKind = 'multi_in_single_out' | 'single_in_multi_out' | 'fan_out';
 
@@ -295,6 +295,73 @@ export interface VisionsGoalsSubstrateResponse {
   goals: GoalGraphNodeData[];
   tasks: TaskGraphNodeData[];
   edges: VisionGoalTaskEdge[];
+  fetchedAt: string;
+}
+
+
+export interface WorkSocketBudgetSummary {
+  maxInput: number;
+  maxOutput: number;
+  maxTotal: number;
+  inputUsed: number;
+  outputUsed: number;
+}
+
+export interface WorkSocketPredicateReceipt {
+  checkpointIndex: number;
+  predicateKey: string;
+  predicateVersion: number;
+  passed: boolean;
+  evidenceCount: number;
+  createdAt: string | null;
+}
+
+export interface WorkSocketAuditEvent {
+  eventType: string;
+  message: string;
+  actorLabel: string | null;
+  occurredAt: string | null;
+}
+
+export interface WorkSocketTaskRecord {
+  id: string;
+  taskKey: string;
+  goalId: string | null;
+  goalKey: string | null;
+  goalName: string | null;
+  systemKey: string | null;
+  parentTaskId: string | null;
+  name: string;
+  description: string;
+  status: string;
+  executionModel: string;
+  taskRole: string;
+  loopScriptStatus: string;
+  verificationStatus: string;
+  requiredCapabilities: string[];
+  occupancy: TaskOccupancyInfo;
+  budget: WorkSocketBudgetSummary | null;
+  nextContextOffset: number;
+  childCount: number;
+  predicates: WorkSocketPredicateReceipt[];
+  events: WorkSocketAuditEvent[];
+  updatedAt: string | null;
+}
+
+export interface WorkSocketWorkerRecord {
+  label: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+  capabilities: string[];
+  lastSeenAt: string | null;
+  expiresAt: string | null;
+  source: 'agent_registry' | 'socket_invocation';
+}
+
+export interface WorkSocketSubstrateResponse {
+  tasks: WorkSocketTaskRecord[];
+  workers: WorkSocketWorkerRecord[];
   fetchedAt: string;
 }
 
