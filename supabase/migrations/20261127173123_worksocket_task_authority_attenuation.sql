@@ -170,8 +170,12 @@ WITH RECURSIVE authority_tree AS (
       )
       ELSE ARRAY['atax:read','atax:write','atax:verify']::text[]
     END allowed_tools,
-    CASE WHEN jsonb_typeof(t.target->'repository')='string'
-      THEN ARRAY[t.target->>'repository']::text[]
+    CASE
+      WHEN jsonb_typeof(t.target->'repositories')='array' THEN ARRAY(
+        SELECT DISTINCT value FROM jsonb_array_elements_text(t.target->'repositories') value
+      )
+      WHEN jsonb_typeof(t.target->'repository')='string'
+        THEN ARRAY[t.target->>'repository']::text[]
       ELSE '{}'::text[] END repositories,
     CASE WHEN jsonb_typeof(t.target->'resources')='object'
       THEN t.target->'resources' ELSE '{}'::jsonb END resources,
@@ -232,7 +236,7 @@ LANGUAGE plpgsql
 SET search_path=public,pg_temp
 AS $guard$
 BEGIN
-  IF pg_trigger_depth()=0 THEN
+  IF pg_trigger_depth()<2 THEN
     RAISE EXCEPTION 'Socket task authority can only be created with a task';
   END IF;
   RETURN NEW;
