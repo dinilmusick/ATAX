@@ -63,7 +63,7 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_claim_verification(text,integer)'),
-        $old$and t.claimed_by_agent_id is distinct from verifier_agent_id_in $old$,
+        $old$ and t.claimed_by_agent_id is distinct from verifier_agent_id_in$old$,
         $new$$new$
       ),
       (
