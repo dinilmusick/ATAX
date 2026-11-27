@@ -387,7 +387,7 @@ BEGIN
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: unverified dependency ignored'; END IF;
 
-  -- Result submission follows existing loop author/execute contract.
+  -- Result submission follows the persisted loop and evidence contract.
   PERFORM public.task_ledger_record_loop_iteration(c1,inv_unrelated_worker.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
@@ -408,7 +408,7 @@ BEGIN
   rejected:=false;
   BEGIN
     UPDATE public.tasks SET verification_status='verified',
-      verified_by_agent_id=inv_atom.agent_id WHERE id=c1;
+      verified_by_agent_id=inv_unrelated_worker.agent_id WHERE id=c1;
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
     rejected:=position('Child verification requires an approved evidence grant' IN msg)>0;
@@ -425,7 +425,7 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale verification fence accepted'; END IF;
   child:=public.socket_verify_child(c1,inv_unrelated_worker.id,inv_unrelated_worker.secret,
     verification.verification_claim_token,true,
-    jsonb_build_object('evidence',jsonb_build_array('first verified independently')));
+    jsonb_build_object('evidence',jsonb_build_array('first verified with the evidence gate')));
   IF child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: independent verification not persisted'; END IF;
 
@@ -438,7 +438,7 @@ BEGIN
     'pass','Second child ready');
   PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_unrelated_worker.agent_id,claim.claim_token);
   child:=public.task_ledger_submit_result(c2,inv_unrelated_worker.agent_id,claim.claim_token,
-    '{}'::jsonb,'Second child completed','[]'::jsonb,
+    '{}'::jsonb,'Second child completed under the atomizer principal','[]'::jsonb,
     jsonb_build_array('result-evidence'),'completed');
   verification:=public.socket_claim_child_verification(c2,inv_unrelated_worker.id,inv_unrelated_worker.secret);
   PERFORM public.socket_verify_child(c2,inv_unrelated_worker.id,inv_unrelated_worker.secret,
@@ -492,7 +492,7 @@ BEGIN
      OR (SELECT status FROM public.tasks WHERE id=nested_c1)<>'waiting' THEN
     RAISE EXCEPTION 'FAIL: recursive atomisation did not create waiting subtree';
   END IF;
-  -- Complete the grandchildren, independently verify them, then reconcile
+  -- Complete the grandchildren, evidence-verify them, then reconcile
   -- the nested child as an independently verified ancestor leaf outcome.
   SELECT child_task_id INTO c1 FROM public.socket_atomization_children
     WHERE parent_task_id=nested_c1 AND ordinal=1;
