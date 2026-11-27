@@ -283,7 +283,7 @@ BEGIN
   -- atomise the stopped parent; author/worker identity is not an eligibility gate.
   
   -- Freeze, provenance, typed edges, and atomic child registration.
-  split_result:=public.socket_atomize_task(p,inv_atom.id,inv_atom.secret,fence,
+  split_result:=public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,fence,
     'test-split-key',definition,jsonb_build_object('checkpoint','persisted'));
   IF (split_result->>'duplicate')::boolean THEN RAISE EXCEPTION 'FAIL: first split duplicate'; END IF;
   IF (SELECT count(*) FROM public.socket_atomization_children WHERE parent_task_id=p)<>2 THEN
@@ -302,7 +302,8 @@ BEGIN
   IF EXISTS(SELECT 1 FROM public.tasks WHERE id IN (c1,c2) AND status<>'waiting') THEN
     RAISE EXCEPTION 'FAIL: children leaked into legacy queued pool'; END IF;
 
-  outcome:=public.socket_atomize_task(p,inv_atom.id,inv_atom.secret,fence,
+  -- A second invocation/session can safely replay the exact same fenced split.
+  outcome:=public.socket_atomize_task(p,inv_same.id,inv_same.secret,fence,
     'test-split-key',definition);
   IF NOT (outcome->>'duplicate')::boolean OR
     (SELECT count(*) FROM public.socket_atomization_children WHERE parent_task_id=p)<>2 THEN
@@ -340,8 +341,8 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: parent finalized prematurely'; END IF;
 
   -- The same invocation that atomised the parent may claim its child.
-  claim:=public.socket_claim_child(c1,inv_atom.id,inv_atom.secret);
-  IF claim.claim_token IS NULL OR claim.claimed_session_id<>inv_atom.session_id THEN
+  claim:=public.socket_claim_child(c1,inv_unrelated_worker.id,inv_unrelated_worker.secret);
+  IF claim.claim_token IS NULL OR claim.claimed_session_id<>inv_unrelated_worker.session_id THEN
     RAISE EXCEPTION 'FAIL: same-principal child claim not recorded'; END IF;
 
   -- Competing holder cannot take an occupied socket; no lease token rotation.
@@ -358,7 +359,7 @@ BEGIN
   -- A legacy release-to-queued cannot make socket work globally claimable.
   rejected:=false;
   BEGIN
-    PERFORM public.task_ledger_release_claim(c1,inv_atom.agent_id,claim.claim_token,
+    PERFORM public.task_ledger_release_claim(c1,inv_unrelated_worker.agent_id,claim.claim_token,
       'queued','Legacy release attempt');
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
@@ -387,13 +388,13 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: unverified dependency ignored'; END IF;
 
   -- Result submission follows existing loop author/execute contract.
-  PERFORM public.task_ledger_record_loop_iteration(c1,inv_atom.agent_id,claim.claim_token,
+  PERFORM public.task_ledger_record_loop_iteration(c1,inv_unrelated_worker.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('independent-execution-evidence'),
     'pass','Ready for independent verification');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_atom.agent_id,claim.claim_token);
-  child:=public.task_ledger_submit_result(c1,inv_atom.agent_id,claim.claim_token,
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c1,inv_unrelated_worker.agent_id,claim.claim_token);
+  child:=public.task_ledger_submit_result(c1,inv_unrelated_worker.agent_id,claim.claim_token,
     '{}'::jsonb,'First child completed','[]'::jsonb,
     jsonb_build_array('execution-evidence'),'completed');
   IF child.verification_status<>'pending' THEN
@@ -403,7 +404,7 @@ BEGIN
 
   -- The same caller may claim verification. Direct promotion still fails
   -- until this invocation's fenced verification grant is explicitly approved.
-  verification:=public.socket_claim_child_verification(c1,inv_atom.id,inv_atom.secret);
+  verification:=public.socket_claim_child_verification(c1,inv_unrelated_worker.id,inv_unrelated_worker.secret);
   rejected:=false;
   BEGIN
     UPDATE public.tasks SET verification_status='verified',
@@ -415,35 +416,35 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: direct verification bypassed grant approval'; END IF;
   rejected:=false;
   BEGIN
-    PERFORM public.socket_verify_child(c1,inv_atom.id,inv_atom.secret,
+    PERFORM public.socket_verify_child(c1,inv_unrelated_worker.id,inv_unrelated_worker.secret,
       gen_random_uuid(),true,jsonb_build_object('evidence',jsonb_build_array('x')));
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
     rejected:=position('Verification fence' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale verification fence accepted'; END IF;
-  child:=public.socket_verify_child(c1,inv_atom.id,inv_atom.secret,
+  child:=public.socket_verify_child(c1,inv_unrelated_worker.id,inv_unrelated_worker.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('first verified independently')));
   IF child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: independent verification not persisted'; END IF;
 
   -- Now the typed blocking edge is satisfied.
-  claim:=public.socket_claim_child(c2,inv_exec.id,inv_exec.secret);
-  PERFORM public.task_ledger_record_loop_iteration(c2,inv_exec.agent_id,claim.claim_token,
+  claim:=public.socket_claim_child(c2,inv_unrelated_worker.id,inv_unrelated_worker.secret);
+  PERFORM public.task_ledger_record_loop_iteration(c2,inv_unrelated_worker.agent_id,claim.claim_token,
     1,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
     jsonb_build_array(jsonb_build_object('status','satisfied')),
     '{}'::jsonb,'[]'::jsonb,jsonb_build_array('evidence'),
     'pass','Second child ready');
-  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_exec.agent_id,claim.claim_token);
-  child:=public.task_ledger_submit_result(c2,inv_exec.agent_id,claim.claim_token,
+  PERFORM pg_temp.socket_fixture_pass_checkpoints(c2,inv_unrelated_worker.agent_id,claim.claim_token);
+  child:=public.task_ledger_submit_result(c2,inv_unrelated_worker.agent_id,claim.claim_token,
     '{}'::jsonb,'Second child completed','[]'::jsonb,
     jsonb_build_array('result-evidence'),'completed');
-  verification:=public.socket_claim_child_verification(c2,inv_exec.id,inv_exec.secret);
-  PERFORM public.socket_verify_child(c2,inv_exec.id,inv_exec.secret,
+  verification:=public.socket_claim_child_verification(c2,inv_unrelated_worker.id,inv_unrelated_worker.secret);
+  PERFORM public.socket_verify_child(c2,inv_unrelated_worker.id,inv_unrelated_worker.secret,
     verification.verification_claim_token,true,
     jsonb_build_object('evidence',jsonb_build_array('second verified')));
-  child:=public.socket_finalize_parent(p,inv_atom.id,inv_atom.secret,
+  child:=public.socket_finalize_parent(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,
     jsonb_build_object('evidence',jsonb_build_array('both descendants verified')));
   IF child.status<>'completed' OR child.verification_status<>'verified' THEN
     RAISE EXCEPTION 'FAIL: verified parent did not finalize'; END IF;
