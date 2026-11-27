@@ -169,29 +169,29 @@ BEGIN
   source_definition:=replace(source_definition,old_fragment,new_fragment);
 
   old_fragment:=$old$  ELSIF v_operation='workflow_request' THEN
-     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
-       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
-       v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
-       v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$old$;
+    v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
+      v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
+      v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
+      v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$old$;
   new_fragment:=$new$  ELSIF v_operation='workflow_request' THEN
-     IF NOT EXISTS (
-       SELECT 1 FROM public.socket_task_authority authority
-       WHERE authority.task_id=v_task_id
-         AND v_workflow.target_repository=ANY(authority.repository_scope)
-     ) THEN
-       RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
-     END IF;
-     IF v_payload->'inputs' ? 'resources' AND NOT public.socket_json_scope_is_subset(
-       (SELECT authority.resource_scope FROM public.socket_task_authority authority
-         WHERE authority.task_id=v_task_id),
-       v_payload->'inputs'->'resources'
-     ) THEN
-       RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
-     END IF;
-     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
-       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
-       v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
-       v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$new$;
+    IF NOT EXISTS (
+      SELECT 1 FROM public.socket_task_authority authority
+      WHERE authority.task_id=v_task_id
+        AND v_workflow.target_repository=ANY(authority.repository_scope)
+    ) THEN
+      RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
+    END IF;
+    IF v_payload->'inputs' ? 'resources' AND NOT public.socket_json_scope_is_subset(
+      (SELECT authority.resource_scope FROM public.socket_task_authority authority
+        WHERE authority.task_id=v_task_id),
+      v_payload->'inputs'->'resources'
+    ) THEN
+      RETURN jsonb_build_object('status','denied','code','CAPABILITY_REVOKED');
+    END IF;
+    v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
+      v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
+      v_workflow.runner_repository,v_workflow.target_sha,v_workflow.workflow_file,
+      v_workflow.mode,v_payload->'inputs',v_workflow.expected_output);$new$;
   matches:=(length(source_definition)-length(replace(source_definition,old_fragment,'')))/
     greatest(length(old_fragment),1);
   IF matches<>1 THEN
