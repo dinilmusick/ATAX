@@ -37,8 +37,18 @@ def main():
     if not token: raise SystemExit("Missing CODING_REPO_TOKEN or GH_TOKEN")
     source=api(f"/repos/{a.template}",token)
     source_private=bool(source.get("private"))
-    if source_private and a.visibility=="public":
+    # Explicit public-portfolio opt-in: a source repository must contain the sentinel.
+    public_opt_in=False
+    try:
+        sentinel=api(f"/repos/{a.template}/contents/.portfolio-public",token)
+        public_opt_in=bool(isinstance(sentinel,dict) and sentinel.get("type")=="file")
+    except RuntimeError as exc:
+        if "HTTP 404" not in str(exc): raise
+    if source_private and (a.visibility=="public" or public_opt_in):
         raise SystemExit("SECURITY: private source may not generate a public repository")
+    if public_opt_in and not source_private:
+        a.visibility="public"
+        a.ci_workflow=True
     target=f"{a.owner}/{a.name}"
     try:
         api(f"/repos/{target}",token)
