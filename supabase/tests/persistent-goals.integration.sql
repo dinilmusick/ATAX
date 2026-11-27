@@ -109,7 +109,7 @@ begin
     raise exception 'Independent verifier did not claim submitted direct task';
   end if;
   perform public.task_ledger_verify_result_claimed(
-    verifier.id,'smoke-evidence-based-verifier',verifier.verification_claim_token,
+    verifier.id,'smoke-worker',verifier.verification_claim_token,
     true,jsonb_build_object('method','SQL integration assertion','evidence',jsonb_build_array('passing loop iteration','all checkpoint predicate receipts'))
   );
   if not exists(select 1 from public.tasks where id=direct_task_id
