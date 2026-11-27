@@ -64,7 +64,7 @@ begin
   if authored.loop_script_status<>'ready'
      or authored.task_role<>'execution'
      or authored.loop_author_agent_id<>'integration-test-actor' then
-    raise exception 'Independent loop contract was not published';
+    raise exception 'Same-principal loop contract was not published';
   end if;
 
   select * into claimed from public.task_ledger_claim_next(
@@ -72,8 +72,8 @@ begin
     array['test-capability']::text[],900
   );
   if claimed.id is distinct from task_id
-     or claimed.loop_author_agent_id=claimed.claimed_by_agent_id then
-    raise exception 'Executor did not claim the authorized, same-principal authored task';
+     or claimed.loop_author_agent_id is distinct from claimed.claimed_by_agent_id then
+    raise exception 'Same principal did not claim the task it authored';
   end if;
   select * into duplicate_claim from public.task_ledger_claim_next(
     'integration-test-actor-2','Competing Claimant','worker',
