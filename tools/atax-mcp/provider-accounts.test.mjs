@@ -12,6 +12,7 @@ const env={
   CF_KEY_PERSONAL:'cloudflare-personal-test', CF_KEY_WORK:'cloudflare-work-test',
   NEON_KEY_PERSONAL:'neon-personal-test', NEON_KEY_WORK:'neon-work-test',
   VERCEL_KEY_PERSONAL:'vercel-personal-test', VERCEL_KEY_WORK:'vercel-work-test',
+  SUPABASE_KEY_PERSONAL:'supabase-personal-test', SUPABASE_KEY_WORK:'supabase-work-test',
   CLOUDFLARE_ACCOUNT_ID_WORK:'abc12345',
 };
 const find=name=>providerTools.find(x=>x.name===name);
@@ -25,20 +26,23 @@ test('single shared or pinned OAuth owner discovers named accounts; outsiders ne
     assert.deepEqual(availableAccounts(env,user,'cloudflare'),['PERSONAL','WORK']);
     assert.deepEqual(availableAccounts(env,user,'neon'),['PERSONAL','WORK']);
     assert.deepEqual(availableAccounts(env,user,'vercel'),['PERSONAL','WORK']);
+    assert.deepEqual(availableAccounts(env,user,'supabase'),['PERSONAL','WORK']);
   }
   assert.equal(isOwnerPrincipal(env,outsider),false);
   assert.deepEqual(availableAccounts(env,outsider,'github'),[]);
   assert.deepEqual(availableAccounts(env,outsider,'cloudflare'),[]);
   assert.deepEqual(availableAccounts(env,outsider,'neon'),[]);
   assert.deepEqual(availableAccounts(env,outsider,'vercel'),[]);
-  assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[],[],[],undefined]);
+  assert.deepEqual(availableAccounts(env,outsider,'supabase'),[]);
+  assert.deepEqual((await invoke('atax_provider_accounts_list',{},outsider)).accounts.map(x=>x.aliases),[[],[],[],[],[],undefined]);
   const listed=await invoke('atax_provider_accounts_list',{},oauthOwner);
-  assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare','neon','vercel','compute']);
-  assert.deepEqual(listed.accounts[4].providers,[{provider:'fly',aliases:['DEV']}]);
+  assert.deepEqual(listed.accounts.map(x=>x.provider),['github','cloudflare','neon','vercel','supabase','compute']);
+  assert.deepEqual(listed.accounts[5].providers,[{provider:'fly',aliases:['DEV']}]);
   assert.ok(!JSON.stringify(listed).includes('github-personal-test'));
   assert.ok(!JSON.stringify(listed).includes('cloudflare-work-test'));
   assert.ok(!JSON.stringify(listed).includes('neon-personal-test'));
   assert.ok(!JSON.stringify(listed).includes('vercel-work-test'));
+  assert.ok(!JSON.stringify(listed).includes('supabase-work-test'));
 });
 
 test('select exact named secret; no automatic choice with multiple accounts',()=>{
@@ -46,9 +50,11 @@ test('select exact named secret; no automatic choice with multiple accounts',()=
   assert.equal(resolveProviderAccount(env,oauthOwner,'github','PERSONAL').token,'github-personal-test');
   assert.equal(resolveProviderAccount(env,owner,'neon','work').token,'neon-work-test');
   assert.equal(resolveProviderAccount(env,oauthOwner,'vercel','PERSONAL').token,'vercel-personal-test');
+  assert.equal(resolveProviderAccount(env,owner,'supabase','work').token,'supabase-work-test');
   assert.throws(()=>resolveProviderAccount(env,owner,'github'),/Specify an account alias/);
   assert.throws(()=>resolveProviderAccount(env,owner,'neon'),/Specify an account alias/);
   assert.throws(()=>resolveProviderAccount(env,owner,'vercel'),/Specify an account alias/);
+  assert.throws(()=>resolveProviderAccount(env,owner,'supabase'),/Specify an account alias/);
   assert.throws(()=>resolveProviderAccount(env,owner,'github','../WORK'),/Invalid account/);
   assert.throws(()=>resolveProviderAccount(env,outsider,'github','WORK'),/not authorized/);
   assert.throws(()=>resolveProviderAccount(env,{id:'owner',authMethod:'jwt'},'github','PERSONAL'),/not authorized/);
@@ -56,20 +62,23 @@ test('select exact named secret; no automatic choice with multiple accounts',()=
 });
 
 test('one secret works without account; old named prefixes migrate safely',()=>{
-  const single={...env,GH_KEY_WORK:undefined,CF_KEY_WORK:undefined,NEON_KEY_WORK:undefined,VERCEL_KEY_WORK:undefined};
+  const single={...env,GH_KEY_WORK:undefined,CF_KEY_WORK:undefined,NEON_KEY_WORK:undefined,VERCEL_KEY_WORK:undefined,SUPABASE_KEY_WORK:undefined};
   assert.equal(resolveProviderAccount(single,owner,'github').alias,'PERSONAL');
   assert.equal(resolveProviderAccount(single,owner,'cloudflare').alias,'PERSONAL');
   assert.equal(resolveProviderAccount(single,owner,'neon').alias,'PERSONAL');
   assert.equal(resolveProviderAccount(single,owner,'vercel').alias,'PERSONAL');
+  assert.equal(resolveProviderAccount(single,owner,'supabase').alias,'PERSONAL');
   const old={...env,GH_KEY_PERSONAL:undefined,GH_KEY_WORK:undefined,GH_TOKEN_OLD:'older-github-test',
     CF_KEY_PERSONAL:undefined,CF_KEY_WORK:undefined,CLOUDFLARE_TOKEN_OLD:'older-cloudflare-test',
     NEON_KEY_PERSONAL:undefined,NEON_KEY_WORK:undefined,NEON_TOKEN_OLD:'older-neon-test',
-    VERCEL_KEY_PERSONAL:undefined,VERCEL_KEY_WORK:undefined,VERCEL_TOKEN_OLD:'older-vercel-test'};
+    VERCEL_KEY_PERSONAL:undefined,VERCEL_KEY_WORK:undefined,VERCEL_TOKEN_OLD:'older-vercel-test',
+    SUPABASE_KEY_PERSONAL:undefined,SUPABASE_KEY_WORK:undefined,SUPABASE_ACCESS_TOKEN_OLD:'older-supabase-test'};
   assert.deepEqual(availableAccounts(old,owner,'github'),['OLD']);
   assert.equal(resolveProviderAccount(old,owner,'github').token,'older-github-test');
   assert.deepEqual(availableAccounts(old,oauthOwner,'cloudflare'),['OLD']);
   assert.deepEqual(availableAccounts(old,owner,'neon'),['OLD']);
   assert.deepEqual(availableAccounts(old,owner,'vercel'),['OLD']);
+  assert.deepEqual(availableAccounts(old,owner,'supabase'),['OLD']);
   assert.throws(()=>resolveProviderAccount({...env,GH_TOKEN_WORK:'ambiguous'},owner,'github','WORK'),/Duplicate/);
 });
 
