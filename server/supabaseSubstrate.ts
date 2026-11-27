@@ -1167,7 +1167,7 @@ export function createSubstrateService(
       invocationsRes,
     ] = await Promise.all([
       api.selectAll(
-        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,status,verification_status,task_role,execution_model,loop_script_status,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,required_capabilities,updated_at&status=not.in.(cancelled,abandoned)&order=updated_at.desc&limit=3000'
+        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,status,verification_status,task_role,execution_model,loop_script_status,claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,required_capabilities,updated_at&status=not.in.(cancelled,abandoned)&order=updated_at.desc&limit=3000'
       ),
       api.selectAll('goals?select=id,goal_key,name,system_id'),
       api.selectAll('systems?select=id,system_key'),
