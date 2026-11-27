@@ -24,8 +24,6 @@ BEGIN
       executor_in,coalesce(fence_in::text,'synthetic-parent-verification'));
   END LOOP;
 END $helper$;
-\ir ../../supabase/migrations/20261122170000_socket_atomization_v1.sql
-\ir ../../supabase/migrations/20261122170000_socket_atomization_v1.sql
 
 DO $test$
 DECLARE
@@ -267,8 +265,7 @@ BEGIN
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: mutated usage replay accepted'; END IF;
   IF EXISTS(SELECT 1 FROM public.socket_task_budgets
     WHERE task_id=p AND (input_used<>55 OR output_used<>0 OR version<>1)) THEN
-    RAISE EXCEPTION 'FAIL: replay changed the versioned budget counters';
-  END IF;
+    RAISE EXCEPTION 'FAIL: replay changed the versioned budget counters'; END IF;
   -- A stopped parent can never be split with a stale fence.
   rejected:=false;
   BEGIN
