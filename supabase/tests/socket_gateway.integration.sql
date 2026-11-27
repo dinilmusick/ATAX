@@ -4,6 +4,12 @@ BEGIN;
 DO $test$
 DECLARE
   t uuid; fence uuid:=gen_random_uuid(); inv public.socket_invocations;
+  mcp_task uuid; mcp_principal text:='test-mcp-principal-'||left(gen_random_uuid()::text,8);
+  mcp_session text:='test-mcp-session-'||left(gen_random_uuid()::text,8);
+  mcp_fence uuid:=gen_random_uuid(); mcp_command jsonb; mcp_result jsonb;
+  mcp_inv public.socket_invocations; mcp_grants integer;
+  collision_task uuid; collision_principal text:='test-mcp-collision-'||left(gen_random_uuid()::text,8);
+  collision_fence uuid:=gen_random_uuid();
   cursor_task uuid; cursor_fence uuid:=gen_random_uuid(); cursor_command jsonb;
   cursor_result jsonb; cursor_resumed jsonb; cursor_stale jsonb; cursor_used bigint;
   principal text:='test-socket-rpc-'||left(gen_random_uuid()::text,8);
@@ -21,6 +27,89 @@ BEGIN
      OR has_table_privilege('authenticated','public.socket_gateway_capabilities','SELECT')
      OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid='public.socket_gateway_workflows'::regclass)
   THEN RAISE EXCEPTION 'FAIL: socket gateway privileges not isolated'; END IF;
+
+  -- No separate worker identity or out-of-band invocation registration is
+  -- needed for an authenticated MCP caller. The server-bound adapter marker
+  -- bootstraps one invocation from the existing live claim and grants only the
+  -- exact operation capability for that task.
+  INSERT INTO public.tasks(agent_id,agent_name,task_name,status,task_role,
+    claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claim_token,
+    claim_expires_at,task_definition)
+  VALUES('test-rpc-origin','test-rpc-origin','MCP invocation bootstrap test','running','execution',
+    mcp_principal,mcp_principal,mcp_principal,mcp_fence,now()+interval '1 hour',
+    jsonb_build_object('name','MCP invocation bootstrap','general_pattern','claim → invoke → audit',
+      'actions',jsonb_build_array(jsonb_build_object('description','Use one authenticated principal'))))
+  RETURNING id INTO mcp_task;
+  INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
+    VALUES(mcp_task,1000,800,2000);
+
+  mcp_command:=jsonb_build_object('transport','mcp',
+    'profileSource','atax-mcp-pinned-fallback',
+    'operation','task_status','capability','socket:task:status',
+    'principalId',mcp_principal,'sessionId',mcp_session,'taskId',mcp_task::text,
+    'claimToken',mcp_fence::text,'requestWire',input,'replyId',1,
+    'inboundTokens',octet_length(input)+8,'payload','{}'::jsonb,'budgetProfile',budget);
+  mcp_result:=public.atax_socket_execute_v1(mcp_command);
+  IF mcp_result->>'status'<>'ok' THEN
+    RAISE EXCEPTION 'FAIL: same-principal MCP invocation was not bootstrapped: %',mcp_result;
+  END IF;
+  SELECT * INTO mcp_inv FROM public.socket_invocations WHERE session_id=mcp_session;
+  IF mcp_inv.id IS NULL OR mcp_inv.agent_id IS DISTINCT FROM mcp_principal
+     OR mcp_inv.authenticated_subject IS DISTINCT FROM mcp_principal
+     OR mcp_inv.role IS DISTINCT FROM 'worker'
+     OR mcp_inv.transport IS DISTINCT FROM 'mcp'
+     OR mcp_inv.model_id IS DISTINCT FROM 'unknown'
+     OR mcp_inv.model_profile_version IS DISTINCT FROM '2026-11-22.2'
+     OR mcp_inv.expires_at> (SELECT claim_expires_at FROM public.tasks WHERE id=mcp_task) THEN
+    RAISE EXCEPTION 'FAIL: MCP invocation did not bind exact authenticated principal/session/claim: %',mcp_inv;
+  END IF;
+  SELECT count(*) INTO mcp_grants FROM public.socket_gateway_capabilities
+  WHERE invocation_id=mcp_inv.id AND task_id=mcp_task AND enabled;
+  IF mcp_grants<>1 OR NOT EXISTS(
+      SELECT 1 FROM public.socket_gateway_capabilities
+      WHERE invocation_id=mcp_inv.id AND task_id=mcp_task
+        AND capability='socket:task:status' AND enabled)
+     OR EXISTS(
+      SELECT 1 FROM public.socket_gateway_capabilities
+      WHERE invocation_id=mcp_inv.id AND task_id=mcp_task
+        AND capability<>'socket:task:status') THEN
+    RAISE EXCEPTION 'FAIL: MCP invocation received capabilities beyond the exact operation';
+  END IF;
+
+  -- A request from the same principal reuses the same invocation row, while
+  -- another operation can add only its own task-bound capability.
+  mcp_command:=jsonb_set(mcp_command,'{operation}','"context_pull"'::jsonb);
+  mcp_command:=jsonb_set(mcp_command,'{capability}','"socket:context:read"'::jsonb);
+  mcp_command:=jsonb_set(mcp_command,'{payload}','{"limit":1}'::jsonb);
+  mcp_result:=public.atax_socket_execute_v1(mcp_command);
+  IF mcp_result->>'status'<>'ok'
+     OR (SELECT count(*) FROM public.socket_invocations WHERE session_id=mcp_session)<>1
+     OR (SELECT count(*) FROM public.socket_gateway_capabilities
+         WHERE invocation_id=mcp_inv.id AND task_id=mcp_task AND enabled)<>2 THEN
+    RAISE EXCEPTION 'FAIL: same principal did not safely reuse MCP invocation for its second task capability: %',mcp_result;
+  END IF;
+
+  -- An authenticated actor may not take over another principal's logical
+  -- session, even if the second principal owns a different valid task claim.
+  INSERT INTO public.tasks(agent_id,agent_name,task_name,status,task_role,
+    claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claim_token,
+    claim_expires_at,task_definition)
+  VALUES('test-rpc-origin','test-rpc-origin','MCP session collision test','running','execution',
+    collision_principal,collision_principal,mcp_session,collision_fence,now()+interval '1 hour',
+    jsonb_build_object('name','Collision test','general_pattern','claim → reject rebind',
+      'actions',jsonb_build_array(jsonb_build_object('description','Attempt another principal'))))
+  RETURNING id INTO collision_task;
+  INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
+    VALUES(collision_task,1000,800,2000);
+  mcp_command:=jsonb_set(mcp_command,'{principalId}',to_jsonb(collision_principal));
+  mcp_command:=jsonb_set(mcp_command,'{taskId}',to_jsonb(collision_task::text));
+  mcp_command:=jsonb_set(mcp_command,'{claimToken}',to_jsonb(collision_fence::text));
+  mcp_result:=public.atax_socket_execute_v1(mcp_command);
+  IF mcp_result->>'code'<>'UNAUTHORIZED'
+     OR (SELECT agent_id FROM public.socket_invocations WHERE session_id=mcp_session)
+        IS DISTINCT FROM mcp_principal THEN
+    RAISE EXCEPTION 'FAIL: MCP session was rebound to a different authenticated principal: %',mcp_result;
+  END IF;
 
   INSERT INTO public.socket_invocations(agent_id,session_id,authenticated_subject,role,
      model_id,model_profile_version,expires_at)
