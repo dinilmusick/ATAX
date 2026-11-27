@@ -1,6 +1,46 @@
--- Restore singleton owner authorization in atax_mcp_upsert_provider_v1 (regressed in 20261126103500)
--- and allow all valid provider identifiers (including neon, vercel, compute, inference) in
--- atax_mcp_set_provider_enabled_v1 and atax_mcp_delete_provider_v1.
+-- Restore singleton owner authorization in atax_mcp_upsert_provider_v1 (regressed in 20261126103500),
+-- allow all valid provider identifiers (including neon, vercel, compute, inference) in
+-- atax_mcp_set_provider_enabled_v1 and atax_mcp_delete_provider_v1, and return empty accounts
+-- from atax_mcp_runtime_config_v1 when MCP_OWNER_SUBJECT is not yet configured.
+
+create or replace function public.atax_mcp_runtime_config_v1()
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, atax_private, vault
+as $$
+declare
+  policy jsonb;
+  accounts jsonb;
+  configured_owner text;
+begin
+  select settings into policy
+    from atax_private.mcp_server_settings
+   where id = true;
+
+  if policy is null then
+    raise exception 'ATAX MCP policy unavailable';
+  end if;
+
+  configured_owner := nullif(trim(policy->>'MCP_OWNER_SUBJECT'), '');
+  if configured_owner is null or length(configured_owner) not between 3 and 200 then
+    return jsonb_build_object('settings', policy, 'accounts', '[]'::jsonb);
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'provider',p.provider,
+    'alias',p.alias,
+    'token',v.decrypted_secret,
+    'accountId',p.provider_account_id
+  ) order by p.provider,p.alias),'[]'::jsonb)
+  into accounts
+  from atax_private.provider_accounts p
+  join vault.decrypted_secrets v on v.id=p.vault_secret_id
+  where p.enabled and p.owner_subject=configured_owner;
+
+  return jsonb_build_object('settings',policy,'accounts',accounts);
+end;
+$$;
 
 create or replace function public.atax_mcp_upsert_provider_v1(
   owner_subject_in text,
