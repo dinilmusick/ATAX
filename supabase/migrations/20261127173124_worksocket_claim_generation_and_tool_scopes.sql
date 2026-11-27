@@ -168,6 +168,20 @@ BEGIN
   END IF;
   source_definition:=replace(source_definition,old_fragment,new_fragment);
 
+  old_fragment:=$old$SELECT * INTO v_grant FROM public.socket_gateway_capabilities
+   WHERE invocation_id=v_inv.id AND task_id=v_task_id AND capability=v_capability
+     AND enabled AND expires_at>statement_timestamp();$old$;
+  new_fragment:=$new$SELECT * INTO v_grant FROM public.socket_gateway_capabilities
+   WHERE invocation_id=v_inv.id AND task_id=v_task_id AND capability=v_capability
+     AND enabled AND expires_at>statement_timestamp()
+     AND (claim_generation=0 OR claim_generation=v_task.claim_generation);$new$;
+  matches:=(length(source_definition)-length(replace(source_definition,old_fragment,'')))/
+    greatest(length(old_fragment),1);
+  IF matches<>1 THEN
+    RAISE EXCEPTION 'Claim generation migration drift in capability lookup: % matches',matches;
+  END IF;
+  source_definition:=replace(source_definition,old_fragment,new_fragment);
+
   old_fragment:=$old$  ELSIF v_operation='workflow_request' THEN
     v_dispatch:=public.socket_dispatch_submit(v_task_id,v_inv.agent_id,v_inv.session_id,v_claim,
       v_corr,v_key,v_workflow.operation,v_workflow.target_repository,
