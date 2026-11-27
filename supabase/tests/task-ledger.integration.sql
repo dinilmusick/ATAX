@@ -97,7 +97,7 @@ begin
   for checkpoint_index in 0..jsonb_array_length(claimed.checkpoints)-1 loop
     perform public.record_checkpoint_predicate_result(
       task_id,checkpoint_index::smallint,'builtin.evidence_present',1,
-      jsonb_build_object('checkpoint',checkpoint_index),
+      jsonb_build_object('checkpoint',checkpoint_index,'evidence',jsonb_build_array('checkpoint passed')),
       jsonb_build_object('ok',true,'checkpoint',checkpoint_index),
       true,
       jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
@@ -156,7 +156,7 @@ begin
   end if;
   perform public.task_ledger_verify_result_claimed(
     task_id,'integration-test-actor',verifier.verification_claim_token,
-    true,jsonb_build_object('verified',true,'independent',true)
+    true,jsonb_build_object('verified',true,'evidence',jsonb_build_array('passing loop iteration','all checkpoint predicate receipts'))
   );
   select * into denied_claim from public.task_ledger_claim_verification_for_task(
     task_id,'integration-test-actor-two',900
