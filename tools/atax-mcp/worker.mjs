@@ -4,6 +4,7 @@ import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 import {neonTools} from './neon-tools.mjs';
 import {vercelTools} from './vercel-tools.mjs';
 import {browserTools} from './browser-tools.mjs';
+import {verificationTools} from './verification-tools.mjs';
 import {computeTools} from './compute-tools.mjs';
 import {inferenceTools} from './inference-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
@@ -65,7 +66,7 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
   tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
 ];
-TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...browserTools,...visualTools);
+TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...browserTools,...verificationTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
@@ -371,8 +372,7 @@ export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRunt
     let body;try{const source=await req.text();if(encoder.encode(source).length>MAX_BODY_BYTES)return json({error:'Request too large'},413);body=JSON.parse(source);}catch{return json(err(null,-32700,'Parse error'),400);}
     if(Array.isArray(body)&&body.length===0)return json(err(null,-32600,'Empty JSON-RPC batch'),400);
     const batch=Array.isArray(body)?body:[body];if(batch.length>30)return json(err(null,-32600,'Too many batch requests'),400);
-    const results=[];for(const msg of batch){const reply=await routeRpc(msg,principal,env,fetcher);if(reply!==undefined)results.push(reply);}
-    if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
+    const results=[];for(const msg of batch){const reply=await routeRpc(msg,principal,env,fetcher);if(reply!==undefined)results.push(reply);}\n    if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
     return json(Array.isArray(body)?results:results[0]);
   }
   return async (req,bootstrapEnv={})=>{
