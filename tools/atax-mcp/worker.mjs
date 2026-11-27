@@ -3,6 +3,7 @@ import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 import {neonTools} from './neon-tools.mjs';
 import {vercelTools} from './vercel-tools.mjs';
+import {supabaseTools} from './supabase-tools.mjs';
 import {browserTools} from './browser-tools.mjs';
 import {computeTools} from './compute-tools.mjs';
 import {inferenceTools} from './inference-tools.mjs';
@@ -65,7 +66,7 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
   tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
 ];
-TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...browserTools,...visualTools);
+TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...supabaseTools,...browserTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
@@ -127,6 +128,7 @@ function scrubSecrets(text, env){
     }
     if(key.startsWith('GH_KEY_')||key.startsWith('GH_TOKEN_')||key.startsWith('CF_KEY_')||key.startsWith('CLOUDFLARE_TOKEN_')||
        key.startsWith('NEON_KEY_')||key.startsWith('NEON_TOKEN_')||key.startsWith('VERCEL_KEY_')||key.startsWith('VERCEL_TOKEN_')||
+       key.startsWith('SUPABASE_KEY_')||key.startsWith('SUPABASE_ACCESS_TOKEN_')||
        key.startsWith('FRNES_KEY_')||key.startsWith('AI_KEY_')||key==='FRNES_SERVICE_TOKEN'||
        key==='ATAX_SUPABASE_SECRET_KEY'||key==='SUPABASE_SERVICE_ROLE_KEY'||key==='SUPABASE_SECRET_KEY'||key==='MCP_SHARED_TOKEN_SHA256'){
       clean=clean.split(val).join('[REDACTED]');
@@ -187,7 +189,7 @@ async function authenticate(request,env, fetcher=fetch, jwksCache=null){
      env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
      env.MCP_AUTH_OWNER_SCOPES) {
     for(const scope of String(env.MCP_AUTH_OWNER_SCOPES).split(/\s+/)) {
-      if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|neon:read|neon:write|vercel:read|vercel:write|fmrl:execute)$/.test(scope))scopes.add(scope);
+      if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|neon:read|neon:write|vercel:read|vercel:write|supabase:read|supabase:write|fmrl:execute)$/.test(scope))scopes.add(scope);
     }
   }
   // ATAX cares about authorized work, not which app supplies the external agent.
