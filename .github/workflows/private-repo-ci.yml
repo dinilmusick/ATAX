@@ -22,12 +22,32 @@ on:
         default: ""
         type: string
       mode:
-        description: FMRL execution mode (direct, repair, or artifact)
+        description: FMRL execution mode (direct, repair, artifact, or skill)
         required: false
         default: direct
         type: string
       branch:
         description: Target branch (required for repair and artifact modes)
+        required: false
+        default: ""
+        type: string
+      skill_command:
+        description: Single-line command for executable-skill mode
+        required: false
+        default: ""
+        type: string
+      skill_install:
+        description: Single-line dependency installation command for executable-skill mode
+        required: false
+        default: ""
+        type: string
+      skill_workdir:
+        description: Working directory relative to target for executable-skill mode
+        required: false
+        default: ""
+        type: string
+      skill_output:
+        description: Optional bounded output artifact path relative to target
         required: false
         default: ""
         type: string
@@ -88,6 +108,10 @@ jobs:
           INPUT_WORKFLOW: ${{ inputs.workflow }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_SKILL_COMMAND: ${{ inputs.skill_command }}
+          INPUT_SKILL_INSTALL: ${{ inputs.skill_install }}
+          INPUT_SKILL_WORKDIR: ${{ inputs.skill_workdir }}
+          INPUT_SKILL_OUTPUT: ${{ inputs.skill_output }}
           INPUT_REQUEST_ID: ${{ inputs.request_id }}
         shell: bash
         run: |
@@ -100,6 +124,10 @@ jobs:
             'workflow':os.environ.get('INPUT_WORKFLOW',''),
             'mode':os.environ.get('INPUT_MODE','direct'),
             'branch':os.environ.get('INPUT_BRANCH',''),
+            'skill_command':os.environ.get('INPUT_SKILL_COMMAND',''),
+            'skill_install':os.environ.get('INPUT_SKILL_INSTALL',''),
+            'skill_workdir':os.environ.get('INPUT_SKILL_WORKDIR',''),
+            'skill_output':os.environ.get('INPUT_SKILL_OUTPUT',''),
             'request_id':os.environ.get('INPUT_REQUEST_ID','')
           }
           repo=data.get('repository') or ''
