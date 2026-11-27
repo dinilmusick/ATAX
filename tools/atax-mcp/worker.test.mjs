@@ -436,9 +436,9 @@ test('MCP named GitHub accounts use selected token and do not use canonical owne
   assert.equal(seen.length,3);
 });
 
-test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools with owner scopes',async()=>{
+test('MCP exposes provider diagnostics and multi-account Neon, Vercel & Supabase tools with owner scopes',async()=>{
   const cfg={...gitEnv,
-    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read atax:neon:read atax:neon:write atax:vercel:read atax:vercel:write',
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read atax:neon:read atax:neon:write atax:vercel:read atax:vercel:write atax:supabase:read atax:supabase:write',
     GH_KEY_WORK:'git-work-secret',
     CF_KEY_WORK:'cf-work-secret',
     NEON_KEY_PERSONAL:'neon-personal-secret-123',
@@ -447,6 +447,9 @@ test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools wit
     VERCEL_KEY_PERSONAL:'vercel-personal-secret-123',
     VERCEL_KEY_WORK:'vercel-work-secret-456',
     VERCEL_TEAM_ID_WORK:'team_work_1',
+    SUPABASE_KEY_PERSONAL:'supa-personal-secret-123',
+    SUPABASE_KEY_WORK:'supa-work-secret-456',
+    SUPABASE_ORG_SLUG_WORK:'org-supa-work',
   };
   const fetched=(await(await post('tools/list',{}, {env:cfg})).json()).result.tools.map(t=>t.name);
   assert.ok(fetched.includes('atax_provider_accounts_list'));
@@ -455,18 +458,22 @@ test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools wit
   assert.ok(fetched.includes('atax_neon_database_create'));
   assert.ok(fetched.includes('atax_vercel_projects_list'));
   assert.ok(fetched.includes('atax_vercel_deployment_create'));
+  assert.ok(fetched.includes('atax_supabase_projects_list'));
+  assert.ok(fetched.includes('atax_supabase_sql_query'));
   assert.ok(fetched.includes('atax_github_job_logs_get'));
   assert.ok(fetched.includes('atax_browser_render'));
   assert.ok(fetched.includes('atax_browser_test_dispatch'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_neon_projects_list'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_vercel_projects_list'));
+  assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_supabase_projects_list'));
   const list=await makeGitCall('atax_provider_accounts_list',{}, {env:cfg});
   const configured=list.structuredContent.result.accounts;
-  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare','neon','vercel','compute']);
+  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare','neon','vercel','supabase','compute']);
   assert.deepEqual(configured.find(x=>x.provider==='cloudflare').aliases,['WORK']);
   assert.deepEqual(configured.find(x=>x.provider==='neon').aliases,['PERSONAL','WORK']);
   assert.deepEqual(configured.find(x=>x.provider==='vercel').aliases,['PERSONAL','WORK']);
+  assert.deepEqual(configured.find(x=>x.provider==='supabase').aliases,['PERSONAL','WORK']);
   assert.equal((await makeGitCall('atax_cloudflare_accounts_list',{account:'WORK'},{env:gitEnv})).isError,true);
 
   const neonSeen=[];
@@ -505,6 +512,24 @@ test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools wit
   assert.ok(!JSON.stringify(vercelRes).includes('vercel-work-secret-456'));
   const vercelAmbiguous=await makeGitCall('atax_vercel_projects_list',{},{env:cfg,fetcher:vercelFetcher});
   assert.equal(vercelAmbiguous.isError,true);
+
+  const supaSeen=[];
+  const supaFetcher=async(url,opts={})=>{
+    supaSeen.push({url,opts});
+    if(url==='https://api.supabase.com/v1/projects'){
+      return Response.json([{id:'abcdefghijklmnopqrst',name:'atax-db',organization_slug:'org-supa-work',region:'us-east-1',status:'ACTIVE_HEALTHY'}]);
+    }
+    return upstream(url,opts);
+  };
+  const supaRes=await makeGitCall('atax_supabase_projects_list',{account:'WORK'},{env:cfg,fetcher:supaFetcher});
+  assert.equal(supaRes.isError,undefined);
+  assert.equal(supaRes.structuredContent.result.account,'WORK');
+  assert.equal(supaRes.structuredContent.result.org_slug,'org-supa-work');
+  assert.equal(supaRes.structuredContent.result.projects[0].ref,'abcdefghijklmnopqrst');
+  assert.equal(supaSeen[0].opts.headers.authorization,'Bearer supa-work-secret-456');
+  assert.ok(!JSON.stringify(supaRes).includes('supa-work-secret-456'));
+  const supaAmbiguous=await makeGitCall('atax_supabase_projects_list',{},{env:cfg,fetcher:supaFetcher});
+  assert.equal(supaAmbiguous.isError,true);
 });
 
 test('GitHub job step logs and browser rendering/testing tools work and strip ANSI/secrets',async()=>{
