@@ -206,6 +206,43 @@ SELECT id,parent_task_id,allowed_caps,allowed_tools,repositories,resources,autho
 FROM authority_tree
 ON CONFLICT(task_id) DO NOTHING;
 
+-- Authority envelopes are immutable after creation. A new child receives its
+-- own envelope only from the task-insert trigger, which validates attenuation.
+CREATE OR REPLACE FUNCTION public.reject_socket_task_authority_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path=public,pg_temp
+AS $guard$
+BEGIN
+  RAISE EXCEPTION 'Socket task authority envelopes are immutable';
+END
+$guard$;
+DROP TRIGGER IF EXISTS socket_task_authority_append_only ON public.socket_task_authority;
+CREATE TRIGGER socket_task_authority_append_only
+BEFORE UPDATE OR DELETE ON public.socket_task_authority
+FOR EACH ROW EXECUTE FUNCTION public.reject_socket_task_authority_mutation();
+REVOKE UPDATE,DELETE,TRUNCATE ON public.socket_task_authority FROM service_role;
+GRANT SELECT,INSERT ON public.socket_task_authority TO service_role;
+
+-- Reject direct envelopes: every new envelope must be produced by the guarded
+-- task insertion trigger above, never by a caller-supplied authority mutation.
+CREATE OR REPLACE FUNCTION public.require_task_insert_for_socket_authority()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path=public,pg_temp
+AS $guard$
+BEGIN
+  IF pg_trigger_depth()=0 THEN
+    RAISE EXCEPTION 'Socket task authority can only be created with a task';
+  END IF;
+  RETURN NEW;
+END
+$guard$;
+DROP TRIGGER IF EXISTS socket_task_authority_insert_guard ON public.socket_task_authority;
+CREATE TRIGGER socket_task_authority_insert_guard
+BEFORE INSERT ON public.socket_task_authority
+FOR EACH ROW EXECUTE FUNCTION public.require_task_insert_for_socket_authority();
+
 -- No task may bootstrap a gateway capability beyond its immutable task ceiling.
 DO $migration$
 DECLARE
