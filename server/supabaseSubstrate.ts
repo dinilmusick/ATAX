@@ -17,6 +17,11 @@ import type {
   VisionGoalTaskEdge,
   VisionGraphNodeData,
   VisionsGoalsSubstrateResponse,
+  WorkSocketAuditEvent,
+  WorkSocketPredicateReceipt,
+  WorkSocketSubstrateResponse,
+  WorkSocketTaskRecord,
+  WorkSocketWorkerRecord,
 } from '../src/types/substrate.ts';
 
 function asRecord(val: unknown): Record<string, unknown> {
@@ -1144,6 +1149,200 @@ export function createSubstrateService(
     throw new Error(errMsg);
   }
 
+
+  async function getWorkSockets(): Promise<WorkSocketSubstrateResponse> {
+    const api = resolveApi();
+    const fetchedAt = new Date().toISOString();
+    const nowMs = Date.now();
+    const [
+      tasksRes,
+      goalsRes,
+      systemsRes,
+      budgetsRes,
+      cursorsRes,
+      childrenRes,
+      predicatesRes,
+      eventsRes,
+      agentsRes,
+      invocationsRes,
+    ] = await Promise.all([
+      api.selectAll(
+        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,status,verification_status,task_role,execution_model,loop_script_status,claimed_by_agent_id,claimed_by_agent_name,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,required_capabilities,updated_at&status=not.in.(cancelled,abandoned)&order=updated_at.desc&limit=3000'
+      ),
+      api.selectAll('goals?select=id,goal_key,name,system_id'),
+      api.selectAll('systems?select=id,system_key'),
+      api.selectAll(
+        'socket_task_budgets?select=task_id,max_input,max_output,max_total,input_used,output_used'
+      ),
+      api.selectAll('socket_context_cursors?select=task_id,next_offset'),
+      api.selectAll('socket_atomization_children?select=parent_task_id,child_task_id,ordinal'),
+      api.selectAll(
+        'predicate_executions?select=task_id,checkpoint_index,predicate_key,predicate_version,passed,evidence,created_at&order=created_at.desc&limit=3000'
+      ),
+      api.selectAll(
+        'task_events?select=task_id,event_type,agent_id,message,occurred_at&order=occurred_at.desc&limit=2000'
+      ),
+      api.selectAll(
+        'agent_registry?select=agent_id,agent_name,agent_type,capabilities,enabled,last_seen_at&order=last_seen_at.desc&limit=500'
+      ),
+      api.selectAll(
+        'socket_invocations?select=id,agent_id,role,registered_at,expires_at,model_id&order=registered_at.desc&limit=500'
+      ),
+    ]);
+
+    if (!tasksRes.ok) {
+      throw new Error(tasksRes.error || 'Unable to read WorkSocket tasks from Supabase.');
+    }
+
+    const goalById = new Map<string, Record<string, unknown>>(
+      (goalsRes.ok ? goalsRes.rows : []).map((row) => [String(row.id), row])
+    );
+    const systemKeyById = new Map<string, string>(
+      (systemsRes.ok ? systemsRes.rows : []).map((row) => [String(row.id), String(row.system_key || '')])
+    );
+    const budgetByTask = new Map<string, Record<string, unknown>>(
+      (budgetsRes.ok ? budgetsRes.rows : []).map((row) => [String(row.task_id), row])
+    );
+    const cursorByTask = new Map<string, number>(
+      (cursorsRes.ok ? cursorsRes.rows : []).map((row) => [String(row.task_id), Number(row.next_offset || 0)])
+    );
+    const childCountByParent = new Map<string, number>();
+    if (childrenRes.ok) {
+      for (const child of childrenRes.rows) {
+        const parentId = String(child.parent_task_id || '');
+        if (parentId) childCountByParent.set(parentId, (childCountByParent.get(parentId) || 0) + 1);
+      }
+    }
+
+    const predicatesByTask = new Map<string, WorkSocketPredicateReceipt[]>();
+    if (predicatesRes.ok) {
+      for (const row of predicatesRes.rows) {
+        const taskId = String(row.task_id || '');
+        if (!taskId) continue;
+        const list = predicatesByTask.get(taskId) || [];
+        list.push({
+          checkpointIndex: Number(row.checkpoint_index || 0),
+          predicateKey: String(row.predicate_key || ''),
+          predicateVersion: Number(row.predicate_version || 1),
+          passed: row.passed === true,
+          evidenceCount: asArray(row.evidence).length,
+          createdAt: typeof row.created_at === 'string' ? row.created_at : null,
+        });
+        predicatesByTask.set(taskId, list);
+      }
+    }
+
+    const eventsByTask = new Map<string, WorkSocketAuditEvent[]>();
+    if (eventsRes.ok) {
+      for (const row of eventsRes.rows) {
+        const taskId = String(row.task_id || '');
+        if (!taskId) continue;
+        const list = eventsByTask.get(taskId) || [];
+        if (list.length < 6) {
+          list.push({
+            eventType: String(row.event_type || 'event'),
+            message: String(row.message || ''),
+            actorLabel: row.agent_id
+              ? buildOpaqueAgentLabel(row.agent_id, null, null)
+              : null,
+            occurredAt: typeof row.occurred_at === 'string' ? row.occurred_at : null,
+          });
+        }
+        eventsByTask.set(taskId, list);
+      }
+    }
+
+    const tasks: WorkSocketTaskRecord[] = tasksRes.rows
+      .filter((row) => {
+        const id = String(row.id || '');
+        return Boolean(
+          budgetByTask.has(id) ||
+          row.execution_model === 'bounded-v2' ||
+          row.parent_task_id ||
+          row.claimed_session_id ||
+          row.status === 'running' ||
+          row.task_role === 'loop_authoring' ||
+          row.loop_script_status === 'ready'
+        );
+      })
+      .map((row) => {
+        const id = String(row.id || '');
+        const goal = row.goal_id ? goalById.get(String(row.goal_id)) : undefined;
+        const budget = budgetByTask.get(id);
+        const requiredCapabilities = asArray(row.required_capabilities).map(String);
+        const occupancy = deriveOccupancy(row, nowMs);
+        return {
+          id,
+          taskKey: String(row.task_key || id),
+          goalId: row.goal_id ? String(row.goal_id) : null,
+          goalKey: goal ? String(goal.goal_key || '') || null : null,
+          goalName: goal ? String(goal.name || '') || null : null,
+          systemKey: goal?.system_id
+            ? systemKeyById.get(String(goal.system_id)) || null
+            : null,
+          parentTaskId: row.parent_task_id ? String(row.parent_task_id) : null,
+          name: String(row.task_name || row.task_key || 'Untitled task'),
+          description: String(row.description || ''),
+          status: String(row.status || 'queued'),
+          executionModel: String(row.execution_model || 'legacy'),
+          taskRole: String(row.task_role || 'execution'),
+          loopScriptStatus: String(row.loop_script_status || 'missing'),
+          verificationStatus: String(row.verification_status || 'not_started'),
+          requiredCapabilities,
+          occupancy,
+          budget: budget ? {
+            maxInput: Number(budget.max_input || 0),
+            maxOutput: Number(budget.max_output || 0),
+            maxTotal: Number(budget.max_total || 0),
+            inputUsed: Number(budget.input_used || 0),
+            outputUsed: Number(budget.output_used || 0),
+          } : null,
+          nextContextOffset: cursorByTask.get(id) || 0,
+          childCount: childCountByParent.get(id) || 0,
+          predicates: predicatesByTask.get(id) || [],
+          events: eventsByTask.get(id) || [],
+          updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+        };
+      })
+      .sort((a, b) => {
+        const priority = (s: string) => s === 'running' ? 0 : s === 'waiting' ? 1 : s === 'queued' ? 2 : 3;
+        return priority(a.status) - priority(b.status) ||
+          String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+      });
+
+    const workers: WorkSocketWorkerRecord[] = [];
+    if (agentsRes.ok) {
+      for (const row of agentsRes.rows) {
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, row.agent_name, row.last_seen_at) || 'Registered agent',
+          name: String(row.agent_name || 'Agent'),
+          role: String(row.agent_type || 'worker'),
+          enabled: row.enabled !== false,
+          capabilities: asArray(row.capabilities).map(String),
+          lastSeenAt: typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+          expiresAt: null,
+          source: 'agent_registry',
+        });
+      }
+    }
+    if (invocationsRes.ok) {
+      for (const row of invocationsRes.rows) {
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, null, row.registered_at) || 'Socket caller',
+          name: String(row.model_id || 'Authenticated invocation'),
+          role: String(row.role || 'worker'),
+          enabled: Boolean(row.expires_at && Date.parse(String(row.expires_at)) > nowMs),
+          capabilities: [],
+          lastSeenAt: typeof row.registered_at === 'string' ? row.registered_at : null,
+          expiresAt: typeof row.expires_at === 'string' ? row.expires_at : null,
+          source: 'socket_invocation',
+        });
+      }
+    }
+
+    return { tasks, workers, fetchedAt };
+  }
+
   async function getSkillsCatalog(): Promise<SkillsSubstrateResponse> {
     const api = resolveApi();
     const fetchedAt = new Date().toISOString();
@@ -1267,6 +1466,7 @@ export function createSubstrateService(
   return {
     getSystemsGraph,
     getVisionsGoalsGraph,
+    getWorkSockets,
     getSkillsCatalog,
   };
 }
