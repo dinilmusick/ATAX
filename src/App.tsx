@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { BookOpen, Cpu, GitBranch, RefreshCw, Settings } from 'lucide-react';
+import { Activity, BookOpen, Cpu, GitBranch, RefreshCw, Settings } from 'lucide-react';
 import type { ActiveTab } from './types/substrate';
 import { IconButton } from './components/IconButton';
 import { SystemsGraphView } from './components/SystemsGraphView';
 import { VisionsGoalsGraphView } from './components/VisionsGoalsGraphView';
 import { SkillCatalogView } from './components/SkillCatalogView';
+import { WorkSocketsView } from './components/WorkSocketsView';
 import { SettingsView } from './components/SettingsView';
 
 function HayateCrest() {
@@ -71,6 +72,15 @@ export default function App() {
             </IconButton>
 
             <IconButton
+              label="WorkSocket Operations"
+              active={activeTab === 'worksockets'}
+              variant="accent"
+              onClick={() => setActiveTab('worksockets')}
+            >
+              <Activity className="w-4 h-4" />
+            </IconButton>
+
+            <IconButton
               label="Skill Catalog"
               active={activeTab === 'skills'}
               variant="accent"
@@ -108,6 +118,9 @@ export default function App() {
         )}
         {activeTab === 'visions' && (
           <VisionsGoalsGraphView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
+        )}
+        {activeTab === 'worksockets' && (
+          <WorkSocketsView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
         )}
         {activeTab === 'skills' && (
           <SkillCatalogView refreshTick={refreshTick} onLoadingChange={handleLoadingChange} />
