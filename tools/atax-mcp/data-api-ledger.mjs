@@ -46,6 +46,7 @@ export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   'task_ledger_record_handoff',
   'task_ledger_heartbeat_claim',
   'task_ledger_record_loop_iteration',
+  'record_checkpoint_predicate_result',
   'task_ledger_submit_result',
   'task_ledger_release_claim',
   'task_ledger_add_dependency',
