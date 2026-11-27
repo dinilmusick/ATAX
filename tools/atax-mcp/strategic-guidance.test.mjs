@@ -41,7 +41,7 @@ test('intro documentation is available as an explicit tool without being injecte
 test('ordinary tool calls update guidance state but return only a compact retrieval hint', async()=>{
   const h=harness();
   const response=await routeRpc({jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'atax_context',arguments:{}}},h.principal,h.env,fetch);
-  assert.equal(response.result.guidance.retrieval_tool,'atax_preemptive_guidance_get');
+  assert.equal(response.result.structuredContent.guidance.retrieval_tool,'atax_preemptive_guidance_get');
   assert.equal(h.calls.filter(x=>x.name==='atax_mcp_preemptive_guidance_update_v1').length,1);
   assert.equal(response.result.content[0].text,'{"systems":[],"goals":[],"tasks":[]}');
 });
