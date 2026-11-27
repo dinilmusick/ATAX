@@ -8,6 +8,7 @@ import { createSubstrateService } from './server/supabaseSubstrate.ts';
 import { inspectSupabaseConnection } from './server/supabaseVault.ts';
 import { createHandler as createMcpHandler } from './tools/atax-mcp/worker.mjs';
 import { getVisualState, setVisualState } from './tools/atax-mcp/visual-store.mjs';
+import { createSkillService } from './server/skills.ts';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +65,7 @@ if (!process.env.MCP_SHARED_TOKEN_SHA256) {
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '256kb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -107,6 +108,7 @@ app.use('/api/settings', (req, res) => {
 });
 
 const substrateService = createSubstrateService(process.env);
+const skillService = createSkillService(process.env);
 
 async function handleSubstrate(
   res: express.Response,
@@ -135,6 +137,62 @@ app.get('/api/substrate/visions-goals', (_req, res) => {
     () => substrateService.getVisionsGoalsGraph(),
     'Unable to query visions and goals from Supabase.'
   );
+});
+
+app.get('/api/skills', async (req, res) => {
+  try {
+    res.json(await skillService.search(typeof req.query.q === 'string' ? req.query.q : ''));
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : 'Unable to search skills.' });
+  }
+});
+
+app.get('/api/skills/:slug', async (req, res) => {
+  try {
+    res.json(await skillService.get(req.params.slug));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Unable to fetch skill.' });
+  }
+});
+
+app.get('/api/skills/:slug/executable', async (req, res) => {
+  try {
+    res.json(await skillService.executable(req.params.slug));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Unable to fetch executable skill spec.' });
+  }
+});
+
+app.post('/api/skills/register', async (req, res) => {
+  const request = new Request('http://localhost/api/skills/register', {
+    method: 'POST',
+    headers: { authorization: req.get('authorization') || '' },
+  });
+  if (!skillService.operatorAuthorized(request)) {
+    res.status(401).json({ error: 'Operator authorization required.' });
+    return;
+  }
+  try {
+    res.status(201).json(await skillService.register(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Unable to register skill.' });
+  }
+});
+
+app.post('/api/skills/import/github', async (req, res) => {
+  const request = new Request('http://localhost/api/skills/import/github', {
+    method: 'POST',
+    headers: { authorization: req.get('authorization') || '' },
+  });
+  if (!skillService.operatorAuthorized(request)) {
+    res.status(401).json({ error: 'Operator authorization required.' });
+    return;
+  }
+  try {
+    res.status(201).json(await skillService.importGithub(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Unable to import GitHub skill.' });
+  }
 });
 
 app.get('/api/substrate/skills', (_req, res) => {
