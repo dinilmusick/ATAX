@@ -3,6 +3,7 @@ import {githubTools, githubGuide} from './github-tools.mjs';
 import {providerTools,isOwnerPrincipal} from './provider-accounts.mjs';
 import {neonTools} from './neon-tools.mjs';
 import {vercelTools} from './vercel-tools.mjs';
+import {browserTools} from './browser-tools.mjs';
 import {computeTools} from './compute-tools.mjs';
 import {inferenceTools} from './inference-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
@@ -64,7 +65,7 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
   tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
 ];
-TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...visualTools);
+TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...browserTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
@@ -304,23 +305,13 @@ export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRunt
     if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&(req.method==='GET'||req.method==='HEAD')){
       const resource=new URL('/mcp',req.url).toString();
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      // Phase 2: Supabase Auth serves as the independent authorization server.
-      // ATAX is a pure protected resource: it never issues tokens or performs
-      // dynamic client registration itself. Those belong to the Supabase OAuth server.
-      // We advertise the Supabase authorization server so MCP clients can discover
-      // and register with it without any manual credential configuration.
       const metadata={
         resource,
         authorization_servers:server?[server]:[],
         bearer_methods_supported:['header'],
         scopes_supported:['openid','profile','email','offline_access'],
-        // resource_documentation lets clients show human-readable connection instructions.
         resource_documentation:new URL('/health',req.url).toString(),
       };
-      // When the authorization server is known, advertise the dynamic client registration
-      // endpoint so clients that support RFC 7591 registration (Claude, Gemini) can
-      // auto-register without hardcoding credentials. Supabase exposes it at
-      // <issuer>/oauth/clients/register (e.g. https://<project>.supabase.co/auth/v1/oauth/clients/register).
       if(server){
         try{
           const issuerUrl=new URL(server);
@@ -333,9 +324,6 @@ export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRunt
       if(req.method==='HEAD')return new Response(null,{status:200,headers:safeHeaders});
       return json(metadata);
     }
-    // Phase 2: MCP clients may check /.well-known/oauth-authorization-server (or with /mcp suffix)
-    // or /.well-known/openid-configuration on the resource server URL. Proxy the upstream
-    // authorization server discovery document preserving the issuer path (e.g. /auth/v1).
     if((url.pathname==='/.well-known/oauth-authorization-server'||url.pathname==='/.well-known/oauth-authorization-server/mcp'||url.pathname==='/.well-known/openid-configuration')&&(req.method==='GET'||req.method==='HEAD')){
       const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
       if(!server)return json({error:'Authorization server not configured'},404);
