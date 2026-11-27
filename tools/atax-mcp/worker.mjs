@@ -28,8 +28,44 @@ const S = {
   bool: description => ({ type: 'boolean', description }),
 };
 const tool = (name, description, scope, inputSchema, invoke) => ({name, description, scope, inputSchema, invoke});
+const ATAX_INTRO_DOCUMENTATION = {
+  title: 'ATAX agent orientation',
+  version: 2,
+  purpose: 'ATAX is the durable strategic substrate for externally created transient agents. It is the persistent graph of systems, visions, targets, goals, tasks, dependencies, evidence and verified results.',
+  workflow: [
+    'Hydrate ATAX context and the narrowest applicable skills before interpreting substantive work.',
+    'For a substantive or ambiguous objective, call atax_strategy_resolve before creating or claiming work.',
+    'Resolve the existing System and strategic graph first.',
+    'Reuse an existing Vision/Goal when the request belongs to it; create missing strategic structure only when necessary.',
+    'Decompose substantive goals into bounded tasks with 1–4 actions and explicit acceptance/verification.',
+    'Claim one eligible task, execute externally, persist evidence, obtain independent verification, then reassess the strategic graph.',
+    'Use goal and task dependencies to express strategy and execution order; ATAX is the graph, not merely a task queue.'
+  ],
+  guidance: 'Preemptive guidance is durable state. Tool actions update it, but normal responses do not include the documentation. When the next strategic move is unclear, call atax_preemptive_guidance_get to retrieve the current guidance and graph briefing.',
+  privateCi: 'For private-repository remote CI, prefer ATAX FMRL disposable execution rather than consuming private-repository GitHub Actions quota. FMRL is ephemeral, must be polled to terminal state, and cleanup must be independently verified. Never execute private target code in ATAX Actions.',
+  execution: 'ATAX never spawns or schedules agents. It provides durable state, routing, authorization and external execution interfaces; the incoming agent performs the work.'
+};
+
 const TOOLS = [...computeTools, ...inferenceTools,
 
+  tool('atax_intro_documentation', 'Read the concise ATAX operating manual for agents. Use this to understand the strategic graph, planning workflow, on-demand preemptive guidance and private-repository FMRL CI policy.', 'atax:read', one('intro', {}), () => ATAX_INTRO_DOCUMENTATION),
+  tool('atax_strategy_resolve', 'Preferred strategic entry point for substantive objectives. Resolve the request against the live System → Vision/Target → Goal graph and return compact candidate work before any task creation or claim.', 'atax:read', one('strategy resolve',{objective:S.text('Natural-language user objective',4000),system_key:{type:'string',maxLength:120,description:'Optional known canonical System key'}},['objective']), async (a,db) => {
+    const context=await db.rpc('agent_context_overview',{});
+    const objective=String(a.objective||'').toLowerCase();
+    const tokens=new Set((objective.match(/[a-z0-9][a-z0-9_-]{2,}/g)||[]).filter(x=>!['the','and','for','with','from','that','this','into','need','want','make','implement','fix','build'].includes(x)));
+    const systems=(context?.systems||[]).map(s=>{
+      const hay=String([s.system_key,s.name,s.system_type].join(' ')).toLowerCase();
+      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
+      return {system_key:s.system_key,name:s.name,status:s.status,work_priority:s.work_priority,score};
+    }).filter(x=>!a.system_key||x.system_key===a.system_key).sort((x,y)=>y.score-x.score||Number(y.work_priority||0)-Number(x.work_priority||0)).slice(0,8);
+    const goals=(context?.goals||[]).map(g=>{
+      const hay=String([g.goal_key,g.name,g.status].join(' ')).toLowerCase();
+      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
+      return {goal_key:g.goal_key,name:g.name,status:g.status,system_id:g.system_id,user_priority:g.user_priority,score};
+    }).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||Number(y.user_priority||0)-Number(x.user_priority||0)).slice(0,8);
+    return {objective:a.objective,recommended_workflow:['Resolve/reuse System','Reuse or create Vision/Target','Reuse or create Goal','Attach dependencies','Decompose into 1–4 action tasks','Claim one eligible task','Execute externally','Submit evidence','Independently verify','Reassess graph'],candidate_systems:systems,candidate_goals:goals,planning_rule:'Do not create a new task merely because the user phrased a new request. First determine whether the request advances an existing strategic node.',next:'If the correct strategic location is still unclear, call atax_preemptive_guidance_get; otherwise reuse the best matching graph node and continue through the canonical lifecycle.'};
+  }),
+  tool('atax_preemptive_guidance_get', 'Retrieve current durable preemptive guidance on demand. Guidance is updated after tool actions and intentionally omitted from ordinary tool responses to avoid context bloat.', 'atax:read', one('guidance', {}), (_,db,p) => db.rpc('atax_mcp_preemptive_guidance_get_v1',{owner_subject_in:p.id})),
   tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
   tool('atax_system_context', 'Live canonical context snapshot for one system key', 'atax:read', one('system', {system_key:S.text('Canonical system key')}, ['system_key']), (a,db) => db.rpc('atax_context_snapshot', {system_key_in:a.system_key})),
   tool('atax_goal_overview', 'Open goals and their task states, optionally tag-filtered', 'atax:read', one('overview', {tags:{type:'array',items:S.text('Tag',80),maxItems:20}}), (a,db) => db.rpc('goal_ledger_overview', {tags_in:a.tags??null})),
@@ -70,10 +106,13 @@ const TOOLS = [...computeTools, ...inferenceTools,
 TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...supabaseTools,...browserTools,...verificationTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
+  {uri:'atax://documentation/intro',name:'ATAX agent introduction',mimeType:'application/json',description:'Strategic workflow, graph semantics and execution boundaries'},
+  {uri:'atax://guidance/preemptive',name:'Current preemptive strategic guidance',mimeType:'application/json',description:'On-demand mutable guidance updated after tool actions'},
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
   {uri:'atax://goals/overview',name:'Goal and task ledger',mimeType:'application/json',description:'Live canonical goal/task graph'},
   {uri:'atax://skills/catalog',name:'Active skills catalogue',mimeType:'application/json',description:'Canonical Supabase skills registry'},
   {uri:'atax://guides/github-workflows',name:'ATAX GitHub repository and disposable FMRL workflows',mimeType:'application/json',description:'Choose permanent repositories or auto-disposed FMRL control-plane dispatch; security and verification rules'},
+  ...visualResourceDefs,
 ];
 const safeHeaders = {'cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'"};
 function json(value,status=200,extra={}) { return new Response(JSON.stringify(value),{status,headers:{...safeHeaders,'content-type':'application/json; charset=utf-8',...extra}}); }
@@ -231,10 +270,22 @@ async function runCall(name,args,principal,env,fetcher){
   }
   try{
     const result=await match.invoke(args,supabase(env,fetcher),principal,{env,fetcher});
+    let guidanceMeta={guidance_available:true,retrieval_tool:'atax_preemptive_guidance_get'};
+    if(fetcher===fetch && name!=='atax_preemptive_guidance_get' && name!=='atax_intro_documentation'){
+      try{
+        const summary=JSON.stringify(result).slice(0,1000);
+        await supabase(env,fetcher).rpc('atax_mcp_preemptive_guidance_update_v1',{
+          owner_subject_in:principal.id,
+          tool_name_in:name,
+          action_summary_in:summary,
+          context_in:{scope:match.scope}
+        });
+      }catch(e){ console.warn('[mcp:guidance:update]',e instanceof Error?e.message:String(e)); }
+    }
     const rawText=JSON.stringify(result);
     const safeText=scrubSecrets(rawText,env);
     const safeResult=safeText===rawText?result:JSON.parse(safeText);
-    return {content:[{type:'text',text:safeText}],structuredContent:{result:safeResult}};
+    return {content:[{type:'text',text:safeText}],structuredContent:{result:safeResult,guidance:guidanceMeta}};
   }
   catch(err){
     const rawMessage=err instanceof Error?err.message:String(err||'Canonical operation denied or unavailable');
@@ -252,7 +303,7 @@ async function routeRpc(msg,principal,env,fetcher){
   if(!isObj(params))return err(id,-32602,'Params must be an object');
   if(msg.method==='initialize'){
     const negotiated=typeof params.protocolVersion==='string'&&SUPPORTED.has(params.protocolVersion)?params.protocolVersion:PROTOCOL;
-    return ok(id,{protocolVersion:negotiated,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is persistent state for external transient agents. Hydrate canonical context and skills before work; ATAX never spawns or schedules agents. Heartbeat and check claim every 30-60 seconds; leases expire after at most 120 seconds. On lost claim, stop writing the old socket, call atax_task_handoff with the old token and a partial-work note, then call atax_task_claim_next or atax_goal_claim_task to find another free socket. Do NOT exit solely because the prior lease was lost. For GitHub operations, read atax_github_workflows_guide first; create permanent projects via atax_github_repository_create, and use atax_fmrl_create_run_dispose only for disposable fallback CI with mandatory atax_fmrl_get_status cleanup verification.'});
+    return ok(id,{protocolVersion:negotiated,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'2.0.0'},instructions:'ATAX is the durable strategic substrate for externally created transient agents. First call atax_intro_documentation for orientation, then hydrate canonical context and skills. For substantive objectives, call atax_strategy_resolve before creating or claiming work and resolve System → Vision → Target → Goal → Task, reusing existing strategic nodes whenever possible. Use dependencies to express strategy; decompose substantive goals into 1–4 action tasks; then claim → execute externally → evidence → independent verification → reassess. Preemptive guidance is durable state: actions refresh it, ordinary tool responses do not include it, and atax_preemptive_guidance_get retrieves it on demand. ATAX never spawns or schedules agents. Heartbeat and check claims regularly; on lost claim, hand off with the old token and claim another free socket. For private-repository CI, use disposable ATAX FMRL rather than private GitHub Actions quota; read atax_github_workflows_guide and poll atax_fmrl_get_status until terminal state and independently verified cleanup.'});
   }
   if(msg.method==='ping')return ok(id,{});
   if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
@@ -268,7 +319,9 @@ async function routeRpc(msg,principal,env,fetcher){
     try {
       const db=supabase(env,fetcher);
       let result;
-      if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
+      if(params.uri==='atax://documentation/intro')result=ATAX_INTRO_DOCUMENTATION;
+      else if(params.uri==='atax://guidance/preemptive')result=await db.rpc('atax_mcp_preemptive_guidance_get_v1',{owner_subject_in:principal.id});
+      else if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
       else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
       else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
       else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
@@ -290,9 +343,13 @@ async function routeRpc(msg,principal,env,fetcher){
       return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
     }catch{return err(id,-32001,'Canonical resource denied or unavailable');}
   }
-  if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[{name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}]:[]});
+  if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[
+    {name:'atax-introduction',description:'Orient an agent to ATAX strategic planning, graph navigation and on-demand preemptive guidance',arguments:[]},
+    {name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}
+  ]:[]});
   if(msg.method==='prompts/get'){
     if(!canonicalOwner(principal,env))return err(id,-32003,'Canonical ATAX owner required');
+    if(params.name==='atax-introduction')return ok(id,{description:ATAX_INTRO_DOCUMENTATION.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(ATAX_INTRO_DOCUMENTATION)}}]});
     if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
     return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
   }
