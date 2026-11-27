@@ -462,5 +462,36 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("seen.intersection(approved)", runner)
         self.assertNotIn("print(output)", runner)
 
+    def test_public_target_direct_mode_is_allowed_and_receipted(self):
+        calls = []
+
+        def fake_api(path, bearer, method="GET", payload=None):
+            calls.append((path, bearer, method, payload))
+            if path == "/repos/dinilmusick/portfolio-serviceflow":
+                return {"private": False, "default_branch": "main"}
+            if path == "/user/repos":
+                return {"full_name": "dinilmusick/FMRL-unit-test"}
+            if path == "/repos/dinilmusick/FMRL-unit-test":
+                return {"private": False, "html_url": "https://github.com/dinilmusick/FMRL-unit-test"}
+            return None
+
+        with mock.patch.object(MODULE, "api", side_effect=fake_api), \
+             mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(MODULE.subprocess, "run"), \
+             mock.patch.dict(MODULE.os.environ, {
+                 "CODING_REPO_TOKEN": "management", "PRIVATE_REPO_TOKEN": "source-read",
+                 "FMRL_SECRETS_TOKEN": "secret-writer",
+             }), \
+             mock.patch.object(sys, "argv", ["disposable_workspace.py",
+                                               "--source", "dinilmusick/portfolio-serviceflow",
+                                               "--target", "FMRL-unit-test", "--ref", "a"*40]), \
+             contextlib.redirect_stdout(io.StringIO()) as stream:
+            self.assertEqual(MODULE.main(), 0)
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(payload["disposable_repository"], "dinilmusick/FMRL-unit-test")
+            self.assertEqual(payload["verified_target_ref"], "a"*40)
+
+        self.assertEqual(calls[0][:3], ("/repos/dinilmusick/portfolio-serviceflow", "source-read", "GET"))
+
 if __name__ == "__main__":
     unittest.main()
