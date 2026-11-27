@@ -24,13 +24,15 @@ export const githubGuide = Object.freeze({
   canonical:'GitHub-native repo/tools remains fully supported; this MCP surface is an alternate interface to the same ATAX control plane.',
   order:[
     'Always hydrate ATAX Supabase context and current skills and claim an eligible ledger task before work.',
-    'Use your own agent container and clone the TARGET repo there when possible; never use ATAX as a checkout workspace.',
+    'For private-repository CI/build/test evidence, prefer atax_fmrl_create_run_dispose so the work does not consume the target private repository GitHub Actions quota. Local/container execution remains valid when it is sufficient and no remote CI evidence is needed.',
+    'Use your own agent container for repository editing and local checks; never use ATAX as a checkout workspace.',
     'Create a permanent project with atax_github_repository_create. It never creates FMRL repositories or grants CI execution.',
-    'For private-target remote CI when local execution is unavailable/insufficient, call atax_fmrl_create_run_dispose with exact 40-character target commit SHA. This dispatches ATAX control-plane workflow; it alone provisions FMRL-*, runs checks and always attempts cleanup.',
+    'For private-target remote CI, call atax_fmrl_create_run_dispose with the exact 40-character target commit SHA. This dispatches the ATAX control-plane workflow; it alone provisions FMRL-*, runs checks and always attempts cleanup.',
     'Poll atax_fmrl_get_status with the returned request_id. Dispatch acceptance is NOT an execution result. Verify controller and disposable CI result plus independent bridge deletion/404. Failed cleanup is a blocker, never success.',
     'Record the precise result and evidence in the canonical ledger; obtain a separate verifier. Do not self-verify.',
   ],
   rules:[
+    'For private-repository CI/build/test evidence, FMRL is the preferred remote execution path because it avoids spending the target private repository GitHub Actions quota.',
     'FMRL public repos contain ONLY a trusted static CI bridge; a private target is cloned only inside the FMRL ephemeral runner.',
     'Do not put private source, secrets, target SHA, private target paths or raw logs in public FMRL commits, artifacts or MCP responses.',
     'Never run target code or private checkouts in ATAX Actions, nor fall back to Agent-Workspace-1.',
