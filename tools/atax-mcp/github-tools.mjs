@@ -275,6 +275,18 @@ async function dispatchWorkflow(a,_db,p,ctx){
   requireOk(res,'GitHub Actions workflow dispatch');
   return {operation:'workflow_dispatch',account:selected.alias,repository:repo,workflow,ref,status:'dispatched',note:'Workflow dispatched successfully to GitHub Actions.'};
 }
+async function rerunWorkflow(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  if(!Number.isInteger(a.run_id)||a.run_id<1)throw new Error('Valid run_id is required');
+  const failedOnly=a.failed_only!==false;
+  const endpoint=failedOnly?'rerun-failed-jobs':'rerun';
+  const url=`${API}/repos/${repo}/actions/runs/${a.run_id}/${endpoint}`;
+  const res=await githubRequest(ctx.fetcher,url,selected.token,{method:'POST'});
+  requireOk(res,'GitHub Actions workflow rerun');
+  return {operation:'workflow_rerun',account:selected.alias,repository:repo,run_id:a.run_id,failed_only:failedOnly,status:'rerun_requested'};
+}
 async function listWorkflowRuns(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
@@ -580,6 +592,9 @@ export const githubTools=[
   tool('atax_github_workflow_dispatch',
     'Dispatch a GitHub Actions workflow (e.g. lint.yml, build.yml, test.yml) on any accessible repository using the authenticated GitHub token.',
     'atax:github:create',one('Workflow dispatch',{repository:s('GitHub owner/name repository',205),workflow:s('Workflow filename (e.g. lint.yml, build.yml) or ID',100),ref:s('Git branch or commit SHA (default main)',120),inputs:{type:'object',description:'Optional workflow inputs object'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','workflow']),dispatchWorkflow),
+  tool('atax_github_workflow_rerun',
+    'Re-run a GitHub Actions workflow run (all jobs or failed jobs only) by run_id.',
+    'atax:github:create',one('Workflow rerun',{repository:s('GitHub owner/name repository',205),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'GitHub Actions workflow run ID'},failed_only:{type:'boolean',description:'Re-run only failed jobs (default true)'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','run_id']),rerunWorkflow),
   tool('atax_github_workflow_runs',
     'List or inspect GitHub Actions workflow runs for a repository, reporting execution status, conclusion (success, failure), jobs, steps, failure_receipts and failure_log_tail for failed jobs, and URL.',
     'atax:github:read',one('Workflow runs lookup',{repository:s('GitHub owner/name repository',205),workflow:s('Optional workflow filename filter (e.g. ci.yml, lint.yml)',100),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional exact run ID to inspect in detail'},status:s('Optional status filter (e.g. completed, in_progress, queued)',50),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository']),listWorkflowRuns),

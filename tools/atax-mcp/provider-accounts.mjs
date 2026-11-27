@@ -224,9 +224,56 @@ async function cloudflareWorkers(a,_db,p,ctx) {
   if(payload.success!==true)throw new Error('Cloudflare Workers query failed');
   return {account:selected.alias,cloudflare_account_id:id,scripts:limited(payload.result).map(x=>({id:x.id,tag:x.tag??null,modified_on:x.modified_on}))};
 }
-async function cloudflareWorkerBuilds(a,_db,p,ctx) {
+async function cloudflareWorkerInspect(a,_db,p,ctx) {
   const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
   const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
+  if(!a.script_id||!ID.test(a.script_id))throw new Error('Valid script_id is required');
+  const versionLimit=a.version_limit??5;
+  const base='https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/workers';
+  const [acctSubRes,scriptSubRes,depRes,verRes]=await Promise.all([
+    providerRequest(ctx.fetcher,base+'/subdomain',selected.token),
+    providerRequest(ctx.fetcher,base+'/scripts/'+encodeURIComponent(a.script_id)+'/subdomain',selected.token),
+    providerRequest(ctx.fetcher,base+'/scripts/'+encodeURIComponent(a.script_id)+'/deployments',selected.token),
+    providerRequest(ctx.fetcher,base+'/scripts/'+encodeURIComponent(a.script_id)+'/versions?page=1&per_page='+encodeURIComponent(String(versionLimit)),selected.token),
+  ]);
+  const warnings=[];
+  const acctSub=acctSubRes.ok&&acctSubRes.data?.success?acctSubRes.data.result?.subdomain??null:null;
+  if(!acctSubRes.ok&&acctSubRes.status!==404)warnings.push('subdomain: HTTP '+acctSubRes.status);
+  const scriptSubEnabled=scriptSubRes.ok&&scriptSubRes.data?.success?Boolean(scriptSubRes.data.result?.enabled):null;
+  if(!scriptSubRes.ok&&scriptSubRes.status!==404)warnings.push('script_subdomain: HTTP '+scriptSubRes.status);
+  const deploymentsRaw=depRes.ok&&depRes.data?.success?(depRes.data.result?.deployments??depRes.data.result):null;
+  if(!depRes.ok&&depRes.status!==404)warnings.push('deployments: HTTP '+depRes.status);
+  const versionsRaw=verRes.ok&&verRes.data?.success?(verRes.data.result?.items??verRes.data.result):null;
+  if(!verRes.ok&&verRes.status!==404)warnings.push('versions: HTTP '+verRes.status);
+  if(!depRes.ok&&!verRes.ok&&!scriptSubRes.ok) {
+    throw new Error('Cloudflare Worker inspect failed (deployments HTTP '+depRes.status+', versions HTTP '+verRes.status+')');
+  }
+  const deployments=limited(deploymentsRaw,10).map(d=>({
+    id:d.id??null,
+    source:d.source??null,
+    strategy:d.strategy??null,
+    created_on:d.created_on??null,
+    versions:Array.isArray(d.versions)?d.versions.map(v=>({version_id:v.version_id,percentage:v.percentage})):[],
+  }));
+  const versions=limited(versionsRaw,versionLimit).map(v=>({
+    id:v.id??null,
+    number:v.number??null,
+    created_on:v.metadata?.created_on??v.created_on??null,
+    source:v.metadata?.source??null,
+  }));
+  return {
+    operation:'cloudflare_worker_inspect',
+    account:selected.alias,
+    cloudflare_account_id:id,
+    script_id:a.script_id,
+    workers_dev_url:acctSub&&scriptSubEnabled?'https://'+a.script_id+'.'+acctSub+'.workers.dev':null,
+    workers_dev_enabled:scriptSubEnabled,
+    deployments,
+    versions,
+    warnings,
+  };
+}
+async function resolveWorkerTag(ctx,selected,id,a) {
   let workerTag=a.worker_tag;
   if(!workerTag) {
     if(!a.script_id||!ID.test(a.script_id))throw new Error('Provide worker_tag or script_id');
@@ -238,6 +285,12 @@ async function cloudflareWorkerBuilds(a,_db,p,ctx) {
   } else if(!ID.test(workerTag)) {
     throw new Error('Invalid worker_tag');
   }
+  return workerTag;
+}
+async function cloudflareWorkerBuilds(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
+  const workerTag=await resolveWorkerTag(ctx,selected,id,a);
   const limit=a.limit??20;
   const payload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/builds/workers/'+encodeURIComponent(workerTag)+'/builds',selected.token);
   if(payload.success!==true)throw new Error('Cloudflare Workers Builds query failed');
@@ -254,6 +307,40 @@ async function cloudflareWorkerBuilds(a,_db,p,ctx) {
       created_on:b.created_on??null,
       stopped_on:b.stopped_on??null,
     })),
+  };
+}
+async function cloudflareWorkerBuildTrigger(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=resolveCloudflareAccountId(ctx,selected,a.account_id);
+  let triggerUuid=a.trigger_uuid;
+  const branch=a.branch?String(a.branch).trim():'main';
+  if(!triggerUuid) {
+    const workerTag=await resolveWorkerTag(ctx,selected,id,a);
+    const trigPayload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/builds/workers/'+encodeURIComponent(workerTag)+'/triggers',selected.token);
+    if(trigPayload.success!==true||!Array.isArray(trigPayload.result)||trigPayload.result.length===0)
+      throw new Error('No Cloudflare Workers Build triggers found for worker');
+    const match=trigPayload.result.find(t=>Array.isArray(t.branch_includes)?t.branch_includes.includes(branch):true)||trigPayload.result[0];
+    triggerUuid=match?.trigger_uuid;
+  }
+  if(!triggerUuid||!ID.test(triggerUuid))throw new Error('Valid trigger_uuid required');
+  const res=await providerRequest(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/builds/triggers/'+encodeURIComponent(triggerUuid)+'/builds',selected.token,{
+    method:'POST',
+    body:{branch},
+  });
+  if(!res.ok||res.data?.success!==true) {
+    const msg=res.data?.errors?.[0]?.message||'Cloudflare Workers Build trigger failed';
+    throw new Error('Cloudflare Workers Build trigger failed (HTTP '+res.status+': '+msg+')');
+  }
+  const b=res.data.result||{};
+  return {
+    operation:'cloudflare_worker_build_trigger',
+    account:selected.alias,
+    cloudflare_account_id:id,
+    trigger_uuid:triggerUuid,
+    branch,
+    build_uuid:b.build_uuid??null,
+    status:b.status??null,
+    created_on:b.created_on??null,
   };
 }
 async function cloudflareBuildLogs(a,_db,p,ctx) {
@@ -403,7 +490,9 @@ export const providerTools=[
   tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, Neon, Vercel, Supabase, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
   tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
   tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),
+  tool('atax_cloudflare_worker_inspect','Inspect a Cloudflare Worker active deployments, recent versions, and workers.dev subdomain status.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},version_limit:{type:'integer',minimum:1,maximum:20}},['script_id']),cloudflareWorkerInspect),
   tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),
+  tool('atax_cloudflare_worker_build_trigger','Trigger a new Cloudflare Workers Build for a trigger_uuid, worker_tag, or script_id.','atax:github:create',accountSchema({account_id:{type:'string',maxLength:128},trigger_uuid:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},branch:{type:'string',maxLength:120}}),cloudflareWorkerBuildTrigger),
   tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs),
   tool('atax_cloudflare_pages_deploy','Create (if missing) a GitHub-connected Cloudflare Pages project and trigger a production deployment.','atax:github:create',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},repository:{type:'string',minLength:3,maxLength:205},production_branch:{type:'string',minLength:1,maxLength:120},build_command:{type:'string',maxLength:256},destination_dir:{type:'string',maxLength:256}},['project_name','repository']),cloudflarePagesDeploy),
   tool('atax_cloudflare_pages_get','Inspect a Cloudflare Pages project and its latest deployment status and URL.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},deployment_id:{type:'string',maxLength:128}},['project_name']),cloudflarePagesGet)
