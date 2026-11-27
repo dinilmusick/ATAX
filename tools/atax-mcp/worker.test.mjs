@@ -136,6 +136,25 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for evidence verification',evidence:[{url:'test://result'}]});
   assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
 });
+test('MCP socket command uses the pinned fallback profile and exact UTF-8 wire metering',async()=>{
+  const taskId='f5c29f36-27ba-4d6e-a6b2-a3c6757668c9';
+  const claimToken='94a0197b-e59c-458a-99a8-d4027920f62d';
+  const result=await call('atax_socket_task_status',{task_id:taskId,claim_token:claimToken});
+  const command=result.payload.result.structuredContent.result.params.command_in;
+  assert.equal(command.transport,'mcp');
+  assert.equal(command.profileSource,'atax-mcp-pinned-fallback');
+  assert.equal(command.principalId,'test-external-agent');
+  assert.equal(command.sessionId,'test-external-agent');
+  assert.equal(command.taskId,taskId);
+  assert.equal(command.claimToken,claimToken);
+  assert.equal(command.budgetProfile.modelId,'unknown');
+  assert.equal(command.budgetProfile.tokenizerId,'utf8-byte-upper-bound-v1');
+  assert.equal(command.budgetProfile.profileSetVersion,'2026-11-22.2');
+  assert.equal(command.budgetProfile.overhead,8);
+  assert.equal(command.inboundTokens,new TextEncoder().encode(command.requestWire).byteLength+8);
+  assert.ok(command.budgetProfile.maxUsableTokens<=3276);
+});
+
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
   const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const claim_token='11111111-2222-4333-8444-555555555555';
