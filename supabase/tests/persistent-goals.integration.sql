@@ -49,13 +49,16 @@ begin
     raise exception 'Direct task did not use bounded-v2';
   end if;
 
+  -- The goal creator/orchestrator is also allowed to claim work. The obsolete
+  -- orchestrator/worker identity split must not block a valid fenced claim.
   select * into claimed from public.goal_ledger_claim_task(
-    goal_name,'smoke-worker','Smoke Worker','worker',array[]::text[],
+    goal_name,'smoke-orchestrator','Smoke Orchestrator','worker',array[]::text[],
     'session-smoke',900
   );
   if claimed.id is distinct from direct_task_id
+     or claimed.claimed_by_agent_id<>'smoke-orchestrator'
      or claimed.claimed_session_id<>'session-smoke' then
-    raise exception 'Worker did not claim the expected direct task';
+    raise exception 'Goal creator/orchestrator could not claim the expected direct task';
   end if;
 
   select * into second_claim from public.goal_ledger_claim_task(
@@ -67,7 +70,7 @@ begin
   end if;
 
   perform public.task_ledger_record_loop_iteration(
-    claimed.id,'smoke-worker',claimed.claim_token,1,
+    claimed.id,'smoke-orchestrator',claimed.claim_token,1,
     jsonb_build_object('task_name','Smoke direct task'),
     jsonb_build_object('ok',true),
     jsonb_build_object('observed','pass'),
@@ -92,12 +95,12 @@ begin
         'checkpoint',checkpoint_index,
         'result','passed'
       )),
-      'smoke-worker',claimed.claim_token::text
+      'smoke-orchestrator',claimed.claim_token::text
     );
   end loop;
 
   perform public.task_ledger_submit_result(
-    claimed.id,'smoke-worker',claimed.claim_token,
+    claimed.id,'smoke-orchestrator',claimed.claim_token,
     jsonb_build_object('ok',true),'Smoke direct task completed',
     '[]'::jsonb,
     jsonb_build_array(jsonb_build_object('type','test','result','passed')),
@@ -125,7 +128,7 @@ begin
   if resumed->'summary'->'tasks'->>'completed'<>'1' then
     raise exception 'Resume summary incorrect: %',resumed;
   end if;
-  raise notice 'PASS: bounded-v2 goal, exclusive claim, passing loop, submission, independent verifier and finalization';
+  raise notice 'PASS: bounded-v2 goal, creator/orchestrator self-claim, exclusive claim, passing loop, submission, independent verifier and finalization';
 end;
 $test$;
 rollback;
