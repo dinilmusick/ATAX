@@ -4,7 +4,10 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.agent_intelligence_profiles (
-  agent_id text PRIMARY KEY REFERENCES public.agent_registry(agent_id) ON DELETE CASCADE,
+  agent_id text PRIMARY KEY CHECK(length(btrim(agent_id)) BETWEEN 3 AND 120),
+  display_name text,
+  agent_type text NOT NULL DEFAULT 'mcp-external',
+  declared_capabilities text[] NOT NULL DEFAULT '{}'::text[],
   domain_affinities jsonb NOT NULL DEFAULT '{}'::jsonb
     CHECK (jsonb_typeof(domain_affinities)='object'),
   tool_familiarity text[] NOT NULL DEFAULT '{}'::text[],
@@ -31,6 +34,9 @@ CREATE TABLE IF NOT EXISTS public.agent_routing_evaluations (
     CHECK (jsonb_typeof(evidence)='object'),
   evaluated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS agent_intelligence_profiles_updated_idx
+  ON public.agent_intelligence_profiles(updated_at DESC);
+
 CREATE INDEX IF NOT EXISTS agent_routing_evaluations_task_recent_idx
   ON public.agent_routing_evaluations(task_id,evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS agent_routing_evaluations_candidate_recent_idx
@@ -58,6 +64,82 @@ CREATE TRIGGER agent_routing_evaluations_append_only
 BEFORE UPDATE OR DELETE ON public.agent_routing_evaluations
 FOR EACH ROW EXECUTE FUNCTION public.reject_agent_routing_evaluation_mutation();
 
+CREATE OR REPLACE FUNCTION public.atax_worker_intelligence_profile_upsert_v1(
+  actor_id_in text,
+  display_name_in text DEFAULT NULL,
+  agent_type_in text DEFAULT 'mcp-external',
+  declared_capabilities_in text[] DEFAULT '{}',
+  domain_affinities_in jsonb DEFAULT '{}',
+  tool_familiarity_in text[] DEFAULT '{}',
+  resource_capacity_in jsonb DEFAULT '{}',
+  model_families_in text[] DEFAULT '{}',
+  notes_in jsonb DEFAULT '{}'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path=public,pg_temp
+AS $profile$
+DECLARE
+  affinity record;
+BEGIN
+  IF nullif(btrim(actor_id_in),'') IS NULL OR length(actor_id_in)>120 THEN
+    RAISE EXCEPTION 'Authenticated actor attribution is required';
+  END IF;
+  IF nullif(btrim(coalesce(agent_type_in,'')),'') IS NULL
+     OR length(agent_type_in)>80 THEN
+    RAISE EXCEPTION 'Profile agent type is invalid';
+  END IF;
+  IF jsonb_typeof(coalesce(domain_affinities_in,'{}'::jsonb))<>'object'
+     OR jsonb_typeof(coalesce(resource_capacity_in,'{}'::jsonb))<>'object'
+     OR jsonb_typeof(coalesce(notes_in,'{}'::jsonb))<>'object' THEN
+    RAISE EXCEPTION 'Profile affinity, resource and notes values must be objects';
+  END IF;
+  FOR affinity IN SELECT key,value FROM jsonb_each(coalesce(domain_affinities_in,'{}'::jsonb)) LOOP
+    IF jsonb_typeof(affinity.value)<>'number'
+       OR (affinity.value#>>'{}')::numeric<0
+       OR (affinity.value#>>'{}')::numeric>1 THEN
+      RAISE EXCEPTION 'Domain affinity values must be numeric in [0,1]';
+    END IF;
+  END LOOP;
+  INSERT INTO public.agent_intelligence_profiles(
+    agent_id,display_name,agent_type,declared_capabilities,
+    domain_affinities,tool_familiarity,resource_capacity,model_families,notes,
+    profile_version,updated_at
+  )
+  VALUES(
+    actor_id_in,nullif(btrim(display_name_in),''),agent_type_in,
+    coalesce(declared_capabilities_in,'{}'::text[]),
+    coalesce(domain_affinities_in,'{}'::jsonb),
+    coalesce(tool_familiarity_in,'{}'::text[]),
+    coalesce(resource_capacity_in,'{}'::jsonb),
+    coalesce(model_families_in,'{}'::text[]),
+    coalesce(notes_in,'{}'::jsonb),1,statement_timestamp()
+  )
+  ON CONFLICT(agent_id) DO UPDATE SET
+    display_name=EXCLUDED.display_name,
+    agent_type=EXCLUDED.agent_type,
+    declared_capabilities=EXCLUDED.declared_capabilities,
+    domain_affinities=EXCLUDED.domain_affinities,
+    tool_familiarity=EXCLUDED.tool_familiarity,
+    resource_capacity=EXCLUDED.resource_capacity,
+    model_families=EXCLUDED.model_families,
+    notes=EXCLUDED.notes,
+    profile_version=public.agent_intelligence_profiles.profile_version+1,
+    updated_at=statement_timestamp();
+  RETURN jsonb_build_object('agent_id',actor_id_in,'profile_version',
+    (SELECT profile_version FROM public.agent_intelligence_profiles WHERE agent_id=actor_id_in),
+    'suitability_only',true,
+    'authorization_effect',false);
+END
+$profile$;
+
+REVOKE ALL ON FUNCTION public.atax_worker_intelligence_profile_upsert_v1(
+  text,text,text,text[],jsonb,text[],jsonb,text[],jsonb
+) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.atax_worker_intelligence_profile_upsert_v1(
+  text,text,text,text[],jsonb,text[],jsonb,text[],jsonb
+) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.atax_worker_suitability_v1(
   task_id_in uuid,
   requested_by_actor_in text,
@@ -83,7 +165,38 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'Task not found'; END IF;
 
   FOR candidate IN
-    WITH required AS (
+    WITH worker_candidates AS (
+      SELECT ar.agent_id,ar.agent_name,ar.agent_type,ar.capabilities,ar.enabled,ar.last_seen_at
+      FROM public.agent_registry ar
+      WHERE ar.enabled=true
+      UNION ALL
+      SELECT profile.agent_id,coalesce(profile.display_name,profile.agent_id),
+        profile.agent_type,profile.declared_capabilities,true,profile.updated_at
+      FROM public.agent_intelligence_profiles profile
+      WHERE NOT EXISTS (
+        SELECT 1 FROM public.agent_registry registered
+        WHERE registered.agent_id=profile.agent_id AND registered.enabled=true
+      )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.socket_invocations invocation
+          WHERE invocation.agent_id=profile.agent_id AND invocation.expires_at>statement_timestamp()
+        )
+      UNION ALL
+      SELECT invocation.agent_id,invocation.agent_id,'mcp-external',
+        '{}'::text[],true,max(invocation.registered_at)
+      FROM public.socket_invocations invocation
+      WHERE invocation.expires_at>statement_timestamp()
+        AND NOT EXISTS (
+          SELECT 1 FROM public.agent_registry registered
+          WHERE registered.agent_id=invocation.agent_id AND registered.enabled=true
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.agent_intelligence_profiles profile
+          WHERE profile.agent_id=invocation.agent_id
+        )
+      GROUP BY invocation.agent_id
+    ),
+    required AS (
       SELECT coalesce(task_out.required_capabilities,'{}'::text[]) capabilities,
         CASE WHEN jsonb_typeof(task_out.required_tools)='array'
           THEN task_out.required_tools ELSE '[]'::jsonb END tools,
@@ -126,7 +239,7 @@ BEGIN
             ELSE 0.5
           END
         ),0.5)::numeric affinity_score
-      FROM public.agent_registry ar
+      FROM worker_candidates ar
       LEFT JOIN public.agent_intelligence_profiles profile ON profile.agent_id=ar.agent_id
       LEFT JOIN LATERAL (
         SELECT count(*) filter(where t.claimed_by_agent_id=ar.agent_id) claim_count,
