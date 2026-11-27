@@ -35,6 +35,9 @@ jobs:
     timeout-minutes: 45
     env:
       FMRL_EXECUTION_MODE: ${{ secrets.FMRL_EXECUTION_MODE }}
+      FMRL_SKILL_RUNTIME: ${{ secrets.FMRL_SKILL_RUNTIME }}
+      FMRL_SKILL_WORKDIR: ${{ secrets.FMRL_SKILL_WORKDIR }}
+      FMRL_SKILL_OUTPUT: ${{ secrets.FMRL_SKILL_OUTPUT }}
     steps:
       - name: Checkout trusted static public FMRL writeback helper
         if: env.FMRL_EXECUTION_MODE == 'repair' || env.FMRL_EXECUTION_MODE == 'artifact'
@@ -181,6 +184,52 @@ jobs:
         with:
           version: 10.33.0
 
+      - name: Execute repository-backed skill
+        if: env.FMRL_EXECUTION_MODE == 'skill'
+        env:
+          FMRL_SKILL_COMMAND: ${{ secrets.FMRL_SKILL_COMMAND }}
+          FMRL_SKILL_INSTALL: ${{ secrets.FMRL_SKILL_INSTALL }}
+          FMRL_SKILL_WORKDIR: ${{ secrets.FMRL_SKILL_WORKDIR }}
+          FMRL_SKILL_RUNTIME: ${{ secrets.FMRL_SKILL_RUNTIME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FMRL_SKILL_COMMAND"
+          [[ "$FMRL_SKILL_COMMAND" != *$'\n'* && "$FMRL_SKILL_COMMAND" != *$'\r'* ]]
+          if [[ -n "$FMRL_SKILL_WORKDIR" ]]; then
+            [[ "$FMRL_SKILL_WORKDIR" != /* && "$FMRL_SKILL_WORKDIR" != *".."* ]]
+            cd "target/$FMRL_SKILL_WORKDIR"
+          else
+            cd target
+          fi
+          if [[ -n "$FMRL_SKILL_INSTALL" ]]; then
+            bash -lc "$FMRL_SKILL_INSTALL" >/tmp/fmrl-skill-install.log 2>&1
+          elif [[ -f pnpm-lock.yaml ]]; then
+            pnpm install --frozen-lockfile >/tmp/fmrl-skill-install.log 2>&1
+          elif [[ -f package-lock.json ]]; then
+            npm ci --include=optional --no-audit --no-fund >/tmp/fmrl-skill-install.log 2>&1
+          elif [[ -f yarn.lock ]]; then
+            corepack enable >/dev/null 2>&1
+            yarn install --immutable >/tmp/fmrl-skill-install.log 2>&1
+          fi
+          set +e
+          bash -lc "$FMRL_SKILL_COMMAND" >/tmp/fmrl-skill-result.log 2>&1
+          status=$?
+          set -e
+          echo "FMRL skill execution: $([[ "$status" == 0 ]] && echo PASS || echo FAIL); exit=$status"
+          [[ -n "$FMRL_SKILL_RUNTIME" ]] && echo "FMRL skill runtime: declared" || true
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          p=Path('/tmp/fmrl-skill-result.log')
+          text=p.read_text(errors='replace') if p.exists() else ''
+          text=re.sub(r'(gh[pousr]_[A-Za-z0-9_]+|Bearer\s+\S+|sk-[A-Za-z0-9_-]+)','[redacted]',text)
+          lines=[x.strip() for x in text.splitlines() if x.strip()]
+          safe=[x for x in lines if len(x)<=240 and not re.search(r'(/home/runner|/tmp/|BEGIN [A-Z ]+ KEY)',x,re.I)]
+          print('FMRL skill result summary: '+(safe[-1][:240] if safe else 'no safe textual result'))
+          PY
+          rm -f /tmp/fmrl-skill-install.log /tmp/fmrl-skill-result.log
+          exit "$status"
       - name: Run portable private-suite checks (not full workflow parity)
         if: env.FMRL_EXECUTION_MODE == 'direct'
         shell: bash
@@ -641,6 +690,11 @@ def main() -> int:
     parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
     parser.add_argument("--mode", choices=("direct", "act", "repair", "artifact"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
     parser.add_argument("--branch", default="", help="Exact private PR branch for lockfile or artifact repair.")
+    parser.add_argument("--skill-command", default="", help="Bounded command for repository-backed skill execution.")
+    parser.add_argument("--skill-runtime", default="", help="Optional runtime declaration.")
+    parser.add_argument("--skill-install", default="", help="Optional dependency-install command.")
+    parser.add_argument("--skill-workdir", default="", help="Optional repository-relative working directory.")
+    parser.add_argument("--skill-output", default="", help="Optional bounded output declaration.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -655,6 +709,13 @@ def main() -> int:
 
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
+    if args.mode == "skill":
+        if not 1 <= len(args.skill_command) <= 2000 or "\n" in args.skill_command or "\r" in args.skill_command:
+            raise SystemExit("Skill execution requires a bounded single-line command.")
+        if len(args.skill_install) > 1200 or len(args.skill_runtime) > 120 or len(args.skill_output) > 1200:
+            raise SystemExit("Skill execution declaration exceeds its bounded limit.")
+        if args.skill_workdir and (args.skill_workdir.startswith("/") or ".." in args.skill_workdir or len(args.skill_workdir) > 180):
+            raise SystemExit("Unsafe skill working directory.")
     if args.mode in ("repair", "artifact"):
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
@@ -723,6 +784,11 @@ def main() -> int:
             ("FMRL_TARGET_EVENT", args.event),
             ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
             ("FMRL_EXECUTION_MODE", args.mode),
+            ("FMRL_SKILL_COMMAND", args.skill_command),
+            ("FMRL_SKILL_RUNTIME", args.skill_runtime),
+            ("FMRL_SKILL_INSTALL", args.skill_install),
+            ("FMRL_SKILL_WORKDIR", args.skill_workdir),
+            ("FMRL_SKILL_OUTPUT", args.skill_output),
         ) + repair_secrets:
           for attempt in range(4):
             try:
@@ -770,7 +836,7 @@ def main() -> int:
             "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
             "execution_mode": args.mode,
-            "coverage": ("lockfile-only repair and frozen install" if args.mode == "repair" else
+            "coverage": ("repository-backed executable skill command in disposable FMRL" if args.mode == "skill" else "lockfile-only repair and frozen install" if args.mode == "repair" else
                          "bounded Worker artifact repair and verified atomic writeback" if args.mode == "artifact" else
                          "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act"),
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",

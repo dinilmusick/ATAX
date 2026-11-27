@@ -192,7 +192,7 @@ function validateFmrlArgs(a,env){
   if(a.workflow!==undefined && !/^[A-Za-z0-9_.-]{1,100}\.ya?ml$/.test(a.workflow))throw new Error('Invalid target workflow file');
   return repo;
 }
-async function dispatchFmrl(a,_db,principal,ctx){
+export async function dispatchFmrl(a,_db,principal,ctx){
   const owner=assertOwner(ctx.env);
   const controller=controllerRepo(ctx.env);
   const actionsUrl=`${API}/repos/${controller}/actions/workflows/${ACTIONS_WORKFLOW}`;
@@ -204,11 +204,28 @@ async function dispatchFmrl(a,_db,principal,ctx){
   if(a.mode!==undefined){
     const mode=a.mode;
     const branch=String(a.branch||'').trim();
-    if(!['direct','repair','artifact'].includes(mode))throw new Error('FMRL mode must be direct, repair, or artifact');
+    if(!['direct','repair','artifact','skill'].includes(mode))throw new Error('FMRL mode must be direct, repair, artifact, or skill');
     if(mode!=='direct'&&!branch)throw new Error(`FMRL ${mode} mode requires a target branch`);
     if(branch&&!BRANCH_NAME.test(branch))throw new Error('Invalid FMRL target branch');
     inputs.mode=mode;
     inputs.branch=branch;
+    if(mode==='skill'){
+      const command=String(a.command||'').trim();
+      if(!command || command.length>2000)throw new Error('Skill execution requires a bounded command (1-2000 characters)');
+      const runtime=String(a.runtime||'').trim();
+      const install=String(a.install||'').trim();
+      const workdir=String(a.workdir||'').trim();
+      const output=String(a.output||'').trim();
+      if(runtime && runtime.length>120)throw new Error('Invalid skill runtime declaration');
+      if(install.length>1200)throw new Error('Skill install declaration is too long');
+      if(workdir && !/^[A-Za-z0-9_.\\/-]{1,180}$/.test(workdir))throw new Error('Invalid skill working directory');
+      if(output.length>1200)throw new Error('Skill output declaration is too long');
+      inputs.skill_command=command;
+      inputs.skill_runtime=runtime;
+      inputs.skill_install=install;
+      inputs.skill_workdir=workdir;
+      inputs.skill_output=output;
+    }
   }
   const res=await githubRequest(ctx.fetcher,`${actionsUrl}/dispatches`,token,{method:'POST',body:{ref:'main',inputs}});
   requireOk(res,'FMRL controller dispatch');
@@ -585,9 +602,24 @@ export const githubTools=[
   tool('atax_github_repository_create',
     'CREATE A PERMANENT GitHub repository using the existing ATAX GitHub repository-lifecycle contract. Defaults PRIVATE, README initialised, verifies created owner/visibility. Never use for FMRL; separate scope atax:github:create.',
     'atax:github:create',one('Permanent GitHub repository',{name:s('New repository name (NOT FMRL-* or ATAX)',100),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential; omit when exactly one is available'},description:{type:'string',maxLength:300,description:'Public description; must contain no credentials or private content'},visibility:{type:'string',enum:['private','public'],description:'Defaults to private'},initialize:{type:'boolean',description:'Initialize repository with README (default true)'}},['name']),createRepository),
+  tool('atax_skill_repository_execute',
+    'Execute a repository-backed skill in a disposable FMRL environment. The repository may be public or private; private access uses the selected authorized GitHub account. The repository is pinned to an exact commit SHA, dependencies are installed inside FMRL, the declared command runs there, and results are returned only as sanitized execution evidence. The control plane never checks out target source.',
+    'atax:fmrl:execute',
+    one('Repository-backed executable skill',{
+      repository:s('GitHub owner/name repository',205),
+      ref:s('Exact 40-character lowercase commit SHA',40),
+      command:s('Command to execute inside the disposable repository',2000),
+      runtime:s('Optional runtime declaration such as node@24 or python@3.12',120),
+      install:s('Optional dependency-install command; empty means FMRL auto-detects the lockfile/package manager',1200),
+      workdir:s('Optional repository-relative working directory',180),
+      output:s('Optional bounded output/artifact declaration',1200),
+      workflow:{type:'string',maxLength:105,description:'Optional target workflow filename for provenance'},
+      account:{type:'string',maxLength:48,description:'Named authorized GitHub account; omit when one account is available'}
+    },['repository','ref','command']),
+    (a,db,p,ctx)=>dispatchFmrl({...a,mode:'skill'},db,p,ctx)),
   tool('atax_fmrl_create_run_dispose',
-    'DISPOSABLE PRIVATE-TARGET CI FALLBACK, NOT permanent repo creation. Container first; only if local execution unavailable/insufficient. Dispatch canonical ATAX private-repo-ci.yml controller which provisions a public FMRL-* bridge, checks out exact private SHA inside isolated runner, runs checks, ALWAYS deletes FMRL even after failure and independently verifies 404. Returns correlation request_id, NOT job success. Never execute target code in ATAX. Requires atax:fmrl:execute scope.',
-    'atax:fmrl:execute',one('Dispatch FMRL remote CI',{repository:s('Private repository owner/name under the canonical owner (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),account:{type:'string',maxLength:48,description:'Named GitHub account authorized for the ATAX controller'},event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'},mode:{type:'string',enum:['direct','repair','artifact'],description:'Optional FMRL execution mode; default direct'},branch:{type:'string',maxLength:180,description:'Target PR head branch (required for repair and artifact modes)'}},['repository','ref']),dispatchFmrl),
+    'DISPOSABLE REPOSITORY CI EXECUTION, NOT permanent repo creation. Container first; only if local execution unavailable/insufficient. Dispatch canonical ATAX private-repo-ci.yml controller which provisions a public FMRL-* bridge, checks out exact private SHA inside isolated runner, runs checks, ALWAYS deletes FMRL even after failure and independently verifies 404. Returns correlation request_id, NOT job success. Never execute target code in ATAX. Requires atax:fmrl:execute scope.',
+    'atax:fmrl:execute',one('Dispatch disposable FMRL repository CI',{repository:s('Private repository owner/name under the canonical owner (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),account:{type:'string',maxLength:48,description:'Named GitHub account authorized for the ATAX controller'},event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'},mode:{type:'string',enum:['direct','repair','artifact'],description:'Optional FMRL execution mode; default direct'},branch:{type:'string',maxLength:180,description:'Target PR head branch (required for repair and artifact modes)'}},['repository','ref']),dispatchFmrl),
   tool('atax_fmrl_get_status',
     'POLL one FMRL controller dispatch by correlation request_id until terminal. Reports exact controller result, confirms provisioning+cleanup steps, independently reads the public bridge for HTTP 404, and BLOCKS acceptance without verified deletion. Never infer CI success from dispatch acceptance.',
     'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),account:{type:'string',maxLength:48,description:'Same GitHub account used for dispatch'},dispatched_account:{type:'string',maxLength:48,description:'Optional dispatched_account returned by atax_fmrl_create_run_dispose to enforce account consistency'},run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
