@@ -91,3 +91,37 @@ test('ATAX MCP branch create/delete, PR list/merge, and file delete', async () =
   const deletedBranch = await callTool('atax_github_branch_delete', { repository: 'dinilmusick/Aiko', branch: 'feat/test-branch' });
   assert.equal(deletedBranch.result.structuredContent.result.deleted, true);
 });
+
+test('ATAX MCP PR merge falls back to branch merge on 403/405', async () => {
+  const headSha = 'd'.repeat(40);
+  const mergeSha = 'e'.repeat(40);
+  const fetcher = async (url, options = {}) => {
+    if (url === 'https://issuer.example/oauth/jwks') return Response.json({ keys: [pub] });
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/pulls/12/merge' && options.method === 'PUT') {
+      return Response.json({ message: 'Resource not accessible by personal access token' }, { status: 403 });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/pulls/12' && (!options.method || options.method === 'GET')) {
+      return Response.json({ number: 12, title: 'Finish app', state: 'open', head: { ref: 'feat/x', sha: headSha }, base: { ref: 'main' } });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/merges' && options.method === 'POST') {
+      const body = JSON.parse(options.body);
+      assert.equal(body.base, 'main');
+      assert.equal(body.head, headSha);
+      return Response.json({ sha: mergeSha, commit: { message: body.commit_message } }, { status: 201 });
+    }
+    throw new Error('Unexpected URL: ' + url);
+  };
+
+  const handler = createRuntimeHandler(fetcher, async (e) => ({ ...e, __ledgerDb: { rpc: async () => ({ ok: true }) } }));
+  const tok = await makeJwt('owner-1');
+  const req = new Request(resource, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'atax_github_pull_request_merge', arguments: { repository: 'dinilmusick/Aiko', pull_number: 12, sha: headSha } } }),
+  });
+  const res = await (await handler(req, env)).json();
+  assert.equal(res.result.isError, undefined);
+  assert.equal(res.result.structuredContent.result.merged, true);
+  assert.equal(res.result.structuredContent.result.sha, mergeSha);
+  assert.equal(res.result.structuredContent.result.fallback, 'branch_merge');
+});
