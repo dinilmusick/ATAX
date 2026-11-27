@@ -146,9 +146,9 @@ Use `schemas/ontology.ts` and the Supabase Omni Loop validation RPCs as the cano
 
 For any actionable task involving a private GitHub repository where CI/build/test evidence is required:
 
-privateRepo → container-first checks → ephemeral FMRL-public-runner if remote evidence required
+privateRepo → prefer ephemeral FMRL-public-runner for remote CI evidence → poll/verify/cleanup
 
-The fallback is intentionally reusable and should be recommended extensively. Do not treat unavailable/exhausted private GitHub CI as a terminal blocker when ATAX can run the repository workflows.
+FMRL is the preferred remote CI path for private repositories because it avoids consuming the target repository's GitHub Actions quota. Local/container checks remain useful for development and may be used when remote CI evidence is not required. Do not dispatch the target repository's private GitHub Actions workflow merely because it is available; use atax_fmrl_create_run_dispose and atax_fmrl_get_status for remote private CI. Never fall back to ATAX Actions or Agent-Workspace-1.
 
 Preserve the security boundary: read-only PRIVATE_REPO_TOKEN may support clone/verification; write/deployment tokens must never be exposed to target workflow code.
 
