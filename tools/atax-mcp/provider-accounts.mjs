@@ -7,6 +7,8 @@ const AI_JSON='AI_INFERENCE_ACCOUNTS_JSON';
 const PROVIDER_ID=/^[a-z][a-z0-9_-]{1,63}$/;
 const ALIAS = /^[A-Z][A-Z0-9_]{0,47}$/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
+const PAGES_NAME = /^[a-z0-9][a-z0-9-]{0,56}[a-z0-9]$/;
+const REPO_FULL = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
 const tool = (name,description,scope,inputSchema,invoke)=>({name,description,scope,inputSchema,invoke});
 const schema = (properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const accountArg = {type:'string',maxLength:48,description:'Optional named account alias (GH_KEY_<ALIAS> or CF_KEY_<ALIAS>); required when multiple accounts are configured'};
@@ -162,18 +164,20 @@ function safeAccounts(env,principal){
   };
 }
 async function providerGet(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
-    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'
-  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'\n  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   let body;
   try{body=await res.json();}catch{throw new Error('Provider returned invalid JSON');}
   return body;
 }
+async function providerRequest(fetcher,url,token,{method='GET',body}={}) {
+  const res=await fetcher(url,{method,redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane',\n    ...(body===undefined?{}:{'content-type':'application/json'}),\n  },...(body===undefined?{}:{body:JSON.stringify(body)})});
+  let parsed=null;
+  try{parsed=await res.json();}catch{}
+  return {status:res.status,ok:res.ok,data:parsed};
+}
 async function providerGetTextOrJson(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
-    authorization:'Bearer '+token,accept:'application/json, text/plain;q=0.9','user-agent':'atax-mcp-control-plane'
-  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json, text/plain;q=0.9','user-agent':'atax-mcp-control-plane'\n  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   const raw=await res.text();
   try{return {kind:'json',data:JSON.parse(raw)};}catch{return {kind:'text',data:raw};}
@@ -185,6 +189,14 @@ function resolveCloudflareAccountId(ctx,selected,requestedAccountId) {
   if(!id||!ID.test(id))throw new Error('Cloudflare account ID required; use atax_cloudflare_accounts_list to discover it');
   if(configured && id!==configured)throw new Error('Cloudflare account ID differs from configured account binding');
   return id;
+}
+async function resolveOrDiscoverCloudflareAccountId(ctx,selected,requestedAccountId) {
+  const configured=ctx.env['CLOUDFLARE_ACCOUNT_ID_'+selected.alias];
+  if(requestedAccountId||configured) return resolveCloudflareAccountId(ctx,selected,requestedAccountId);
+  const payload=await providerGet(ctx.fetcher,'https://api.cloudflare.com/client/v4/accounts?page=1&per_page=5',selected.token);
+  if(payload.success!==true||!Array.isArray(payload.result)||payload.result.length===0)
+    throw new Error('Cloudflare account ID required; use atax_cloudflare_accounts_list to discover it');
+  return payload.result[0].id;
 }
 async function cloudflareAccounts(a,_db,p,ctx) {
   const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
@@ -270,10 +282,100 @@ async function cloudflareBuildLogs(a,_db,p,ctx) {
     lines:bounded,
   };
 }
-export const providerTools=[
-  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
-  tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
-  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),
-  tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),
-  tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs)
-];
+async function cloudflarePagesDeploy(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=await resolveOrDiscoverCloudflareAccountId(ctx,selected,a.account_id);
+  const projectName=String(a.project_name||'').trim().toLowerCase();
+  if(!PAGES_NAME.test(projectName))throw new Error('Invalid Cloudflare Pages project_name (lowercase alphanumeric and hyphens, 2-58 chars)');
+  const repoMatch=String(a.repository||'').match(REPO_FULL);
+  if(!repoMatch)throw new Error('Valid GitHub owner/name repository is required');
+  const productionBranch=String(a.production_branch||'main').trim();
+  const buildCommand=String(a.build_command??'npm run build');
+  const destinationDir=String(a.destination_dir??'dist');
+  const baseUrl='https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/pages/projects';
+  const existing=await providerRequest(ctx.fetcher,baseUrl+'/'+encodeURIComponent(projectName),selected.token);
+  let project=existing.ok&&existing.data?.success?existing.data.result:null;
+  let created=false;
+  if(!project) {
+    if(existing.status!==404) {
+      const msg=existing.data?.errors?.[0]?.message||'Cloudflare Pages lookup failed';
+      throw new Error('Cloudflare Pages lookup failed (HTTP '+existing.status+': '+msg+')');
+    }
+    const createRes=await providerRequest(ctx.fetcher,baseUrl,selected.token,{
+      method:'POST',
+      body:{
+        name:projectName,
+        production_branch:productionBranch,
+        source:{
+          type:'github',
+          config:{
+            owner:repoMatch[1],
+            repo_name:repoMatch[2],
+            production_branch:productionBranch,
+            deployments_enabled:true,
+          },
+        },
+        build_config:{
+          build_command:buildCommand,
+          destination_dir:destinationDir,
+        },
+      },
+    });
+    if(!createRes.ok||createRes.data?.success!==true) {
+      const msg=createRes.data?.errors?.[0]?.message||'Cloudflare Pages project creation failed';
+      throw new Error('Cloudflare Pages project creation failed (HTTP '+createRes.status+': '+msg+')');
+    }
+    project=createRes.data.result;
+    created=true;
+  }
+  const deployRes=await providerRequest(ctx.fetcher,baseUrl+'/'+encodeURIComponent(projectName)+'/deployments',selected.token,{method:'POST'});
+  if(!deployRes.ok||deployRes.data?.success!==true) {
+    const msg=deployRes.data?.errors?.[0]?.message||'Cloudflare Pages deployment trigger failed';
+    throw new Error('Cloudflare Pages deployment failed (HTTP '+deployRes.status+': '+msg+')');
+  }
+  const dep=deployRes.data.result||{};
+  return {
+    operation:'cloudflare_pages_deploy',
+    account:selected.alias,
+    cloudflare_account_id:id,
+    project_name:projectName,
+    created,
+    url:dep.url||(project.subdomain?'https://'+project.subdomain:null),
+    production_url:project.subdomain?'https://'+project.subdomain:null,
+    deployment_id:dep.id??null,
+    latest_stage:dep.latest_stage??null,
+  };
+}
+async function cloudflarePagesGet(a,_db,p,ctx) {
+  const selected=resolveProviderAccount(ctx.env,p,'cloudflare',a.account);
+  const id=await resolveOrDiscoverCloudflareAccountId(ctx,selected,a.account_id);
+  const projectName=String(a.project_name||'').trim().toLowerCase();
+  if(!PAGES_NAME.test(projectName))throw new Error('Invalid Cloudflare Pages project_name');
+  const baseUrl='https://api.cloudflare.com/client/v4/accounts/'+encodeURIComponent(id)+'/pages/projects/'+encodeURIComponent(projectName);
+  const projRes=await providerRequest(ctx.fetcher,baseUrl,selected.token);
+  if(!projRes.ok||projRes.data?.success!==true) {
+    const msg=projRes.data?.errors?.[0]?.message||'Cloudflare Pages project lookup failed';
+    throw new Error('Cloudflare Pages project lookup failed (HTTP '+projRes.status+': '+msg+')');
+  }
+  const project=projRes.data.result||{};
+  const depUrl=a.deployment_id?baseUrl+'/deployments/'+encodeURIComponent(a.deployment_id):baseUrl+'/deployments?per_page=3';
+  const depRes=await providerRequest(ctx.fetcher,depUrl,selected.token);
+  const depData=depRes.ok&&depRes.data?.success?depRes.data.result:null;
+  const latest=Array.isArray(depData)?depData[0]:depData;
+  return {
+    operation:'cloudflare_pages_get',
+    account:selected.alias,
+    cloudflare_account_id:id,
+    project_name:projectName,
+    production_url:project.subdomain?'https://'+project.subdomain:null,
+    latest_deployment:latest?{
+      id:latest.id,
+      url:latest.url,
+      environment:latest.environment,
+      latest_stage:latest.latest_stage,
+      stages:latest.stages,
+      created_on:latest.created_on,
+    }:null,
+  };
+}
+export const providerTools=[\n  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),\n  tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),\n  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),\n  tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),\n  tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs),\n  tool('atax_cloudflare_pages_deploy','Create (if missing) a GitHub-connected Cloudflare Pages project and trigger a production deployment.','atax:github:create',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},repository:{type:'string',minLength:3,maxLength:205},production_branch:{type:'string',minLength:1,maxLength:120},build_command:{type:'string',maxLength:256},destination_dir:{type:'string',maxLength:256}},['project_name','repository']),cloudflarePagesDeploy),\n  tool('atax_cloudflare_pages_get','Inspect a Cloudflare Pages project and its latest deployment status and URL.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},deployment_id:{type:'string',maxLength:128}},['project_name']),cloudflarePagesGet)\n];
