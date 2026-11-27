@@ -24,15 +24,13 @@ export const githubGuide = Object.freeze({
   canonical:'GitHub-native repo/tools remains fully supported; this MCP surface is an alternate interface to the same ATAX control plane.',
   order:[
     'Always hydrate ATAX Supabase context and current skills and claim an eligible ledger task before work.',
-    'For private-repository CI/build/test evidence, prefer atax_fmrl_create_run_dispose so the work does not consume the target private repository GitHub Actions quota. Local/container execution remains valid when it is sufficient and no remote CI evidence is needed.',
-    'Use your own agent container for repository editing and local checks; never use ATAX as a checkout workspace.',
+    'Use your own agent container and clone the TARGET repo there when possible; never use ATAX as a checkout workspace.',
     'Create a permanent project with atax_github_repository_create. It never creates FMRL repositories or grants CI execution.',
-    'For private-target remote CI, call atax_fmrl_create_run_dispose with the exact 40-character target commit SHA. This dispatches the ATAX control-plane workflow; it alone provisions FMRL-*, runs checks and always attempts cleanup.',
+    'For private-target remote CI when local execution is unavailable/insufficient, call atax_fmrl_create_run_dispose with exact 40-character target commit SHA. This dispatches ATAX control-plane workflow; it alone provisions FMRL-*, runs checks and always attempts cleanup.',
     'Poll atax_fmrl_get_status with the returned request_id. Dispatch acceptance is NOT an execution result. Verify controller and disposable CI result plus independent bridge deletion/404. Failed cleanup is a blocker, never success.',
     'Record the precise result and evidence in the canonical ledger; obtain a separate verifier. Do not self-verify.',
   ],
   rules:[
-    'For private-repository CI/build/test evidence, FMRL is the preferred remote execution path because it avoids spending the target private repository GitHub Actions quota.',
     'FMRL public repos contain ONLY a trusted static CI bridge; a private target is cloned only inside the FMRL ephemeral runner.',
     'Do not put private source, secrets, target SHA, private target paths or raw logs in public FMRL commits, artifacts or MCP responses.',
     'Never run target code or private checkouts in ATAX Actions, nor fall back to Agent-Workspace-1.',
@@ -267,6 +265,9 @@ async function dispatchWorkflow(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
   if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const info=await repositoryInfo(repo,ctx,selected.token);
+  if(info.visibility==='private')
+    throw new Error('Private-repository CI must use disposable ATAX FMRL. Do not dispatch GitHub Actions directly; call atax_fmrl_create_run_dispose with the exact target SHA and then poll atax_fmrl_get_status.');
   const workflow=String(a.workflow||'');
   if(!/^[A-Za-z0-9_.-]{1,100}\.ya?ml$/.test(workflow)&&!/^\d+$/.test(workflow))
     throw new Error('Invalid workflow filename or ID');
@@ -281,6 +282,9 @@ async function rerunWorkflow(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
   if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const info=await repositoryInfo(repo,ctx,selected.token);
+  if(info.visibility==='private')
+    throw new Error('Private-repository CI reruns must use disposable ATAX FMRL. Do not rerun GitHub Actions directly; dispatch FMRL for the exact target SHA and poll its status.');
   if(!Number.isInteger(a.run_id)||a.run_id<1)throw new Error('Valid run_id is required');
   const failedOnly=a.failed_only!==false;
   const endpoint=failedOnly?'rerun-failed-jobs':'rerun';
@@ -592,10 +596,10 @@ export const githubTools=[
     'POLL one FMRL controller dispatch by correlation request_id until terminal. Reports exact controller result, confirms provisioning+cleanup steps, independently reads the public bridge for HTTP 404, and BLOCKS acceptance without verified deletion. Never infer CI success from dispatch acceptance.',
     'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),account:{type:'string',maxLength:48,description:'Same GitHub account used for dispatch'},dispatched_account:{type:'string',maxLength:48,description:'Optional dispatched_account returned by atax_fmrl_create_run_dispose to enforce account consistency'},run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
   tool('atax_github_workflow_dispatch',
-    'Dispatch a GitHub Actions workflow on an accessible repository. For private-repository CI/build/test evidence, prefer atax_fmrl_create_run_dispose instead so the target private GitHub Actions quota is not consumed.',
+    'Dispatch a GitHub Actions workflow for a public repository. Private-repository CI is blocked here and must use disposable ATAX FMRL to avoid consuming private GitHub Actions quota.',
     'atax:github:create',one('Workflow dispatch',{repository:s('GitHub owner/name repository',205),workflow:s('Workflow filename (e.g. lint.yml, build.yml) or ID',100),ref:s('Git branch or commit SHA (default main)',120),inputs:{type:'object',description:'Optional workflow inputs object'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','workflow']),dispatchWorkflow),
   tool('atax_github_workflow_rerun',
-    'Re-run a GitHub Actions workflow run (all jobs or failed jobs only) by run_id.',
+    'Re-run a GitHub Actions workflow for a public repository. Private-repository CI reruns are blocked and must use disposable ATAX FMRL.',
     'atax:github:create',one('Workflow rerun',{repository:s('GitHub owner/name repository',205),run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'GitHub Actions workflow run ID'},failed_only:{type:'boolean',description:'Re-run only failed jobs (default true)'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','run_id']),rerunWorkflow),
   tool('atax_github_workflow_runs',
     'List or inspect GitHub Actions workflow runs for a repository, reporting execution status, conclusion (success, failure), jobs, steps, failure_receipts and failure_log_tail for failed jobs, and URL.',
