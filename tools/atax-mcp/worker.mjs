@@ -473,7 +473,7 @@ export default {fetch:createHandler()};
     const fetchRaw=async path=>{
       if(!path||path.length>1000||path.startsWith('/')||path.includes('..')) throw new Error('Invalid skill asset path');
       const url='https://raw.githubusercontent.com/'+repo+'/'+rev+'/'+path;
-      const response=await ctx.fetcher(url,{signal:AbortSignal.timeout(15000)});
+      const response=await fetch(url,{signal:AbortSignal.timeout(15000)});
       if(!response.ok) throw new Error('Unable to fetch GitHub skill asset: '+path);
       const content=await response.text();
       if(content.length>5000000) throw new Error('Skill asset exceeds 5 MB: '+path);
