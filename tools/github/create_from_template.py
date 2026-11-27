@@ -1,82 +1,107 @@
 #!/usr/bin/env python3
-"""Create a permanent repository from a GitHub template, with verification."""
-import argparse
-import json
-import os
-import re
-import sys
-import time
-from urllib import request, error
+"""Create a permanent repository from an owner-controlled public/private source."""
+import argparse,json,os,re,subprocess,tempfile,shutil,time
+from urllib import request,error
 
-def api(path, token, method="GET", payload=None):
-    body = None if payload is None else json.dumps(payload).encode()
-    req = request.Request("https://api.github.com" + path, data=body, method=method,
-        headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "atax-template-generator"})
+API="https://api.github.com"
+IDENT=re.compile(r"^[A-Za-z0-9_.-]+$")
+
+def api(path,token,method="GET",payload=None):
+    body=None if payload is None else json.dumps(payload).encode()
+    req=request.Request(API+path,data=body,method=method,headers={
+        "Authorization":"Bearer "+token,"Accept":"application/vnd.github+json",
+        "X-GitHub-Api-Version":"2022-11-28","User-Agent":"atax-repository-generator"})
     try:
-        with request.urlopen(req, timeout=30) as res:
-            return json.load(res) if res.status != 204 else {}
+        with request.urlopen(req,timeout=30) as res:
+            return json.load(res) if res.status!=204 else {}
     except error.HTTPError as exc:
         raise RuntimeError(f"GitHub {method} {path}: HTTP {exc.code}") from None
 
+def safe_repo(v):
+    if not IDENT.fullmatch(v): raise SystemExit("Invalid repository identifier")
+    return v
+
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--template", required=True, help="Existing owner/repo marked as template")
-    p.add_argument("--owner", required=True, help="Destination owner")
-    p.add_argument("--name", required=True, help="New repository name")
-    p.add_argument("--visibility", choices=["private"], default="private", help="Meditation repositories are always private")
-    p.add_argument("--description", default="")
-    p.add_argument("--dry-run", action="store_true")
-    a = p.parse_args()
-    valid = r"[A-Za-z0-9_.-]+"
-    if not re.fullmatch(valid + "/" + valid, a.template) or not all(
-        re.fullmatch(valid, v) for v in (a.owner, a.name)):
-        p.error("Invalid repository identifier")
-    payload = {"owner": a.owner, "name": a.name,
-               "private": True, "include_all_branches": False}
-    if a.description:
-        payload["description"] = a.description
-    endpoint = f"/repos/{a.template}/generate"
-    if a.dry_run:
-        print(json.dumps({"method": "POST", "endpoint": endpoint, "payload": payload}))
-        return
-    token = os.environ.get("CODING_REPO_TOKEN") or os.environ.get("GH_TOKEN")
-    if not token:
-        raise SystemExit("Missing CODING_REPO_TOKEN or GH_TOKEN")
-    source = api(f"/repos/{a.template}", token)
-    if source.get("is_template") is not True:
-        raise SystemExit("Source is not configured as a GitHub template")
-    target_path = f"/repos/{a.owner}/{a.name}"
+    p=argparse.ArgumentParser()
+    p.add_argument("--template",required=True,help="Source owner/repo; must be public unless destination is private")
+    p.add_argument("--owner",required=True)
+    p.add_argument("--name",required=True)
+    p.add_argument("--visibility",choices=["private","public"],default="private")
+    p.add_argument("--description",default="")
+    p.add_argument("--ci-workflow",action="store_true")
+    a=p.parse_args()
+    parts=a.template.split("/")
+    if len(parts)!=2 or not all(IDENT.fullmatch(x) for x in parts): p.error("Invalid source repository")
+    safe_repo(a.owner); safe_repo(a.name)
+    token=os.environ.get("CODING_REPO_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token: raise SystemExit("Missing CODING_REPO_TOKEN or GH_TOKEN")
+    source=api(f"/repos/{a.template}",token)
+    source_private=bool(source.get("private"))
+    if source_private and a.visibility=="public":
+        raise SystemExit("SECURITY: private source may not generate a public repository")
+    target=f"{a.owner}/{a.name}"
     try:
-        api(target_path, token)
+        api(f"/repos/{target}",token)
     except RuntimeError as exc:
-        if "HTTP 404" not in str(exc):
-            raise
+        if "HTTP 404" not in str(exc): raise
     else:
         raise SystemExit("Destination already exists; refusing to overwrite")
-    created = api(endpoint, token, "POST", payload)
-    if created.get("full_name", "").lower() != f"{a.owner}/{a.name}".lower():
-        raise SystemExit("Unexpected generated repository identity")
-    if created.get("private") is not True:
-        raise SystemExit("SECURITY: generated repository is not private; inspect and restrict immediately")
-    for attempt in range(20):
-        try:
-            target = api(target_path, token)
-            if target.get("private") is not True:
-                raise SystemExit("SECURITY: destination repository is not private")
-            if target.get("default_branch") and not target.get("empty", False):
-                branch = api(target_path + "/branches/" + target["default_branch"], token)
-                if branch.get("commit", {}).get("sha"):
-                    print(json.dumps({"repository": target["full_name"],
-                                      "url": target["html_url"],
-                                      "commit": branch["commit"]["sha"],
-                                      "template": a.template}))
-                    return
-        except RuntimeError as exc:
-            if "HTTP 404" not in str(exc):
-                raise
-        time.sleep(3)
-    raise SystemExit("Repository created but branch not ready; inspect manually (not deleted)")
 
-if __name__ == "__main__":
+    created=api("/user/repos",token,"POST",{
+        "name":a.name,"private":a.visibility=="private",
+        "description":a.description,"auto_init":False})
+    if str(created.get("full_name","")).lower()!=target.lower():
+        raise SystemExit("Unexpected generated repository identity")
+    source_url=f"https://github.com/{a.template}.git"
+    target_url=f"https://github.com/{target}.git"
+    with tempfile.TemporaryDirectory(prefix="atax-repo-copy-") as work:
+        src=os.path.join(work,"src")
+        subprocess.run(["git","clone","--depth","1",source_url,src],check=True,capture_output=True,text=True)
+        git_dir=os.path.join(src,".git")
+        if os.path.exists(git_dir): shutil.rmtree(git_dir)
+        if a.ci_workflow:
+            wf=os.path.join(src,".github","workflows")
+            os.makedirs(wf,exist_ok=True)
+            with open(os.path.join(wf,"ci.yml"),"w",encoding="utf-8") as f:
+                f.write("""name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run check
+""")
+        subprocess.run(["git","-C",src,"init","-b","main"],check=True,capture_output=True,text=True)
+        subprocess.run(["git","-C",src,"config","user.name","github-actions[bot]"],check=True)
+        subprocess.run(["git","-C",src,"config","user.email","41898282+github-actions[bot]@users.noreply.github.com"],check=True)
+        subprocess.run(["git","-C",src,"add","."],check=True)
+        subprocess.run(["git","-C",src,"commit","-m","feat: initialize portfolio application"],check=True,capture_output=True,text=True)
+        auth_header="AUTHORIZATION: basic "+subprocess.check_output(
+            ["bash","-lc","printf 'x-access-token:%s' "$CODING_REPO_TOKEN" | base64 -w0"],
+            env={**os.environ,"CODING_REPO_TOKEN":token},text=True).strip()
+        subprocess.run(["git","-C",src,"-c",f"http.extraheader={auth_header}","remote","add","origin",target_url],check=True)
+        subprocess.run(["git","-C",src,"-c",f"http.extraheader={auth_header}","push","origin","main"],check=True,capture_output=True,text=True)
+
+    for _ in range(20):
+        target_info=api(f"/repos/{target}",token)
+        if bool(target_info.get("private"))==(a.visibility=="private") and target_info.get("default_branch"):
+            branch=api(f"/repos/{target}/branches/{target_info['default_branch']}",token)
+            sha=branch.get("commit",{}).get("sha")
+            if sha:
+                print(json.dumps({"repository":target,"url":target_info["html_url"],"visibility":a.visibility,"commit":sha,"source":a.template}))
+                return
+        time.sleep(2)
+    raise SystemExit("Repository created but final branch was not verified")
+
+if __name__=="__main__":
     main()
