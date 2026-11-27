@@ -94,7 +94,7 @@ BEGIN
       END IF;
       IF v_mcp_transport THEN
         UPDATE public.socket_invocations
-        SET expires_at=least(v_task.claim_expires_at,statement_timestamp()+interval '5 minutes')
+        SET expires_at=greatest(v_inv.expires_at,least(v_task.claim_expires_at,statement_timestamp()+interval '5 minutes'))
         WHERE id=v_inv.id RETURNING * INTO v_inv;
       END IF;
     END IF;
