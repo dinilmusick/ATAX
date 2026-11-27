@@ -365,6 +365,38 @@ export interface WorkSocketSubstrateResponse {
   fetchedAt: string;
 }
 
+export interface WorkSocketSuitabilityComponents {
+  capability: number;
+  reliability: number;
+  domain_affinity: number;
+  tool_familiarity: number;
+  verification: number;
+  latency: number;
+  context_efficiency: number;
+  resource_fit: number;
+}
+
+export interface WorkSocketSuitabilityCandidate {
+  evaluation_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  suitability_score: number;
+  capability_complete: boolean;
+  components: WorkSocketSuitabilityComponents;
+  evidence: Record<string, number | null>;
+}
+
+export interface WorkSocketSuitabilityResponse {
+  task_id: string;
+  evaluated_at: string;
+  candidate_count: number;
+  suitability_only: true;
+  authorization_note: string;
+  candidates: WorkSocketSuitabilityCandidate[];
+}
+
+
 export interface SkillRecord {
   id: number;
   name: string;
