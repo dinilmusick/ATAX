@@ -297,6 +297,39 @@ BEGIN
     RAISE EXCEPTION 'FAIL: rejected child budget escalation left partial atomization state';
   END IF;
 
+  -- A child may not add socket capabilities outside the parent's immutable
+  -- task authority, even when an authenticated atomizer requests them.
+  bad:=jsonb_set(definition,'{0,socket_authority}',
+    jsonb_build_object('capabilities',jsonb_build_array('socket:admin')),true);
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,
+      fence,'socket-capability-escalation',bad,jsonb_build_object('checkpoint','must-rollback'));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Child socket capability scope exceeds parent authority' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: child socket capability escalation was accepted'; END IF;
+
+  -- A child may not request broader MCP/ATAX tool scopes either.
+  bad:=jsonb_set(definition,'{0,socket_authority}',
+    jsonb_build_object('tool_scopes',jsonb_build_array('atax:owner')),true);
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,
+      fence,'tool-scope-escalation',bad,jsonb_build_object('checkpoint','must-rollback'));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('Child tool scope exceeds parent authority' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: child tool scope escalation was accepted'; END IF;
+
+  IF EXISTS(SELECT 1 FROM public.socket_atomizations WHERE parent_task_id=p)
+     OR EXISTS(SELECT 1 FROM public.socket_atomization_children WHERE parent_task_id=p)
+     OR EXISTS(SELECT 1 FROM public.tasks child WHERE child.parent_task_id=p) THEN
+    RAISE EXCEPTION 'FAIL: rejected child authority escalation left partial child state';
+  END IF;
+
   -- Any authenticated invocation holding the original overflow fence may
   -- atomise the stopped parent; author/worker identity is not an eligibility gate.
 
