@@ -106,6 +106,12 @@ BEGIN
        OR v_parent.claim_token IS NOT NULL THEN$new$
       ),
       (
+        to_regprocedure('public.socket_atomize_task(uuid,uuid,uuid,uuid,text,jsonb,jsonb)'),
+        $old$IF v_old.split_key<>split_key_in OR v_old.definition<>children_in
+       OR v_old.authored_by_invocation<>invocation_in THEN$old$,
+        $new$IF v_old.split_key<>split_key_in OR v_old.definition<>children_in THEN$new$
+      ),
+      (
         to_regprocedure('public.socket_claim_child(uuid,uuid,uuid,integer)'),
         $old$ARRAY['executor','worker']$old$,
         $new$ARRAY['worker','atomizer','executor','verifier']$new$
