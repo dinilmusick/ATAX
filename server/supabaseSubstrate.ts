@@ -1343,6 +1343,26 @@ export function createSubstrateService(
     return { tasks, workers, fetchedAt };
   }
 
+  async function getWorkSocketSuitability(taskId: string): Promise<Record<string, unknown>> {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedTaskId)) {
+      throw new Error('A valid task UUID is required for suitability evaluation.');
+    }
+    const result = await resolveApi().callRpc('atax_worker_suitability_v1', {
+      task_id_in: normalizedTaskId,
+      requested_by_actor_in: 'service:atax-dashboard',
+      limit_in: 10,
+    });
+    if (!result.ok) {
+      throw new Error(result.error || 'Unable to evaluate worker suitability.');
+    }
+    const value = result.rows[0]?.value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Suitability RPC returned an invalid response.');
+    }
+    return asRecord(value);
+  }
+
   async function getSkillsCatalog(): Promise<SkillsSubstrateResponse> {
     const api = resolveApi();
     const fetchedAt = new Date().toISOString();
@@ -1467,6 +1487,7 @@ export function createSubstrateService(
     getSystemsGraph,
     getVisionsGoalsGraph,
     getWorkSockets,
+    getWorkSocketSuitability,
     getSkillsCatalog,
   };
 }
