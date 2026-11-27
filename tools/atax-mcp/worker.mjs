@@ -52,17 +52,20 @@ const TOOLS = [...computeTools, ...inferenceTools,
     const context=await db.rpc('agent_context_overview',{});
     const objective=String(a.objective||'').toLowerCase();
     const tokens=new Set((objective.match(/[a-z0-9][a-z0-9_-]{2,}/g)||[]).filter(x=>!['the','and','for','with','from','that','this','into','need','want','make','implement','fix','build'].includes(x)));
-    const systems=(context?.systems||[]).map(s=>{
-      const hay=String([s.system_key,s.name,s.system_type].join(' ')).toLowerCase();
-      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
-      return {system_key:s.system_key,name:s.name,status:s.status,work_priority:s.work_priority,score};
-    }).filter(x=>!a.system_key||x.system_key===a.system_key).sort((x,y)=>y.score-x.score||Number(y.work_priority||0)-Number(x.work_priority||0)).slice(0,8);
-    const goals=(context?.goals||[]).map(g=>{
-      const hay=String([g.goal_key,g.name,g.status].join(' ')).toLowerCase();
-      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
-      return {goal_key:g.goal_key,name:g.name,status:g.status,system_id:g.system_id,user_priority:g.user_priority,score};
-    }).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||Number(y.user_priority||0)-Number(x.user_priority||0)).slice(0,8);
-    return {objective:a.objective,recommended_workflow:['Resolve/reuse System','Reuse or create Vision/Target','Reuse or create Goal','Attach dependencies','Decompose into 1–4 action tasks','Claim one eligible task','Execute externally','Submit evidence','Independently verify','Reassess graph'],candidate_systems:systems,candidate_goals:goals,planning_rule:'Do not create a new task merely because the user phrased a new request. First determine whether the request advances an existing strategic node.',next:'If the correct strategic location is still unclear, call atax_preemptive_guidance_get; otherwise reuse the best matching graph node and continue through the canonical lifecycle.'};
+    const scoreMatch=(parts)=>{const hay=String(parts.filter(Boolean).join(' ')).toLowerCase();return [...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);};
+    const systems=(context?.systems||[]).map(s=>({...s,score:scoreMatch([s.system_key,s.name,s.system_type])})).filter(x=>!a.system_key||x.system_key===a.system_key).sort((x,y)=>y.score-x.score||Number(y.work_priority||0)-Number(x.work_priority||0)).slice(0,8);
+    const goals=(context?.goals||[]).map(g=>({...g,score:scoreMatch([g.goal_key,g.name,g.status])})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||Number(y.user_priority||0)-Number(x.user_priority||0)).slice(0,8);
+    const [visions,targets,edges,tasks]=await Promise.all([
+      db.request('visions?select=id,vision_key,title,description,status,updated_at&order=updated_at.desc&limit=40'),
+      db.request('vision_targets?select=id,vision_id,parent_target_id,label,target,created_at&order=created_at.desc&limit=80'),
+      db.request('vision_target_goals?select=vision_target_id,goal_id,created_at&limit=160'),
+      db.request('tasks?select=id,task_key,goal_id,task_name,status,priority,verification_status,updated_at&order=updated_at.desc&limit=120')
+    ]);
+    const candidateVisions=(visions||[]).map(v=>({...v,score:scoreMatch([v.vision_key,v.title,v.description])})).filter(v=>v.score>0).sort((x,y)=>y.score-x.score).slice(0,8);
+    const candidateTargets=(targets||[]).filter(t=>candidateVisions.some(v=>v.id===t.vision_id)||scoreMatch([t.label,JSON.stringify(t.target)])>0).slice(0,12);
+    const candidateEdges=(edges||[]).filter(e=>candidateTargets.some(t=>t.id===e.vision_target_id)||goals.some(g=>g.id===e.goal_id)).slice(0,20);
+    const candidateTasks=(tasks||[]).filter(t=>goals.some(g=>g.id===t.goal_id)||scoreMatch([t.task_key,t.task_name,t.status])>0).slice(0,16);
+    return {objective:a.objective,recommended_workflow:['Resolve/reuse System','Resolve/reuse Vision','Resolve/reuse Target','Resolve/reuse or create Goal','Attach Vision/Target/Goal dependencies','Decompose into 1–4 action tasks','Claim one eligible task','Execute externally','Submit evidence','Independently verify','Reassess the entire graph'],candidate_systems:systems,candidate_visions:candidateVisions,candidate_targets:candidateTargets,candidate_goal_links:candidateEdges,candidate_goals:goals,candidate_tasks:candidateTasks,planning_rule:'Do not create a new strategic node merely because the user phrased a new request. First determine whether it advances an existing System, Vision, Target, Goal or Task. Create only the missing layer.',next:'If the correct strategic location is still unclear, call atax_preemptive_guidance_get; otherwise reuse the best matching graph node and continue through the canonical lifecycle.'};
   }),
   tool('atax_preemptive_guidance_get', 'Retrieve current durable preemptive guidance on demand. Guidance is updated after tool actions and intentionally omitted from ordinary tool responses to avoid context bloat.', 'atax:read', one('guidance', {}), (_,db,p) => db.rpc('atax_mcp_preemptive_guidance_get_v1',{owner_subject_in:p.id})),
     tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
@@ -291,6 +294,9 @@ async function runCall(name,args,principal,env,fetcher){
   catch(err){
     const rawMessage=err instanceof Error?err.message:String(err||'Canonical operation denied or unavailable');
     const safeMessage=scrubSecrets(rawMessage,env).slice(0,500)||'Canonical operation denied or unavailable';
+    if(fetcher===fetch&&name!=='atax_preemptive_guidance_get'&&name!=='atax_intro_documentation'){
+      try{await db.rpc('atax_mcp_preemptive_guidance_update_v1',{owner_subject_in:principal.id,tool_name_in:name,action_summary_in:'FAILED: '+safeMessage,context_in:{scope:match.scope,error:true}});}catch(e){console.warn('[mcp:guidance:error-update]',e instanceof Error?e.message:String(e));}
+    }
     return {isError:true,content:[{type:'text',text:safeMessage}]};
   }
 }
