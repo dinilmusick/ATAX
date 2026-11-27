@@ -105,6 +105,20 @@ function TaskDetails({ task }: { task: WorkSocketTaskRecord }) {
               ))
             : <span className="font-mono">none declared</span>}
           </div>
+          <div>Socket authority: {task.authority?.allowedSocketCapabilities.length
+            ? task.authority.allowedSocketCapabilities.map((cap) => (
+                <span key={cap} className="inline-block mr-1 mb-1 rounded-sm border border-[#4A362D] px-1.5 py-0.5 font-mono text-[10px]">{cap}</span>
+              ))
+            : <span className="font-mono">not provisioned</span>}
+          </div>
+          <div>Tool scopes: {task.authority?.allowedToolScopes.length
+            ? task.authority.allowedToolScopes.join(' · ')
+            : 'not provisioned'}</div>
+          <div>Repository scope: {task.authority?.repositoryScope.length
+            ? task.authority.repositoryScope.join(' · ')
+            : 'none declared'}</div>
+          <div>Resource ceiling: <span className="font-mono break-all">{task.authority ? JSON.stringify(task.authority.resourceScope) : 'not provisioned'}</span></div>
+          <div>Authority version: <span className="font-mono">{task.authority?.authorityVersion ?? '—'}</span></div>
         </div>
       </section>
 
