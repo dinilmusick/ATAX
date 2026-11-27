@@ -80,7 +80,7 @@ BEGIN
       END IF;
       UPDATE public.socket_invocations
       SET secret=gen_random_uuid(),registered_at=statement_timestamp(),
-          expires_at=least(v_task.claim_expires_at,statement_timestamp()+interval '5 minutes'),
+          expires_at=greatest(v_inv.expires_at,least(v_task.claim_expires_at,statement_timestamp()+interval '5 minutes')),
           model_id=v_model->>'modelId',
           model_profile_version=v_model->>'profileSetVersion',
           role='worker'
