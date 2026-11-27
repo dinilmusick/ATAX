@@ -62,6 +62,15 @@ jobs:
           set -euo pipefail
           env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_URL supabase db reset
 
+      - name: Run current-head fenced task-claim race before adapter integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SUPABASE_ACCESS_TOKEN:-}"
+          test -z "${SUPABASE_DB_URL:-}"
+          bash supabase/tests/concurrent-claims-fenced.sh
       - name: Run SQL, RLS, RPC and trigger integration tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
