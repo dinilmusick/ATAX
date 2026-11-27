@@ -1,7 +1,7 @@
 -- WorkSocket completion is evidence/predicate based, not actor-identity based.
--- Evaluate the supported builtin predicates in the database and require their
--- persisted receipts before accepting a bounded task's verified terminal state.
--- No caller-supplied worker/verifier inequality is introduced.
+-- Supported builtin predicates are evaluated in the database. Caller-supplied
+-- verdicts must match the evaluator, and verified completion requires durable
+-- evidence, passing loop iterations and predicate-backed checkpoints.
 
 DO $migration$
 DECLARE
@@ -11,7 +11,7 @@ DECLARE
   matches integer;
 BEGIN
   FOR patch IN
-    SELECT signature::regprocedure AS signature, old_fragment, new_fragment
+    SELECT signature, old_fragment, new_fragment
     FROM (VALUES
       (
         to_regprocedure('public.task_ledger_claim_verification_for_task(uuid,text,integer)'),
@@ -163,143 +163,15 @@ BEGIN
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old
-      (
-        to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old$'passed',passed_in$old$,
-        $new$'passed',v_computed_pass$new$
-      )
-    ) AS changes(signature,old_fragment,new_fragment)
-  LOOP
-    IF patch.signature IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: required function is missing';
-    END IF;
-    SELECT pg_get_functiondef(patch.signature) INTO source_definition;
-    IF source_definition IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: function definition unavailable for %',patch.signature;
-    END IF;
-    matches := (length(source_definition) -
-      length(replace(source_definition,patch.old_fragment,''))) /
-      greatest(length(patch.old_fragment),1);
-    IF matches <> 1 THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration drift: expected one match in %, found %',patch.signature,matches;
-    END IF;
-    patched_definition := replace(source_definition,patch.old_fragment,patch.new_fragment);
-    EXECUTE patched_definition;
-  END LOOP;
-END
-$migration$;
-
-COMMENT ON FUNCTION public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text) IS
-'Records a checkpoint predicate execution. Supported builtin operations are evaluated by the database; caller-supplied verdicts must match the computed result, and every success requires durable evidence.';
-
-COMMENT ON FUNCTION public.task_ledger_verify_result(uuid,text,boolean,jsonb) IS
-'Verification is available to any authorized principal and accepts only persisted result evidence, passing loop iterations and passing registered checkpoint predicates.';
-status','succeeded',
+        $old$'status','succeeded',
         'result',result_in,$old$,
-        $new
-      (
-        to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old$'passed',passed_in$old$,
-        $new$'passed',v_computed_pass$new$
-      )
-    ) AS changes(signature,old_fragment,new_fragment)
-  LOOP
-    IF patch.signature IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: required function is missing';
-    END IF;
-    SELECT pg_get_functiondef(patch.signature) INTO source_definition;
-    IF source_definition IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: function definition unavailable for %',patch.signature;
-    END IF;
-    matches := (length(source_definition) -
-      length(replace(source_definition,patch.old_fragment,''))) /
-      greatest(length(patch.old_fragment),1);
-    IF matches <> 1 THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration drift: expected one match in %, found %',patch.signature,matches;
-    END IF;
-    patched_definition := replace(source_definition,patch.old_fragment,patch.new_fragment);
-    EXECUTE patched_definition;
-  END LOOP;
-END
-$migration$;
-
-COMMENT ON FUNCTION public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text) IS
-'Records a checkpoint predicate execution. Supported builtin operations are evaluated by the database; caller-supplied verdicts must match the computed result, and every success requires durable evidence.';
-
-COMMENT ON FUNCTION public.task_ledger_verify_result(uuid,text,boolean,jsonb) IS
-'Verification is available to any authorized principal and accepts only persisted result evidence, passing loop iterations and passing registered checkpoint predicates.';
-status','succeeded',
+        $new$'status','succeeded',
         'result',v_result$new$
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old
-      (
-        to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old$'passed',passed_in$old$,
-        $new$'passed',v_computed_pass$new$
-      )
-    ) AS changes(signature,old_fragment,new_fragment)
-  LOOP
-    IF patch.signature IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: required function is missing';
-    END IF;
-    SELECT pg_get_functiondef(patch.signature) INTO source_definition;
-    IF source_definition IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: function definition unavailable for %',patch.signature;
-    END IF;
-    matches := (length(source_definition) -
-      length(replace(source_definition,patch.old_fragment,''))) /
-      greatest(length(patch.old_fragment),1);
-    IF matches <> 1 THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration drift: expected one match in %, found %',patch.signature,matches;
-    END IF;
-    patched_definition := replace(source_definition,patch.old_fragment,patch.new_fragment);
-    EXECUTE patched_definition;
-  END LOOP;
-END
-$migration$;
-
-COMMENT ON FUNCTION public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text) IS
-'Records a checkpoint predicate execution. Supported builtin operations are evaluated by the database; caller-supplied verdicts must match the computed result, and every success requires durable evidence.';
-
-COMMENT ON FUNCTION public.task_ledger_verify_result(uuid,text,boolean,jsonb) IS
-'Verification is available to any authorized principal and accepts only persisted result evidence, passing loop iterations and passing registered checkpoint predicates.';
-status','failed','result',result_in,$old$,
-        $new
-      (
-        to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
-        $old$'passed',passed_in$old$,
-        $new$'passed',v_computed_pass$new$
-      )
-    ) AS changes(signature,old_fragment,new_fragment)
-  LOOP
-    IF patch.signature IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: required function is missing';
-    END IF;
-    SELECT pg_get_functiondef(patch.signature) INTO source_definition;
-    IF source_definition IS NULL THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration: function definition unavailable for %',patch.signature;
-    END IF;
-    matches := (length(source_definition) -
-      length(replace(source_definition,patch.old_fragment,''))) /
-      greatest(length(patch.old_fragment),1);
-    IF matches <> 1 THEN
-      RAISE EXCEPTION 'WorkSocket evidence migration drift: expected one match in %, found %',patch.signature,matches;
-    END IF;
-    patched_definition := replace(source_definition,patch.old_fragment,patch.new_fragment);
-    EXECUTE patched_definition;
-  END LOOP;
-END
-$migration$;
-
-COMMENT ON FUNCTION public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text) IS
-'Records a checkpoint predicate execution. Supported builtin operations are evaluated by the database; caller-supplied verdicts must match the computed result, and every success requires durable evidence.';
-
-COMMENT ON FUNCTION public.task_ledger_verify_result(uuid,text,boolean,jsonb) IS
-'Verification is available to any authorized principal and accepts only persisted result evidence, passing loop iterations and passing registered checkpoint predicates.';
-status','failed','result',v_result$new$
+        $old$'status','failed','result',result_in,$old$,
+        $new$'status','failed','result',v_result$new$
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
