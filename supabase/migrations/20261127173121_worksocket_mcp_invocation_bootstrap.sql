@@ -57,8 +57,10 @@ BEGIN
   new_fragment := $new$  v_mcp_transport:=command_in->>'transport'='mcp'
     AND command_in->>'profileSource'='atax-mcp-pinned-fallback';
 
-  -- Session uniqueness is enforced in the canonical table. Never rebind an
-  -- existing session to another actor or transport.
+  -- Serialize first registration for this logical authenticated MCP session.
+  -- The unique session row is then locked and can never be rebound to another
+  -- principal or transport.
+  PERFORM pg_advisory_xact_lock(hashtextextended(v_session,0));
   SELECT * INTO v_inv FROM public.socket_invocations
   WHERE session_id=v_session FOR UPDATE;
 
