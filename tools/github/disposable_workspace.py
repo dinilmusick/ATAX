@@ -7,7 +7,7 @@ clones the private target at runtime, executes its workflow with act, and
 removes the checkout before the job ends.
 """
 from __future__ import annotations
-import argparse, base64, json, os, re, shutil, subprocess, time, uuid
+import argparse, base64, json, os, re, shutil, subprocess, sys, time, uuid
 from pathlib import Path
 from urllib import error, request
 
@@ -673,8 +673,11 @@ def main() -> int:
     target_ref = args.ref
     if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
         raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
-    if args.mode != "repair" and not source.get("private", False):
-        raise SystemExit("Source repository is not private; this tool is only for private-target CI.")
+    if not source.get("private", False):
+        # Public targets carry no private-source exposure risk; allow the same
+        # disposable-bridge exact-SHA execution in direct and repair modes.
+        # Fixed-format stderr receipt only; no secrets or private metadata.
+        print("FMRL public-target execution: mode=" + args.mode, file=sys.stderr)
 
     created = api("/user/repos", bearer, "POST", {
         "name": target_name,
