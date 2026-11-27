@@ -89,7 +89,7 @@ begin
       claimed_session_id=session_id_in,
       claim_token=gen_random_uuid(),
       claimed_at=now(),
-      claim_expires_at=now()+make_interval(secs=lease_value),
+      claim_expires_at=now()+make_interval(secs=>lease_value),
       attempt_count=attempt_count+1,
       heartbeat_at=now(),
       updated_at=now(),
