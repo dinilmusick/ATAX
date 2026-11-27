@@ -118,9 +118,6 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   const hp=h.payload.result.structuredContent.result.params;
   assert.equal(hp.agent_id_in,'test-external-agent');assert.equal(hp.current_step_in,'Testing actual work');
   assert.equal(hp.heartbeat_context_in.next_action,'Continue');
-  const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for independent verification',evidence:[{url:'test://result'}]});
-  assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
-
   const predicate=await call('atax_task_record_checkpoint_predicate',{
     task_id:sampleTaskId,claim_token:sampleClaimToken,checkpoint_index:0,
     predicate_key:'builtin.evidence_present',predicate_version:1,
@@ -135,6 +132,9 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   assert.equal(pp.predicate_key_in,'builtin.evidence_present');
   assert.equal(pp.passed_in,true);
   assert.deepEqual(pp.inputs_in,{evidence:['observed']});
+
+  const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for evidence verification',evidence:[{url:'test://result'}]});
+  assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
 });
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
   const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -187,10 +187,10 @@ test('a fenced-out caller can leave a non-mutating handoff then discover another
   const readOnly={...env,MCP_SHARED_SCOPES:'atax:read'};
   assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,claim_token:oldFence,note:'x'},{env:readOnly})).payload.result.isError,true);
 });
-test('independent verification uses distinct scope and identity, never self-authorizes verification',async()=>{
+test('verification uses its explicit scope and the same authenticated principal is permitted',async()=>{
   const readonly={...env,MCP_SHARED_SCOPES:'atax:read atax:write'};
   assert.equal((await call('atax_verification_claim',{}, {env:readonly})).payload.result.isError,true);
-  const r=await call('atax_verification_submit',{task_id:'task-id',verification_claim_token:'token',verified:true,report:{evidence:'third party'}});
+  const r=await call('atax_verification_submit',{task_id:'task-id',verification_claim_token:'token',verified:true,report:{evidence:[{type:'predicate','result':'passed'}]}});
   assert.equal(r.payload.result.structuredContent.result.params.verifier_agent_id_in,'test-external-agent');
   assert.equal(r.payload.result.structuredContent.result.params.verified_in,true);
 });
