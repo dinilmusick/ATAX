@@ -9,6 +9,7 @@ import {inferenceTools} from './inference-tools.mjs';
 import {createConfiguredSocketWorker} from './socket-worker.mjs';
 import {visualTools, visualResourceDefs} from './visual-tools.mjs';
 import {getVisualState} from './visual-store.mjs';
+import {resolveBudget, estimateTextTokens} from '../socket-budget/index.mjs';
 /** ATAX MCP adapter: stateless JSON-RPC 2.0 / Streamable HTTP, no resident agents. */
 const PROTOCOL = '2025-06-18';
 const SUPPORTED = new Set(['2025-11-25', '2025-06-18', '2025-03-26']);
@@ -26,6 +27,27 @@ const S = {
   bool: description => ({ type: 'boolean', description }),
 };
 const tool = (name, description, scope, inputSchema, invoke) => ({name, description, scope, inputSchema, invoke});
+const MCP_SOCKET_BUDGET = resolveBudget('unknown');
+const MCP_SOCKET_PROFILE = Object.freeze({
+  modelId:MCP_SOCKET_BUDGET.modelId,
+  tokenizerId:MCP_SOCKET_BUDGET.tokenizerId,
+  profileSetVersion:MCP_SOCKET_BUDGET.profileSetVersion,
+  overhead:MCP_SOCKET_BUDGET.overhead,
+  inputLimit:MCP_SOCKET_BUDGET.inputLimit,
+  outputLimit:MCP_SOCKET_BUDGET.outputLimit,
+  maxUsableTokens:MCP_SOCKET_BUDGET.maxUsableTokens,
+});
+const mcpSocketCommand = (args,principalId,operation,capability,payload) => {
+  const requestWire=JSON.stringify(args);
+  return {
+    transport:'mcp',
+    profileSource:'atax-mcp-pinned-fallback',
+    operation,capability,principalId,sessionId:principalId,
+    taskId:args.task_id,claimToken:args.claim_token,payload,
+    requestWire,inboundTokens:estimateTextTokens(requestWire)+MCP_SOCKET_BUDGET.overhead,
+    replyId:'1',maxReplyBytes:8192,budgetProfile:MCP_SOCKET_PROFILE,
+  };
+};
 const TOOLS = [...computeTools, ...inferenceTools,
 
   tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
@@ -61,11 +83,11 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_verification_submit', 'Verify a submitted result under a verification claim using persisted evidence and predicates', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
   tool('atax_goal_finalize', 'Finalize an evidence-verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
   tool('atax_verification_claim_for_task', 'Claim a specific task pending evidence verification by task UUID', 'atax:verify', one('claim verification for task',{task_id:S.text('Task UUID',36),lease_seconds:S.int('Lease length',60,900)},['task_id']), (a,db,p)=>db.rpc('task_ledger_claim_verification_for_task',{task_id_in:a.task_id,verifier_agent_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
-  tool('atax_socket_context_pull', 'Retrieve one bounded canonical context page for the claimed task', 'atax:write', one('context pull',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),cursor:S.text('Cursor',256),limit:S.int('Limit',1,16)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'context_pull',capability:'socket:context:read',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{cursor:a.cursor,limit:a.limit??16},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_output_submit', 'Persist bounded task output only; cannot edit a repository or any external resource', 'atax:write', one('output submit',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),output:{type:'object'},partial:S.bool('Partial output')},['task_id','claim_token','output']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'output_submit',capability:'socket:output:submit',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{output:a.output,partial:a.partial??false},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_atomisation_request', 'Request stop and fenced atomisation with a bounded partial-progress note', 'atax:write', one('atomisation request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),reason:S.text('Reason',512),partial_progress:S.text('Partial progress',3000)},['task_id','claim_token','reason']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'atomisation_request',capability:'socket:atomise:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{reason:a.reason,partial_progress:a.partial_progress??''},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
+  tool('atax_socket_context_pull', 'Retrieve one bounded canonical context page for the claimed task', 'atax:write', one('context pull',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),cursor:S.text('Cursor',256),limit:S.int('Limit',1,16)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:mcpSocketCommand(a,p.id,'context_pull','socket:context:read',{cursor:a.cursor,limit:a.limit??16})})),
+  tool('atax_socket_output_submit', 'Persist bounded task output only; cannot edit a repository or any external resource', 'atax:write', one('output submit',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),output:{type:'object'},partial:S.bool('Partial output')},['task_id','claim_token','output']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:mcpSocketCommand(a,p.id,'output_submit','socket:output:submit',{output:a.output,partial:a.partial??false})})),
+  tool('atax_socket_atomisation_request', 'Request stop and fenced atomisation with a bounded partial-progress note', 'atax:write', one('atomisation request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),reason:S.text('Reason',512),partial_progress:S.text('Partial progress',3000)},['task_id','claim_token','reason']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:mcpSocketCommand(a,p.id,'atomisation_request','socket:atomise:request',{reason:a.reason,partial_progress:a.partial_progress??''})})),
+  tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:mcpSocketCommand(a,p.id,'workflow_request','socket:workflow:request',{workflow_key:a.workflow_key,inputs:a.inputs})})),
+  tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:mcpSocketCommand(a,p.id,'task_status','socket:task:status',{})})),
 ];
 TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...browserTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
