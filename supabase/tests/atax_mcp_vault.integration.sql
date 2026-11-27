@@ -96,7 +96,7 @@ BEGIN
     'synthetic_owner','github','PRIMARY','rotated-synthetic-token-1234567890',
     'synthetic_admin',NULL,true);
   SELECT public.atax_mcp_runtime_config_v1() INTO obj;
-  IF obj->'accounts'->0->>'token'<>'rotated-synthetic-token-1234567890'
+  IF NOT (obj->'accounts' @> '[{"provider":"github","alias":"PRIMARY","token":"rotated-synthetic-token-1234567890"}]'::jsonb)
   THEN RAISE EXCEPTION 'Vault rotation not effective'; END IF;
   PERFORM public.atax_mcp_set_provider_enabled_v1(
     'synthetic_owner','github','WORK',false,'synthetic_admin');
@@ -134,11 +134,11 @@ BEGIN
 
   BEGIN
     PERFORM public.atax_mcp_upsert_provider_v1(
-      'synthetic_owner','vercel','PRIMARY','synthetic-vercel-token-123456',
+      'synthetic_owner','INVALID PROVIDER','PRIMARY','synthetic-invalid-token-123456',
       'synthetic_admin',NULL,true);
-    RAISE EXCEPTION 'Unimplemented Vercel provider was accepted';
+    RAISE EXCEPTION 'Invalid provider format was accepted';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM='Unimplemented Vercel provider was accepted' THEN RAISE; END IF;
+    IF SQLERRM='Invalid provider format was accepted' THEN RAISE; END IF;
   END;
 
   PERFORM public.atax_mcp_delete_provider_v1(
