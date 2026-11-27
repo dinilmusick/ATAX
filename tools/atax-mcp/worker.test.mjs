@@ -112,7 +112,7 @@ test('strategy-first orientation and on-demand guidance are exposed without cont
   assert.equal(guidance.payload.result.structuredContent.guidance.retrieval_tool,'atax_preemptive_guidance_get');
 });
 test('private GitHub workflow execution is blocked in favor of disposable FMRL',async()=>{
-  const out=await call('atax_github_workflow_dispatch',{repository:'private-owner/private-repo',workflow:'ci.yml',ref:'main'});
+  const out=await call('atax_github_workflow_dispatch',{repository:'private-owner/private-repo',workflow:'ci.yml',ref:'main'},{env:{...env,MCP_SHARED_SCOPES:'atax:read atax:write atax:github:create'}});
   assert.equal(out.status,200);
   assert.equal(out.payload.result.isError,true);
   assert.match(out.payload.result.content[0].text,/FMRL/i);
@@ -204,7 +204,7 @@ test('independent verification uses distinct scope and identity, never self-auth
   assert.equal(r.payload.result.structuredContent.result.params.verified_in,true);
 });
 test('resources, notifications, malformed JSON-RPC and batch requests',async()=>{
-  const list=await(await post('resources/list')).json();assert.equal(list.result.resources.length,4);
+  const list=await(await post('resources/list')).json();assert.equal(list.result.resources.length,6);
   const read=await(await post('resources/read',{uri:'atax://context/overview'})).json();
   assert.equal(JSON.parse(read.result.contents[0].text).rpc,'agent_context_overview');
   const n=await post('notifications/initialized',{}, {body:{jsonrpc:'2.0',method:'notifications/initialized'}});
@@ -348,7 +348,7 @@ test('first-class Github tools are documented discoverable, and separately scope
   const resources=await (await post('resources/read',{uri:'atax://guides/github-workflows'})).json();
   assert.match(resources.result.contents[0].text,/container/i);
   const prompts=await (await post('prompts/list')).json();
-  assert.equal(prompts.result.prompts[0].name,'atax-github-workflow');
+  assert.equal(prompts.result.prompts[0].name,'atax-introduction');
   const guided=await (await post('prompts/get',{name:'atax-github-workflow'})).json();
   assert.match(guided.result.messages[0].content.text,/FMRL/);
 });
