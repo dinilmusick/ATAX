@@ -31,8 +31,8 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_submit_result(uuid,text,uuid,jsonb,text,jsonb,jsonb,text)'),
-        $old$claim_expires_at=NULL,claim_token=NULL$old$,
-        $new$claimed_session_id=NULL,claim_expires_at=NULL,claim_token=NULL$new$
+        $old$claim_expires_at=null,claim_token=null$old$,
+        $new$claimed_session_id=null,claim_expires_at=null,claim_token=null$new$
       )
     ) AS changes(signature,old_fragment,new_fragment)
   LOOP
