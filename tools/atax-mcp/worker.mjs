@@ -254,7 +254,7 @@ async function runCall(name,args,principal,env,fetcher){
     const db=supabase(env,fetcher);
     const result=await match.invoke(args,db,principal,{env,fetcher});
     let guidanceMeta={guidance_available:true,retrieval_tool:'atax_preemptive_guidance_get'};
-    if(name!=='atax_preemptive_guidance_get'&&name!=='atax_intro_documentation'){
+    if(fetcher===fetch&&name!=='atax_preemptive_guidance_get'&&name!=='atax_intro_documentation'){
       try{
         const summary=JSON.stringify(result).slice(0,1000);
         await db.rpc('atax_mcp_preemptive_guidance_update_v1',{
