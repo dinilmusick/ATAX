@@ -43,6 +43,7 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
       account.provider==='cloudflare'?'CF_KEY_':
       account.provider==='neon'?'NEON_KEY_':
       account.provider==='vercel'?'VERCEL_KEY_':
+      account.provider==='supabase'?'SUPABASE_KEY_':
       INFERENCE_PROVIDERS.has(account.provider)?'AI_KEY_'+account.provider.replace(/-/g,'_')+'__':
       'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'__';
     resolved[prefix+account.alias]=account.token;
@@ -56,6 +57,8 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
         resolved['NEON_ORG_ID_'+account.alias]=account.accountId;
       }else if(account.provider==='vercel'){
         resolved['VERCEL_TEAM_ID_'+account.alias]=account.accountId;
+      }else if(account.provider==='supabase'){
+        resolved['SUPABASE_ORG_SLUG_'+account.alias]=account.accountId;
       }
     }
   }
@@ -63,7 +66,7 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
 }
 
 /** Restricted sockets receive ONLY socket policy and a narrowly granted DB RPC adapter.
- * No GitHub, Cloudflare, Neon, Vercel, maintainer bearer hashes, or privileged Vault reads.
+ * No GitHub, Cloudflare, Neon, Vercel, Supabase, maintainer bearer hashes, or privileged Vault reads.
  */
 export async function loadSocketRuntimeConfig(bootstrapEnv,open=openLedger) {
   const db=await open(bootstrapEnv);
