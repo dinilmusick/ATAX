@@ -1,5 +1,10 @@
 /** Named provider credentials for one ATAX Worker. Tokens never leave this module. */
-const PREFIX = Object.freeze({github:['GH_KEY_','GH_TOKEN_'],cloudflare:['CF_KEY_','CLOUDFLARE_TOKEN_']});
+const PREFIX = Object.freeze({
+  github: ['GH_KEY_', 'GH_TOKEN_'],
+  cloudflare: ['CF_KEY_', 'CLOUDFLARE_TOKEN_'],
+  neon: ['NEON_KEY_', 'NEON_TOKEN_'],
+  vercel: ['VERCEL_KEY_', 'VERCEL_TOKEN_'],
+});
 const COMPUTE_PREFIX='FRNES_KEY_';
 const COMPUTE_JSON='FRNES_COMPUTE_ACCOUNTS_JSON';
 const AI_PREFIX='AI_KEY_';
@@ -394,7 +399,7 @@ async function cloudflarePagesGet(a,_db,p,ctx) {
   };
 }
 export const providerTools=[
-  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
+  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, Neon, Vercel, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
   tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
   tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),
   tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),

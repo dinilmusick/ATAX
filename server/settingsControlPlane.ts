@@ -7,7 +7,7 @@ export const SETTINGS_SESSION_TTL_SECONDS = 30 * 60;
 export interface SettingsStatus {
   backend: { configured: boolean; reachable: boolean };
   authentication: { required: true; authenticated: boolean };
-  providers: { github: boolean; cloudflare: boolean; vercel: false };
+  providers: { github: boolean; cloudflare: boolean; neon: boolean; vercel: boolean };
 }
 
 function headerValue(headers: Headers | Record<string, string | undefined>, key: string): string | null {
@@ -71,7 +71,7 @@ function baseStatus(configured: boolean, reachable: boolean, authenticated: bool
   return {
     backend: { configured, reachable },
     authentication: { required: true, authenticated },
-    providers: { github: true, cloudflare: true, vercel: false },
+    providers: { github: true, cloudflare: true, neon: true, vercel: true },
   };
 }
 

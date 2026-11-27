@@ -436,20 +436,117 @@ test('MCP named GitHub accounts use selected token and do not use canonical owne
   assert.equal(seen.length,3);
 });
 
-test('MCP exposes provider diagnostics and FRNES compute account routing with owner scopes',async()=>{
+test('MCP exposes provider diagnostics and multi-account Neon & Vercel tools with owner scopes',async()=>{
   const cfg={...gitEnv,
-    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read',
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read atax:neon:read atax:neon:write atax:vercel:read atax:vercel:write',
     GH_KEY_WORK:'git-work-secret',
-    CF_KEY_WORK:'cf-work-secret'
+    CF_KEY_WORK:'cf-work-secret',
+    NEON_KEY_PERSONAL:'neon-personal-secret-123',
+    NEON_KEY_WORK:'neon-work-secret-456',
+    NEON_ORG_ID_WORK:'org-work-1',
+    VERCEL_KEY_PERSONAL:'vercel-personal-secret-123',
+    VERCEL_KEY_WORK:'vercel-work-secret-456',
+    VERCEL_TEAM_ID_WORK:'team_work_1',
   };
   const fetched=(await(await post('tools/list',{}, {env:cfg})).json()).result.tools.map(t=>t.name);
   assert.ok(fetched.includes('atax_provider_accounts_list'));
   assert.ok(fetched.includes('atax_cloudflare_accounts_list'));
-  assert.ok(!fetched.some(name=>name.includes('vercel')));
+  assert.ok(fetched.includes('atax_neon_projects_list'));
+  assert.ok(fetched.includes('atax_neon_database_create'));
+  assert.ok(fetched.includes('atax_vercel_projects_list'));
+  assert.ok(fetched.includes('atax_vercel_deployment_create'));
+  assert.ok(fetched.includes('atax_github_job_logs_get'));
+  assert.ok(fetched.includes('atax_browser_render'));
+  assert.ok(fetched.includes('atax_browser_test_dispatch'));
   assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_cloudflare_accounts_list'));
+  assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_neon_projects_list'));
+  assert.ok(!(await(await post('tools/list',{}, {env:gitEnv})).json()).result.tools.some(t=>t.name==='atax_vercel_projects_list'));
   const list=await makeGitCall('atax_provider_accounts_list',{}, {env:cfg});
   const configured=list.structuredContent.result.accounts;
-  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare','compute']);
+  assert.deepEqual(configured.map(x=>x.provider),['github','cloudflare','neon','vercel','compute']);
   assert.deepEqual(configured.find(x=>x.provider==='cloudflare').aliases,['WORK']);
+  assert.deepEqual(configured.find(x=>x.provider==='neon').aliases,['PERSONAL','WORK']);
+  assert.deepEqual(configured.find(x=>x.provider==='vercel').aliases,['PERSONAL','WORK']);
   assert.equal((await makeGitCall('atax_cloudflare_accounts_list',{account:'WORK'},{env:gitEnv})).isError,true);
+
+  const neonSeen=[];
+  const neonFetcher=async(url,opts={})=>{
+    neonSeen.push({url,opts});
+    if(url.startsWith('https://console.neon.tech/api/v2/projects')){
+      return Response.json({projects:[{id:'proj-1',name:'db-one',region_id:'aws-us-east-1',pg_version:16,org_id:'org-work-1'}]});
+    }
+    return upstream(url,opts);
+  };
+  const neonRes=await makeGitCall('atax_neon_projects_list',{account:'WORK'},{env:cfg,fetcher:neonFetcher});
+  assert.equal(neonRes.isError,undefined);
+  assert.equal(neonRes.structuredContent.result.account,'WORK');
+  assert.equal(neonRes.structuredContent.result.org_id,'org-work-1');
+  assert.equal(neonRes.structuredContent.result.projects[0].id,'proj-1');
+  assert.equal(neonSeen[0].opts.headers.authorization,'Bearer neon-work-secret-456');
+  assert.ok(!JSON.stringify(neonRes).includes('neon-work-secret-456'));
+  const neonAmbiguous=await makeGitCall('atax_neon_projects_list',{},{env:cfg,fetcher:neonFetcher});
+  assert.equal(neonAmbiguous.isError,true);
+
+  const vercelSeen=[];
+  const vercelFetcher=async(url,opts={})=>{
+    vercelSeen.push({url,opts});
+    if(url.startsWith('https://api.vercel.com/v10/projects')){
+      return Response.json({projects:[{id:'prj_1',name:'web-app',framework:'nextjs'}]});
+    }
+    return upstream(url,opts);
+  };
+  const vercelRes=await makeGitCall('atax_vercel_projects_list',{account:'WORK'},{env:cfg,fetcher:vercelFetcher});
+  assert.equal(vercelRes.isError,undefined);
+  assert.equal(vercelRes.structuredContent.result.account,'WORK');
+  assert.equal(vercelRes.structuredContent.result.team_id,'team_work_1');
+  assert.equal(vercelRes.structuredContent.result.projects[0].name,'web-app');
+  assert.equal(vercelSeen[0].opts.headers.authorization,'Bearer vercel-work-secret-456');
+  assert.ok(vercelSeen[0].url.includes('teamId=team_work_1'));
+  assert.ok(!JSON.stringify(vercelRes).includes('vercel-work-secret-456'));
+  const vercelAmbiguous=await makeGitCall('atax_vercel_projects_list',{},{env:cfg,fetcher:vercelFetcher});
+  assert.equal(vercelAmbiguous.isError,true);
+});
+
+test('GitHub job step logs and browser rendering/testing tools work and strip ANSI/secrets',async()=>{
+  const cfg={...gitEnv,
+    MCP_SHARED_SCOPES:gitEnv.MCP_SHARED_SCOPES+' atax:cloudflare:read',
+    CF_KEY_WORK:'cf-browser-secret-1234',
+    CLOUDFLARE_ACCOUNT_ID_WORK:'acct_cf_123',
+  };
+  const seen=[];
+  const mockFetcher=async(url,opts={})=>{
+    seen.push({url,opts});
+    if(url==='https://api.github.com/repos/dinilmusick/ATAX/actions/jobs/555/logs'){
+      return new Response(null,{status:302,headers:{location:'https://pipelines.actions.githubusercontent.com/logs/555'}});
+    }
+    if(url==='https://pipelines.actions.githubusercontent.com/logs/555'){
+      return new Response('\x1b[31m2026-11-27T15:34:50Z FAIL test_a\x1b[0m\n2026-11-27T15:34:51Z Error: assertion failed\n');
+    }
+    if(url==='https://api.cloudflare.com/client/v4/accounts/acct_cf_123/browser-rendering/content'){
+      return Response.json({success:true,result:'<html><body><h1>ATAX Ready</h1></body></html>'});
+    }
+    if(url==='https://api.github.com/repos/dinilmusick/ATAX/actions/workflows/browser-probe.yml/dispatches'){
+      return new Response(null,{status:204});
+    }
+    return upstream(url,opts);
+  };
+
+  const logs=await makeGitCall('atax_github_job_logs_get',{repository:'dinilmusick/ATAX',job_id:555,tail_lines:10},{env:cfg,fetcher:mockFetcher});
+  assert.equal(logs.isError,undefined);
+  assert.equal(logs.structuredContent.result.line_count,2);
+  assert.ok(logs.structuredContent.result.lines[0].includes('FAIL test_a'));
+  assert.ok(!logs.structuredContent.result.lines[0].includes('\x1b[31m'));
+  const redirectReq=seen.find(x=>x.url.includes('pipelines.actions'));
+  assert.equal(redirectReq.opts.headers.authorization,undefined);
+
+  const rendered=await makeGitCall('atax_browser_render',{account:'WORK',url:'https://atax.example/app',mode:'content'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(rendered.isError,undefined);
+  assert.equal(rendered.structuredContent.result.result,'<html><body><h1>ATAX Ready</h1></body></html>');
+  const badUrl=await makeGitCall('atax_browser_render',{account:'WORK',url:'http://127.0.0.1:3000'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(badUrl.isError,true);
+
+  const dispatched=await makeGitCall('atax_browser_test_dispatch',{target_url:'https://atax.example/app',assert_text:'ATAX Ready'},{env:cfg,fetcher:mockFetcher});
+  assert.equal(dispatched.isError,undefined);
+  assert.equal(dispatched.structuredContent.result.workflow,'browser-probe.yml');
+  assert.equal(dispatched.structuredContent.result.status,'dispatched');
 });

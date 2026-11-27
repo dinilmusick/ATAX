@@ -73,7 +73,7 @@ function makeFixture() {
     }],
     upsertSecret: async (input: {provider:string;alias:string;credential:string;accountId?:string|null;enabled?:boolean}) => {
       state.providerCalls.push({name:'vault.upsertSecret',params:input as unknown as Record<string,unknown>});
-      return {id:'a1',provider:String(input.provider) as 'github'|'cloudflare',alias:String(input.alias),
+      return {id:'a1',provider:String(input.provider) as 'github'|'cloudflare'|'neon'|'vercel',alias:String(input.alias),
         accountId:input.accountId ? String(input.accountId) : null,enabled:true};
     },
     setAccountEnabled: async (...args: unknown[]) => {
@@ -107,7 +107,7 @@ test('status is structured, backend-owned, and never exposes legacy env requirem
   assert.equal(result.httpStatus,200);
   assert.deepEqual(result.status.backend,{configured:true,reachable:true});
   assert.deepEqual(result.status.authentication,{required:true,authenticated:false});
-  assert.deepEqual(result.status.providers,{github:true,cloudflare:true,vercel:false});
+  assert.deepEqual(result.status.providers,{github:true,cloudflare:true,neon:true,vercel:true});
   assert.equal(JSON.stringify(result).includes('ATAX_SUPABASE_SECRET_KEY'),false);
   assert.equal(JSON.stringify(result).includes('operatorClaimed'),false);
 });
@@ -186,10 +186,10 @@ test('provider mutations never accept a browser owner subject', async () => {
   assert.equal(call.params.actorSubject,undefined);
 });
 
-test('same control plane exposes only GitHub and Cloudflare as operational providers', async () => {
+test('same control plane exposes GitHub, Cloudflare, Neon, and Vercel as operational providers', async () => {
   const {controller}=makeFixture();
   assert.deepEqual((await controller.status(req('https://atax.example/api/settings/status'))).status.providers,
-    {github:true,cloudflare:true,vercel:false});
+    {github:true,cloudflare:true,neon:true,vercel:true});
 });
 
 test('backend availability is reported as 503 rather than authentication required', async () => {

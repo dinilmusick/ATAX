@@ -39,24 +39,31 @@ export async function loadMcpRuntimeConfig(bootstrapEnv,open=openLedger) {
     const name=account.provider+':'+account.alias;
     if(used.has(name))throw Error('Duplicate canonical provider account');
     used.add(name);
-    // Vercel remains disabled as an MCP operating adapter.
-    if(account.provider==='vercel')continue;
-    const prefix=account.provider==='github'?'GH_KEY_':account.provider==='cloudflare'?'CF_KEY_':
+    const prefix=account.provider==='github'?'GH_KEY_':
+      account.provider==='cloudflare'?'CF_KEY_':
+      account.provider==='neon'?'NEON_KEY_':
+      account.provider==='vercel'?'VERCEL_KEY_':
       INFERENCE_PROVIDERS.has(account.provider)?'AI_KEY_'+account.provider.replace(/-/g,'_')+'__':
       'FRNES_KEY_'+account.provider.replace(/-/g,'_')+'__';
     resolved[prefix+account.alias]=account.token;
-    if(account.provider==='cloudflare'&&account.accountId!==null&&account.accountId!==undefined){
+    if(account.accountId!==null&&account.accountId!==undefined){
       if(typeof account.accountId!=='string'||
          !/^[A-Za-z0-9_-]{1,128}$/.test(account.accountId))
-        throw Error('Invalid canonical Cloudflare account ID');
-      resolved['CLOUDFLARE_ACCOUNT_ID_'+account.alias]=account.accountId;
+        throw Error('Invalid canonical provider account ID');
+      if(account.provider==='cloudflare'){
+        resolved['CLOUDFLARE_ACCOUNT_ID_'+account.alias]=account.accountId;
+      }else if(account.provider==='neon'){
+        resolved['NEON_ORG_ID_'+account.alias]=account.accountId;
+      }else if(account.provider==='vercel'){
+        resolved['VERCEL_TEAM_ID_'+account.alias]=account.accountId;
+      }
     }
   }
   return resolved;
 }
 
 /** Restricted sockets receive ONLY socket policy and a narrowly granted DB RPC adapter.
- * No GitHub, Cloudflare, Vercel, maintainer bearer hashes, or privileged Vault reads.
+ * No GitHub, Cloudflare, Neon, Vercel, maintainer bearer hashes, or privileged Vault reads.
  */
 export async function loadSocketRuntimeConfig(bootstrapEnv,open=openLedger) {
   const db=await open(bootstrapEnv);

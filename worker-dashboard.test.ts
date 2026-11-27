@@ -7,7 +7,7 @@ function fakeSettings() {
   const status = {
     backend:{configured:true,reachable:true},
     authentication:{required:true,authenticated:false},
-    providers:{github:true,cloudflare:true,vercel:false},
+    providers:{github:true,cloudflare:true,neon:true,vercel:true},
   };
   const json = (value:unknown) => value;
   return {
@@ -186,4 +186,3 @@ test('production Worker /api/substrate/visual-state responds to GET and POST', a
   const postState = await postRes.json() as { stickyNotes: Array<{ id: string }> };
   assert.ok(postState.stickyNotes.some((n) => n.id === 'test-sticky'));
 });
-
