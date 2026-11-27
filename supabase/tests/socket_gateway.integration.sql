@@ -5,7 +5,7 @@ DO $test$
 DECLARE
   t uuid; fence uuid:=gen_random_uuid(); inv public.socket_invocations;
   mcp_task uuid; mcp_principal text:='test-mcp-principal-'||left(gen_random_uuid()::text,8);
-  mcp_session text:='test-mcp-session-'||left(gen_random_uuid()::text,8);
+  mcp_session text;
   mcp_fence uuid:=gen_random_uuid(); mcp_command jsonb; mcp_result jsonb;
   mcp_inv public.socket_invocations; mcp_grants integer;
   collision_task uuid; collision_principal text:='test-mcp-collision-'||left(gen_random_uuid()::text,8);
@@ -22,6 +22,7 @@ DECLARE
   input text:='{"jsonrpc":"2.0","method":"ping","id":1}';
   used1 bigint; used2 bigint; old_output bigint;
 BEGIN
+  mcp_session:=mcp_principal;
   IF NOT has_function_privilege('service_role','public.atax_socket_execute_v1(jsonb)','EXECUTE')
      OR has_function_privilege('anon','public.atax_socket_execute_v1(jsonb)','EXECUTE')
      OR has_table_privilege('authenticated','public.socket_gateway_capabilities','SELECT')
