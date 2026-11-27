@@ -93,14 +93,16 @@ stable
 security definer
 set search_path = pg_catalog, public
 as $function$
-declare m jsonb; e jsonb;
+declare m jsonb;
 begin
   select v.manifest into m
   from public.skills s join public.skill_versions v on v.id=s.current_version_id
   where s.slug=slug_in and s.status='active' and v.is_published=true;
   if m is null then return jsonb_build_object('status','not_found','code','SKILL_NOT_FOUND'); end if;
-  e:=m->'executable';
-  if e is null or jsonb_typeof(e)<>'object' then return jsonb_build_object('status','not_executable','code','SKILL_NOT_EXECUTABLE'); end if;
+  if coalesce(m->>'kind','')='instruction-skill' then
+    return jsonb_build_object('status','ok','kind','instruction-skill','execution',coalesce(m->'executable','{}'::jsonb),'source',coalesce(m->'source','{}'::jsonb));
+  end if;
+  if m->'executable' is null or jsonb_typeof(m->'executable')<>'object' then return jsonb_build_object('status','not_executable','code','SKILL_NOT_EXECUTABLE'); end if;
   return public.atax_mcp_skill_executable_spec_v1(slug_in);
 end;
 $function$;
