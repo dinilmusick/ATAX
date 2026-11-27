@@ -302,11 +302,16 @@ jobs:
                 if re.search(pat,output,re.I))
               if codes: summary+=' codes='+','.join(codes[:8])
               clean_out=re.sub(r'\\x1b\\[[0-9;]*m','',output)
-              assertions=re.findall(r'AssertionError(?:\\s*\\[ERR_ASSERTION\\])?:\\s*([^\\r\\n]{1,180})',clean_out,re.I)
+              not_oks=re.findall(r'^\\s*not ok\\s+[0-9]+\\s+-\\s+([^\\r\\n]{1,100})',clean_out,re.M)
+              if not_oks:
+                  safe_test=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',not_oks[-1].strip())
+                  summary=(summary+' | test='+safe_test) if summary else ('test='+safe_test)
+              assertions=re.findall(r'AssertionError(?:\\s*\\[ERR_ASSERTION\\])?:\\s*([^\\r\\n]{1,140}(?:\\r?\\n[^\\r\\n]{0,80}){0,5})',clean_out,re.I)
               if assertions:
-                  safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',assertions[-1])
+                  flat=' '.join(line.strip() for line in assertions[-1].splitlines() if line.strip() and not line.strip().startswith('+ actual'))
+                  safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',flat)
                   summary=(summary+' | assert='+safe_msg) if summary else ('assert='+safe_msg)
-              print('FMRL failure categories: '+summary[:250])
+              print('FMRL failure categories: '+summary[:320])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
               # Only fixed-format error identifiers and npm script names are public.
