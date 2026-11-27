@@ -304,6 +304,7 @@ async function putFile(a,_db,p,ctx){
   const message=String(a.message||'').trim();
   if(!message)throw new Error('Commit message is required');
   const content=String(a.content??'');
+  if (path.startsWith('.github/workflows/')) return putFileGitData(a,_db,p,ctx);
   const base64Content=Buffer.from(content,'utf8').toString('base64');
   const body={message,content:base64Content,...(a.branch?{branch:a.branch}:{}),...(a.sha?{sha:a.sha}:{})};
   const url=`${API}/repos/${repo}/contents/${encodeURI(path)}`;
