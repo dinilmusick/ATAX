@@ -221,12 +221,12 @@ END;$new$
         $old$'status','succeeded',
         'result',result_in,$old$,
         $new$'status','succeeded',
-        'result',v_result$new$
+        'result',v_result,$new$
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
         $old$'status','failed','result',result_in,$old$,
-        $new$'status','failed','result',v_result$new$
+        $new$'status','failed','result',v_result,$new$
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
