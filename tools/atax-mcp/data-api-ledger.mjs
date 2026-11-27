@@ -20,6 +20,7 @@ const MAX_RECURSION_DEPTH = 16;
 export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   // Context & Snapshot (3)
   'agent_context_overview',
+  'atax_worker_suitability_v1',
   'atax_context_snapshot',
   'system_improvement_context',
 
