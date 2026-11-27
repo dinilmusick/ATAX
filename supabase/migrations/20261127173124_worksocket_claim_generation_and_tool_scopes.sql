@@ -10,7 +10,14 @@ UPDATE public.tasks
 SET claim_generation=greatest(claim_generation,CASE WHEN claim_token IS NOT NULL THEN greatest(attempt_count,1) ELSE attempt_count END);
 
 ALTER TABLE public.socket_gateway_capabilities
-  ADD COLUMN IF NOT EXISTS claim_generation bigint;
+  ADD COLUMN IF NOT EXISTS claim_generation bigint NOT NULL DEFAULT 0;
+UPDATE public.socket_gateway_capabilities grant_row
+SET claim_generation=task.claim_generation
+FROM public.tasks task
+WHERE task.id=grant_row.task_id;
+ALTER TABLE public.socket_gateway_capabilities
+  ALTER COLUMN claim_generation SET DEFAULT 0,
+  ALTER COLUMN claim_generation SET NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.bump_task_claim_generation()
 RETURNS trigger
