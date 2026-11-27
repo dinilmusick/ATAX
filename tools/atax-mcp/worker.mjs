@@ -89,6 +89,8 @@ const TOOLS = [...computeTools, ...inferenceTools,
 TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...supabaseTools,...browserTools,...verificationTools,...visualTools);
 const byName = new Map(TOOLS.map(t=>[t.name,t]));
 const resourceDefs = [
+  {uri:'atax://documentation/intro',name:'ATAX agent introduction',mimeType:'application/json',description:'Concise strategy-first operating manual for agents'},
+  {uri:'atax://guidance/preemptive',name:'ATAX preemptive guidance',mimeType:'application/json',description:'On-demand current strategic guidance; intentionally not injected into ordinary tool responses'},
   {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
   {uri:'atax://goals/overview',name:'Goal and task ledger',mimeType:'application/json',description:'Live canonical goal/task graph'},
   {uri:'atax://skills/catalog',name:'Active skills catalogue',mimeType:'application/json',description:'Canonical Supabase skills registry'},
