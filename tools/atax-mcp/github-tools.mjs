@@ -192,6 +192,21 @@ function validateFmrlArgs(a,env){
   if(a.workflow!==undefined && !/^[A-Za-z0-9_.-]{1,100}\.ya?ml$/.test(a.workflow))throw new Error('Invalid target workflow file');
   return repo;
 }
+async function executeSkill(a,db,principal,ctx){
+  const slug=String(a.slug||'').trim();
+  if(!/^[a-z0-9][a-z0-9._-]{0,119}$/.test(slug)) throw new Error('Invalid skill slug');
+  const spec=await db.rpc('atax_mcp_skill_executable_spec_v1',{slug_in:slug});
+  if(!spec||spec.status!=='ok') throw new Error(String(spec?.code||'SKILL_EXECUTION_SPEC_UNAVAILABLE'));
+  const account=String(spec.account||a.account||'').trim();
+  if(spec.account && a.account && String(a.account).toUpperCase()!==String(spec.account).toUpperCase()) throw new Error('Executable skill account does not match requested GitHub account');
+  const inputs={repository:spec.repository,ref:spec.revision,event:'push',workflow:'',request_id:crypto.randomUUID(),mode:'skill',branch:'',skill_command:spec.command,skill_install:spec.install||'',skill_workdir:spec.working_directory||'',skill_output:spec.output_path||''};
+  const selected=resolveProviderAccount(ctx.env,principal,'github',account||undefined);
+  const controller=controllerRepo(ctx.env);
+  const actionsUrl=API+'/repos/'+controller+'/actions/workflows/'+ACTIONS_WORKFLOW;
+  const res=await githubRequest(ctx.fetcher,actionsUrl+'/dispatches',selected.token,{method:'POST',body:{ref:'main',inputs}});
+  requireOk(res,'Executable skill FMRL dispatch');
+  return {request_id:inputs.request_id,skill:slug,repository:spec.repository,revision:spec.revision,account:selected.alias,state:'dispatch_accepted_not_executed',execution:'fmrl',next_tool:'atax_fmrl_get_status'};
+}
 async function dispatchFmrl(a,_db,principal,ctx){
   const owner=assertOwner(ctx.env);
   const controller=controllerRepo(ctx.env);
@@ -588,6 +603,7 @@ export const githubTools=[
   tool('atax_fmrl_create_run_dispose',
     'DISPOSABLE PRIVATE-TARGET CI FALLBACK, NOT permanent repo creation. Container first; only if local execution unavailable/insufficient. Dispatch canonical ATAX private-repo-ci.yml controller which provisions a public FMRL-* bridge, checks out exact private SHA inside isolated runner, runs checks, ALWAYS deletes FMRL even after failure and independently verifies 404. Returns correlation request_id, NOT job success. Never execute target code in ATAX. Requires atax:fmrl:execute scope.',
     'atax:fmrl:execute',one('Dispatch FMRL remote CI',{repository:s('Private repository owner/name under the canonical owner (NOT ATAX)',205),ref:s('Exact 40-character lowercase target commit SHA',40),account:{type:'string',maxLength:48,description:'Named GitHub account authorized for the ATAX controller'},event:{type:'string',enum:['push','pull_request','workflow_dispatch'],description:'Target event; default push'},workflow:{type:'string',maxLength:105,description:'Optional workflow filename ending .yml or .yaml'},mode:{type:'string',enum:['direct','repair','artifact'],description:'Optional FMRL execution mode; default direct'},branch:{type:'string',maxLength:180,description:'Target PR head branch (required for repair and artifact modes)'}},['repository','ref']),dispatchFmrl),
+  tool('atax_skill_execute', 'Execute a published executable skill in a disposable FMRL workspace. Resolves the immutable repository revision and command from the canonical skill manifest, uses the referenced authorized GitHub account for private targets, and returns a correlation request for FMRL status polling.', 'atax:fmrl:execute', one('Execute executable skill',{slug:s('Published skill slug',120),account:{type:'string',maxLength:48,description:'Optional named GH_KEY_<ALIAS> credential; must match the skill manifest when the skill pins one'}},['slug']),executeSkill),
   tool('atax_fmrl_get_status',
     'POLL one FMRL controller dispatch by correlation request_id until terminal. Reports exact controller result, confirms provisioning+cleanup steps, independently reads the public bridge for HTTP 404, and BLOCKS acceptance without verified deletion. Never infer CI success from dispatch acceptance.',
     'atax:fmrl:execute',one('FMRL status',{request_id:s('Correlation ID returned by atax_fmrl_create_run_dispose',36),account:{type:'string',maxLength:48,description:'Same GitHub account used for dispatch'},dispatched_account:{type:'string',maxLength:48,description:'Optional dispatched_account returned by atax_fmrl_create_run_dispose to enforce account consistency'},run_id:{type:'integer',minimum:1,maximum:9007199254740991,description:'Optional known exact controller GitHub Actions run ID (for >100 recent runs)'}},['request_id']),getFmrlStatus),
