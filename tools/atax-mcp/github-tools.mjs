@@ -310,6 +310,40 @@ async function putFile(a,_db,p,ctx){
   const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body}),'GitHub file put');
   return {operation:'file_put',account:selected.alias,repository:repo,path,commit_sha:data.commit?.sha,commit_url:data.commit?.html_url,content_sha:data.content?.sha};
 }
+
+async function putFileGitData(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const path=String(a.path||'').replace(/^\\+/,'');
+  if(!path)throw new Error('File path required');
+  const message=String(a.message||'').trim();
+  if(!message)throw new Error('Commit message is required');
+  const branch=ensureBranchName(a.branch||'main');
+  const expected=a.expected_head?String(a.expected_head).trim():'';
+  if(expected && !REF.test(expected))throw new Error('expected_head must be a 40-character lowercase commit SHA');
+  const headData=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(branch)}`,selected.token),'GitHub branch lookup');
+  const currentHead=String(headData.object?.sha||'');
+  if(!REF.test(currentHead))throw new Error('Unable to resolve current branch head');
+  if(expected && expected!==currentHead)throw new Error('Branch head changed; refusing non-fast-forward write');
+  const commitData=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/commits/${currentHead}`,selected.token),'GitHub commit lookup');
+  const blobData=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/blobs`,selected.token,{method:'POST',body:{
+    content:Buffer.from(String(a.content??''),'utf8').toString('base64'),
+    encoding:'base64'
+  }}),'GitHub blob creation');
+  const treeData=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/trees`,selected.token,{method:'POST',body:{
+    base_tree:commitData.tree.sha,
+    tree:[{path,mode:'100644',type:'blob',sha:blobData.sha}]
+  }}),'GitHub tree creation');
+  const newCommit=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/commits`,selected.token,{method:'POST',body:{
+    message,
+    tree:treeData.sha,
+    parents:[currentHead]
+  }}),'GitHub commit creation');
+  const updated=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,selected.token,{method:'PATCH',body:{sha:newCommit.sha,force:false}}),'GitHub branch update');
+  return {operation:'file_put_gitdata',account:selected.alias,repository:repo,path,branch,previous_head:currentHead,commit_sha:newCommit.sha,commit_url:newCommit.html_url||null,ref:updated.ref};
+}
+
 async function deleteFile(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
@@ -430,6 +464,9 @@ export const githubTools=[
   tool('atax_github_file_put',
     'Create or update a file directly on a GitHub branch via the Contents API with a commit message. Enables remote coding via GitHub without local dirty state.',
     'atax:github:create',one('Put file on GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to create or update',1000),content:{type:'string',description:'File UTF-8 text content'},message:s('Git commit message',1000),branch:s('Optional target branch name (defaults to default branch)',120),sha:s('Blob SHA of the file being replaced (required when updating an existing file)',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','content','message']),putFile),
+  tool('atax_github_file_put_gitdata',
+    'Create or update a GitHub file through the Git Data API, including workflow files when the repository token permits repository writes. Uses an exact branch head and refuses non-fast-forward updates.',
+    'atax:github:create',one('Put file via Git Data API',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to create or update',1000),content:{type:'string',description:'File UTF-8 text content'},message:s('Git commit message',1000),branch:s('Target branch name (default main)',120),expected_head:s('Optional exact 40-character current commit SHA',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','content','message']),putFileGitData),
   tool('atax_github_file_delete',
     'Delete a file on a GitHub branch via the Contents API with a commit message.',
     'atax:github:create',one('Delete file on GitHub',{repository:s('GitHub owner/name repository',205),path:s('File path in repository to delete',1000),message:s('Git commit message',1000),sha:s('Blob SHA of the file being deleted',40),branch:s('Optional target branch name (defaults to default branch)',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','path','message','sha']),deleteFile),
