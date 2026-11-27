@@ -372,7 +372,8 @@ export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRunt
     let body;try{const source=await req.text();if(encoder.encode(source).length>MAX_BODY_BYTES)return json({error:'Request too large'},413);body=JSON.parse(source);}catch{return json(err(null,-32700,'Parse error'),400);}
     if(Array.isArray(body)&&body.length===0)return json(err(null,-32600,'Empty JSON-RPC batch'),400);
     const batch=Array.isArray(body)?body:[body];if(batch.length>30)return json(err(null,-32600,'Too many batch requests'),400);
-    const results=[];for(const msg of batch){const reply=await routeRpc(msg,principal,env,fetcher);if(reply!==undefined)results.push(reply);}\n    if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
+    const results=[];for(const msg of batch){const reply=await routeRpc(msg,principal,env,fetcher);if(reply!==undefined)results.push(reply);}
+    if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
     return json(Array.isArray(body)?results:results[0]);
   }
   return async (req,bootstrapEnv={})=>{
