@@ -104,10 +104,10 @@ jobs:
       - name: Execute executable skill
         if: env.FMRL_EXECUTION_MODE == 'skill'
         env:
-          SKILL_COMMAND: \${{ secrets.FMRL_SKILL_COMMAND }}
-          SKILL_INSTALL: \${{ secrets.FMRL_SKILL_INSTALL }}
-          SKILL_WORKDIR: \${{ secrets.FMRL_SKILL_WORKDIR }}
-          SKILL_OUTPUT: \${{ secrets.FMRL_SKILL_OUTPUT }}
+          SKILL_COMMAND: ${{ secrets.FMRL_SKILL_COMMAND }}
+          SKILL_INSTALL: ${{ secrets.FMRL_SKILL_INSTALL }}
+          SKILL_WORKDIR: ${{ secrets.FMRL_SKILL_WORKDIR }}
+          SKILL_OUTPUT: ${{ secrets.FMRL_SKILL_OUTPUT }}
         shell: bash
         run: |
           set -euo pipefail
