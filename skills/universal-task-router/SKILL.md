@@ -84,11 +84,11 @@ For persistent work, prefer existing System → existing Universe → create Sys
 
 ## Direct tasks
 
-A direct task prompt resolves an existing persisted task. Claim it atomically, execute its persisted loop/parameters, checkpoint, persist evidence, obtain independent verification and finalize. Do not create duplicate work.
+A direct task prompt resolves an existing persisted task. Claim it atomically, execute its persisted loop/parameters, checkpoint, persist evidence, obtain evidence/predicate verification and finalize. Do not create duplicate work.
 
 ## Work modalities
 
-A modality prompt asks the agent to perform a governed way of working. Resolve/reuse durable structure first, then create/decompose the required work into 1–4-action tasks with dependencies, checkpoints, acceptance and independent verification. Use only registered active modalities.
+A modality prompt asks the agent to perform a governed way of working. Resolve/reuse durable structure first, then create/decompose the required work into 1–4-action tasks with dependencies, checkpoints, acceptance and evidence/predicate verification. Use only registered active modalities.
 
 ## Skill routing
 
@@ -112,7 +112,7 @@ A running task is reclaimable only after 5 minutes without a heartbeat. Workers 
 
 ## Workspace identity
 
-The current Supabase project has no Auth users. Browser chats therefore use unique agent/session IDs in a single-owner, project-scoped workspace when `auth.uid()` is null. A separate chat may verify/finalize, but its agent ID must differ from task workers. This is not multi-tenant isolation; before sharing the project across owners, configure Supabase Auth, owner IDs and JWT/RLS boundaries.
+The current Supabase project has no Auth users. Browser chats therefore use unique agent/session IDs in a single-owner, project-scoped workspace when `auth.uid()` is null. The same authenticated principal may verify/finalize after the evidence and acceptance predicates pass. Actor-ID inequality is not required. This is not multi-tenant isolation; before sharing the project across owners, configure Supabase Auth, owner IDs and JWT/RLS boundaries.
 
 ## 10. System boundaries
 
@@ -138,7 +138,7 @@ For actionable goals and tasks, use the Agentic Workspace Omni Loop ontology:
 - Task: one type + one target inherited from its parent + task Omni Loop.
 - Loop input: an edit applied to the target.
 - Loop output: observed target behavior.
-- Goal completion: expected behavior is observed for the declared inputs and all independent verification gates pass.
+- Goal completion: expected behavior is observed for the declared inputs and all evidence/predicate verification gates pass.
 - Task targets are immutable; nested tasks cannot retarget.
 Use `schemas/ontology.ts` and the Supabase Omni Loop validation RPCs as the canonical vocabulary and persistence contract.
 
@@ -194,7 +194,7 @@ System selection precedence: `existing matching System` → `create System in an
 ## SUBSTRATE_PROTOCOL_V3
 All agents are ephemeral workers. Supabase is canonical coordination state; chat is not durable state. Before acting, load the current Task Ledger and the narrowest applicable specialist skill. Persist every meaningful checkpoint: current_step, activity, progress, discoveries, blockers, evidence and next_action.
 WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->independentVerify->finalize. Claims MUST use the atomic ledger claim path. HEARTBEAT~2m->checkpoint+renew lease. OWNERSHIP_CHECK~5m->if fence is lost: append final handoff note, stop immediately, and never overwrite the new owner. Recovery is allowed after heartbeat silence>=5m; the new worker reads the task row, checkpoint and task events before continuing. Use fenced release for queued/blocked/abandoned work.
-LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
+LOOPS=readyContract->samePrincipalMayExecute. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
 CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
 SKILL TIMING: use this skill when its trigger matches; load supporting skills before their required action, not after. Prefer the narrowest specialist skill plus only necessary support skills. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
 
@@ -216,7 +216,7 @@ For modality work:
 1. Resolve an existing matching System/Universe and Vision before creating anything.
 2. If persistent work has no suitable System, create or propose the System inside an appropriate Universe; if no appropriate Universe exists, create/propose the Universe first.
 3. Create a Goal for the modality, recording request_mode=work and the modality slug.
-4. Decompose into explicit tasks with actions[1..4], acceptance criteria, dependencies, checkpoints and independent verification.
+4. Decompose into explicit tasks with actions[1..4], acceptance criteria, dependencies, checkpoints and evidence/predicate verification.
 5. Tell the user what durable work structure was created and that workers can execute the resulting tasks; do not silently treat the modality prompt as a single task.
 
 ### Obstacle Elimination System Tweak
@@ -229,3 +229,14 @@ Actionable prompts may be recorded in public.work_requests. Persist request_mode
 
 LEASE_LOSS_IS_TASK_LOCAL. When the agent observes that its former lease expired or `task_ledger_check_claim` is false: stop **only** external work for the forfeited task; never submit, release, heartbeat or mutate it with the stale token. Best-effort append `task_ledger_record_handoff` (old token, accurate completion note, partial result, evidence and next action). This is audit-only, not completion. Rehydrate the global ledger and find another eligible free socket; atomically claim it under a **new** token and continue the same external agent session. An absent free task triggers bounded always-available work selection. Do not stop the whole agent merely because the previous socket was lost; do not create/schedule agents in ATAX.
 
+
+## WorkSocket unified-principal policy — 2026-11-27 (supersedes older identity-separation text)
+
+- The authenticated ATAX principal may act as orchestrator, loop author, executor, atomizer, verifier and finalizer. These are lifecycle roles, not mutually exclusive identities.
+- Do not require a second worker ID, agent ID, chat, session, model or tool caller merely to claim/execute/verify work. Do not fabricate agent identities or add caller-supplied identity overrides.
+- Claim eligibility is based on goal/System scope, task state, dependencies, declared capabilities and required ready loop contracts. The same principal that created the goal or authored the loop may claim the task after the contract is ready.
+- Actor/session values remain authenticated attribution and fencing inputs. Preserve the live task claim token, lease expiry, task generation, exact task/resource binding, MCP tool scopes, capability grants, budgets, context quota and append-only audit.
+- A child inherits a subset of parent authority: resource/repository scope, capabilities, tool grants, context and every budget. Reject any child request that widens these values.
+- Verification is an evidence/acceptance stage, not an agent-separation rule. The same principal may enter it. A bare caller boolean or self-assertion is insufficient: use server-evaluated registered predicates, durable task/loop evidence, exact artifact/CI receipts where applicable, and live verification fencing.
+- A distinct external CI run, reproducible artifact or automated predicate may provide additional evidence, but it is not represented as a fabricated worker identity.
+- Context exhaustion stops ordinary execution and requires canonical atomization or terminal failure. Stale cursors, expired claims and replayed mutations remain rejected.

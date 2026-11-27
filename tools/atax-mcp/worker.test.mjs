@@ -87,11 +87,19 @@ test('MCP initialize, protocol negotiation, ping and stateless GET contract',asy
 test('tools: list includes access-controlled read and lifecycle tools',async()=>{
   const res=await post('tools/list'); const payload=await res.json();
   const names=payload.result.tools.map(t=>t.name);
-  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
+  for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_record_checkpoint_predicate','atax_task_suitability','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
   const reduced={...env,MCP_SHARED_SCOPES:'atax:read'};
   const filtered=await(await post('tools/list',{}, {env:reduced})).json();
-  assert.ok(filtered.result.tools.every(t=>!t.name.includes('task_')&&!t.name.includes('verification_')));
+  const reducedNames=filtered.result.tools.map(t=>t.name);
+  assert.ok(reducedNames.includes('atax_task_suitability'),'read-only suitability remains available');
+  for(const mutation of [
+    'atax_task_claim_next','atax_task_heartbeat','atax_task_record_loop',
+    'atax_task_record_checkpoint_predicate','atax_task_submit','atax_task_release',
+    'atax_verification_claim','atax_verification_submit'
+  ]) assert.ok(!reducedNames.includes(mutation),`write/verify tool leaked to read-only principal: ${mutation}`);
   assert.equal((await call('atax_task_claim_next',{}, {env:reduced})).payload.result.isError,true);
+  const advisory=await call('atax_task_suitability',{task_id:'f5c29f36-27ba-4d6e-a6b2-a3c6757668c9'}, {env:reduced});
+  assert.notEqual(advisory.payload.result.isError,true);
 });
 test('canonical read invokes real named Supabase RPC and skills REST, not arbitrary SQL',async()=>{
   const before=requests.length;
@@ -118,9 +126,74 @@ test('atomic claims, heartbeat and result carry verified caller ID and claim tok
   const hp=h.payload.result.structuredContent.result.params;
   assert.equal(hp.agent_id_in,'test-external-agent');assert.equal(hp.current_step_in,'Testing actual work');
   assert.equal(hp.heartbeat_context_in.next_action,'Continue');
-  const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for independent verification',evidence:[{url:'test://result'}]});
+  const predicate=await call('atax_task_record_checkpoint_predicate',{
+    task_id:sampleTaskId,claim_token:sampleClaimToken,checkpoint_index:0,
+    predicate_key:'builtin.evidence_present',predicate_version:1,
+    inputs:{evidence:['observed']},result:true,passed:true,
+    evidence:[{type:'test',receipt:'passed'}]
+  });
+  const pp=predicate.payload.result.structuredContent.result.params;
+  assert.equal(predicate.payload.result.structuredContent.result.rpc,'record_checkpoint_predicate_result');
+  assert.equal(pp.executor_id_in,'test-external-agent');
+  assert.equal(pp.fencing_token_in,sampleClaimToken);
+  assert.equal(pp.checkpoint_index_in,0);
+  assert.equal(pp.predicate_key_in,'builtin.evidence_present');
+  assert.equal(pp.passed_in,true);
+  assert.deepEqual(pp.inputs_in,{evidence:['observed']});
+
+  const result=await call('atax_task_submit',{task_id:hp.task_id_in,claim_token:hp.claim_token_in,summary:'Ready for evidence verification',evidence:[{url:'test://result'}]});
   assert.equal(result.payload.result.structuredContent.result.params.status_in,'completed');
 });
+test('MCP socket command uses the pinned fallback profile and exact UTF-8 wire metering',async()=>{
+  const taskId='f5c29f36-27ba-4d6e-a6b2-a3c6757668c9';
+  const claimToken='94a0197b-e59c-458a-99a8-d4027920f62d';
+  const result=await call('atax_socket_task_status',{task_id:taskId,claim_token:claimToken});
+  const command=result.payload.result.structuredContent.result.params.command_in;
+  assert.equal(command.transport,'mcp');
+  assert.equal(command.profileSource,'atax-mcp-pinned-fallback');
+  assert.equal(command.principalId,'test-external-agent');
+  assert.equal(command.sessionId,'test-external-agent');
+  assert.equal(command.taskId,taskId);
+  assert.equal(command.claimToken,claimToken);
+  assert.equal(command.budgetProfile.modelId,'unknown');
+  assert.equal(command.budgetProfile.tokenizerId,'utf8-byte-upper-bound-v1');
+  assert.equal(command.budgetProfile.profileSetVersion,'2026-11-22.2');
+  assert.equal(command.budgetProfile.overhead,8);
+  assert.equal(command.inboundTokens,new TextEncoder().encode(command.requestWire).byteLength+8);
+  assert.ok(command.budgetProfile.maxUsableTokens<=3276);
+});
+
+test('suitability routing derives caller attribution and never grants execution authority',async()=>{
+  const taskId='0e579631-22b2-4d0d-8b6f-6f8e0644ed69';
+  const result=await call('atax_task_suitability',{task_id:taskId,limit:7});
+  const params=result.payload.result.structuredContent.result.params;
+  assert.equal(result.payload.result.structuredContent.result.rpc,'atax_worker_suitability_v1');
+  assert.equal(params.task_id_in,taskId);
+  assert.equal(params.requested_by_actor_in,'test-external-agent');
+  assert.equal(params.limit_in,7);
+  assert.equal(Object.hasOwn(params,'agent_id_in'),false);
+  assert.equal(Object.hasOwn(params,'claim_token_in'),false);
+});
+
+test('claim wrappers derive actor and authorized capabilities server-side',async()=>{
+  const global=await call('atax_task_claim_next',{lease_seconds:60});
+  const globalParams=global.payload.result.structuredContent.result.params;
+  assert.equal(global.payload.result.structuredContent.result.rpc,'atax_mcp_task_claim_next_v1');
+  assert.equal(globalParams.actor_id_in,'test-external-agent');
+  assert.equal(globalParams.lease_seconds_in,60);
+  assert.equal(Object.hasOwn(globalParams,'capabilities_in'),false);
+
+  const goal=await call('atax_goal_claim_task',{goal_key:'test-goal',lease_seconds:90});
+  const goalParams=goal.payload.result.structuredContent.result.params;
+  assert.equal(goal.payload.result.structuredContent.result.rpc,'atax_mcp_goal_claim_task_v1');
+  assert.equal(goalParams.actor_id_in,'test-external-agent');
+  assert.equal(goalParams.goal_key_in,'test-goal');
+  assert.equal(Object.hasOwn(goalParams,'capabilities_in'),false);
+
+  const spoof=await call('atax_task_claim_next',{capabilities:['atax:admin']});
+  assert.equal(spoof.payload.result.isError,true);
+});
+
 test('forfeited lease appends a handoff note and permits discovering other free sockets',async()=>{
   const task_id='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const claim_token='11111111-2222-4333-8444-555555555555';
@@ -172,10 +245,10 @@ test('a fenced-out caller can leave a non-mutating handoff then discover another
   const readOnly={...env,MCP_SHARED_SCOPES:'atax:read'};
   assert.equal((await call('atax_task_handoff',{task_id:sampleTaskId,claim_token:oldFence,note:'x'},{env:readOnly})).payload.result.isError,true);
 });
-test('independent verification uses distinct scope and identity, never self-authorizes verification',async()=>{
+test('verification uses its explicit scope and the same authenticated principal is permitted',async()=>{
   const readonly={...env,MCP_SHARED_SCOPES:'atax:read atax:write'};
   assert.equal((await call('atax_verification_claim',{}, {env:readonly})).payload.result.isError,true);
-  const r=await call('atax_verification_submit',{task_id:'task-id',verification_claim_token:'token',verified:true,report:{evidence:'third party'}});
+  const r=await call('atax_verification_submit',{task_id:'task-id',verification_claim_token:'token',verified:true,report:{evidence:[{type:'predicate','result':'passed'}]}});
   assert.equal(r.payload.result.structuredContent.result.params.verifier_agent_id_in,'test-external-agent');
   assert.equal(r.payload.result.structuredContent.result.params.verified_in,true);
 });

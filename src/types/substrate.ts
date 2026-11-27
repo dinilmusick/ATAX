@@ -1,4 +1,4 @@
-export type ActiveTab = 'systems' | 'visions' | 'skills' | 'settings';
+export type ActiveTab = 'systems' | 'visions' | 'worksockets' | 'skills' | 'settings';
 
 export type BranchingNodeKind = 'multi_in_single_out' | 'single_in_multi_out' | 'fan_out';
 
@@ -298,6 +298,119 @@ export interface VisionsGoalsSubstrateResponse {
   edges: VisionGoalTaskEdge[];
   fetchedAt: string;
 }
+
+
+export interface WorkSocketBudgetSummary {
+  maxInput: number;
+  maxOutput: number;
+  maxTotal: number;
+  inputUsed: number;
+  outputUsed: number;
+}
+
+export interface WorkSocketPredicateReceipt {
+  checkpointIndex: number;
+  predicateKey: string;
+  predicateVersion: number;
+  passed: boolean;
+  evidenceCount: number;
+  createdAt: string | null;
+}
+
+export interface WorkSocketAuditEvent {
+  eventType: string;
+  message: string;
+  actorLabel: string | null;
+  occurredAt: string | null;
+}
+
+export interface WorkSocketAuthoritySummary {
+  parentTaskId: string | null;
+  allowedSocketCapabilities: string[];
+  allowedToolScopes: string[];
+  repositoryScope: string[];
+  resourceScope: Record<string, unknown>;
+  authorityVersion: number;
+}
+
+export interface WorkSocketTaskRecord {
+  id: string;
+  taskKey: string;
+  goalId: string | null;
+  goalKey: string | null;
+  goalName: string | null;
+  systemKey: string | null;
+  parentTaskId: string | null;
+  name: string;
+  description: string;
+  status: string;
+  executionModel: string;
+  taskRole: string;
+  loopScriptStatus: string;
+  verificationStatus: string;
+  requiredCapabilities: string[];
+  occupancy: TaskOccupancyInfo;
+  budget: WorkSocketBudgetSummary | null;
+  authority: WorkSocketAuthoritySummary | null;
+  nextContextOffset: number;
+  childCount: number;
+  predicates: WorkSocketPredicateReceipt[];
+  events: WorkSocketAuditEvent[];
+  updatedAt: string | null;
+}
+
+export interface WorkSocketWorkerRecord {
+  label: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+  capabilities: string[];
+  lastSeenAt: string | null;
+  expiresAt: string | null;
+  source: 'agent_registry' | 'socket_invocation' | 'intelligence_profile';
+  domainAffinities?: Record<string, number>;
+  toolFamiliarity?: string[];
+  resourceCapacity?: Record<string, unknown>;
+  modelFamilies?: string[];
+}
+
+export interface WorkSocketSubstrateResponse {
+  tasks: WorkSocketTaskRecord[];
+  workers: WorkSocketWorkerRecord[];
+  fetchedAt: string;
+}
+
+export interface WorkSocketSuitabilityComponents {
+  capability: number;
+  reliability: number;
+  domain_affinity: number;
+  tool_familiarity: number;
+  verification: number;
+  latency: number;
+  context_efficiency: number;
+  resource_fit: number;
+}
+
+export interface WorkSocketSuitabilityCandidate {
+  evaluation_id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  suitability_score: number;
+  capability_complete: boolean;
+  components: WorkSocketSuitabilityComponents;
+  evidence: Record<string, number | null>;
+}
+
+export interface WorkSocketSuitabilityResponse {
+  task_id: string;
+  evaluated_at: string;
+  candidate_count: number;
+  suitability_only: true;
+  authorization_note: string;
+  candidates: WorkSocketSuitabilityCandidate[];
+}
+
 
 export interface SkillRecord {
   id: number;

@@ -20,6 +20,10 @@ const MAX_RECURSION_DEPTH = 16;
 export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   // Context & Snapshot (3)
   'agent_context_overview',
+  'atax_worker_suitability_v1',
+  'atax_worker_intelligence_profile_upsert_v1',
+  'atax_mcp_task_claim_next_v1',
+  'atax_mcp_goal_claim_task_v1',
   'atax_context_snapshot',
   'system_improvement_context',
 
@@ -46,6 +50,7 @@ export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   'task_ledger_record_handoff',
   'task_ledger_heartbeat_claim',
   'task_ledger_record_loop_iteration',
+  'record_checkpoint_predicate_result',
   'task_ledger_submit_result',
   'task_ledger_release_claim',
   'task_ledger_add_dependency',

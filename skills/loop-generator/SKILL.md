@@ -97,7 +97,7 @@ The goal loop is not a synthetic parent task. Top-level tasks are direct childre
 
 Use the same complete contract for both levels. In the Supabase schema the contract fields are snake_case: `enabled`, `objective`, `input_contract`, `output_contract`, `transformation`, `observation`, `evaluation`, `revision_policy`, `stop_conditions`, `initial_input`, `tools`, `iteration_policy`, and `max_iterations`.
 
-A goal iteration evaluates the current state of all child task loops and selects the next action. It may pass only when every descendant task is completed and independently verified, all goal acceptance criteria are satisfied, and the goal iteration includes non-empty evidence. A task loop may pass only against its own criteria and evidence; task submission and independent verification are separate gates.
+A goal iteration evaluates the current state of all child task loops and selects the next action. It may pass only when every descendant task is completed and evidence verified, all goal acceptance criteria are satisfied, and the goal iteration includes non-empty evidence. A task loop may pass only against its own criteria and evidence; task submission and evidence/predicate verification are separate gates.
 
 Keep both loop histories independently resumable. Never infer that the goal loop passed merely because all tasks submitted results, and never infer that a task passed merely because the goal loop advanced.
 
@@ -110,10 +110,22 @@ When a loop delegates coding work to parallel workers, the worker's GitHub Issue
 ## SUBSTRATE_PROTOCOL_V3
 All agents are ephemeral workers. Supabase is canonical coordination state; chat is not durable state. Before acting, load the current Task Ledger and the narrowest applicable specialist skill. Persist every meaningful checkpoint: current_step, activity, progress, discoveries, blockers, evidence and next_action.
 WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->independentVerify->finalize. Claims MUST use the atomic ledger claim path. HEARTBEAT~2m->checkpoint+renew lease. OWNERSHIP_CHECK~5m->if fence is lost: append final handoff note, stop immediately, and never overwrite the new owner. Recovery is allowed after heartbeat silence>=5m; the new worker reads the task row, checkpoint and task events before continuing. Use fenced release for queued/blocked/abandoned work.
-LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
+LOOPS=readyContract->samePrincipalMayExecute. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
 CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
 SKILL TIMING: use this skill when its trigger matches; load supporting skills before their required action, not after. Prefer the narrowest specialist skill plus only necessary support skills. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
 
 ## Blocker-aware iteration
 
 A checkpoint blocker is a terminal `blocked` iteration, not a generic failure. Persist it through `report_checkpoint_blocker`; do not repeatedly retry an unchanged blocker. On resume, inspect blocker notoriety and resolve the highest-scoring active blocker first. Continue only after resolution evidence is persisted.
+
+
+## WorkSocket unified-principal policy — 2026-11-27 (supersedes older identity-separation text)
+
+- The authenticated ATAX principal may act as orchestrator, loop author, executor, atomizer, verifier and finalizer. These are lifecycle roles, not mutually exclusive identities.
+- Do not require a second worker ID, agent ID, chat, session, model or tool caller merely to claim/execute/verify work. Do not fabricate agent identities or add caller-supplied identity overrides.
+- Claim eligibility is based on goal/System scope, task state, dependencies, declared capabilities and required ready loop contracts. The same principal that created the goal or authored the loop may claim the task after the contract is ready.
+- Actor/session values remain authenticated attribution and fencing inputs. Preserve the live task claim token, lease expiry, task generation, exact task/resource binding, MCP tool scopes, capability grants, budgets, context quota and append-only audit.
+- A child inherits a subset of parent authority: resource/repository scope, capabilities, tool grants, context and every budget. Reject any child request that widens these values.
+- Verification is an evidence/acceptance stage, not an agent-separation rule. The same principal may enter it. A bare caller boolean or self-assertion is insufficient: use server-evaluated registered predicates, durable task/loop evidence, exact artifact/CI receipts where applicable, and live verification fencing.
+- A distinct external CI run, reproducible artifact or automated predicate may provide additional evidence, but it is not represented as a fabricated worker identity.
+- Context exhaustion stops ordinary execution and requires canonical atomization or terminal failure. Stale cursors, expired claims and replayed mutations remain rejected.

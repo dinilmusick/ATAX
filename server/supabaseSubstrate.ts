@@ -17,6 +17,11 @@ import type {
   VisionGoalTaskEdge,
   VisionGraphNodeData,
   VisionsGoalsSubstrateResponse,
+  WorkSocketAuditEvent,
+  WorkSocketPredicateReceipt,
+  WorkSocketSubstrateResponse,
+  WorkSocketTaskRecord,
+  WorkSocketWorkerRecord,
 } from '../src/types/substrate.ts';
 
 function asRecord(val: unknown): Record<string, unknown> {
@@ -1144,6 +1149,264 @@ export function createSubstrateService(
     throw new Error(errMsg);
   }
 
+
+  async function getWorkSockets(): Promise<WorkSocketSubstrateResponse> {
+    const api = resolveApi();
+    const fetchedAt = new Date().toISOString();
+    const nowMs = Date.now();
+    const [
+      tasksRes,
+      goalsRes,
+      systemsRes,
+      budgetsRes,
+      authorityRes,
+      cursorsRes,
+      childrenRes,
+      predicatesRes,
+      eventsRes,
+      agentsRes,
+      invocationsRes,
+      profilesRes,
+    ] = await Promise.all([
+      api.selectAll(
+        'tasks?select=id,task_key,goal_id,parent_task_id,task_name,description,status,verification_status,task_role,execution_model,loop_script_status,claimed_by_agent_id,claimed_by_agent_name,claimed_session_id,claimed_at,heartbeat_at,claim_expires_at,current_step,blocker,required_capabilities,updated_at&status=not.in.(cancelled,abandoned)&order=updated_at.desc&limit=3000'
+      ),
+      api.selectAll('goals?select=id,goal_key,name,system_id'),
+      api.selectAll('systems?select=id,system_key'),
+      api.selectAll(
+        'socket_task_budgets?select=task_id,max_input,max_output,max_total,input_used,output_used'
+      ),
+      api.selectAll(
+        'socket_task_authority?select=task_id,parent_task_id,allowed_socket_capabilities,allowed_tool_scopes,repository_scope,resource_scope,authority_version'
+      ),
+      api.selectAll('socket_context_cursors?select=task_id,next_offset'),
+      api.selectAll('socket_atomization_children?select=parent_task_id,child_task_id,ordinal'),
+      api.selectAll(
+        'predicate_executions?select=task_id,checkpoint_index,predicate_key,predicate_version,passed,evidence,created_at&order=created_at.desc&limit=3000'
+      ),
+      api.selectAll(
+        'task_events?select=task_id,event_type,agent_id,message,occurred_at&order=occurred_at.desc&limit=2000'
+      ),
+      api.selectAll(
+        'agent_registry?select=agent_id,agent_name,agent_type,capabilities,enabled,last_seen_at&order=last_seen_at.desc&limit=500'
+      ),
+      api.selectAll(
+        'socket_invocations?select=id,agent_id,role,registered_at,expires_at,model_id&order=registered_at.desc&limit=500'
+      ),
+      api.selectAll(
+        'agent_intelligence_profiles?select=agent_id,display_name,agent_type,declared_capabilities,domain_affinities,tool_familiarity,resource_capacity,model_families,updated_at&order=updated_at.desc&limit=500'
+      ),
+    ]);
+
+    if (!tasksRes.ok) {
+      throw new Error(tasksRes.error || 'Unable to read WorkSocket tasks from Supabase.');
+    }
+
+    const goalById = new Map<string, Record<string, unknown>>(
+      (goalsRes.ok ? goalsRes.rows : []).map((row) => [String(row.id), row])
+    );
+    const systemKeyById = new Map<string, string>(
+      (systemsRes.ok ? systemsRes.rows : []).map((row) => [String(row.id), String(row.system_key || '')])
+    );
+    const budgetByTask = new Map<string, Record<string, unknown>>(
+      (budgetsRes.ok ? budgetsRes.rows : []).map((row) => [String(row.task_id), row])
+    );
+    const authorityByTask = new Map<string, Record<string, unknown>>(
+      (authorityRes.ok ? authorityRes.rows : []).map((row) => [String(row.task_id), row])
+    );
+    const cursorByTask = new Map<string, number>(
+      (cursorsRes.ok ? cursorsRes.rows : []).map((row) => [String(row.task_id), Number(row.next_offset || 0)])
+    );
+    const childCountByParent = new Map<string, number>();
+    if (childrenRes.ok) {
+      for (const child of childrenRes.rows) {
+        const parentId = String(child.parent_task_id || '');
+        if (parentId) childCountByParent.set(parentId, (childCountByParent.get(parentId) || 0) + 1);
+      }
+    }
+
+    const predicatesByTask = new Map<string, WorkSocketPredicateReceipt[]>();
+    if (predicatesRes.ok) {
+      for (const row of predicatesRes.rows) {
+        const taskId = String(row.task_id || '');
+        if (!taskId) continue;
+        const list = predicatesByTask.get(taskId) || [];
+        list.push({
+          checkpointIndex: Number(row.checkpoint_index || 0),
+          predicateKey: String(row.predicate_key || ''),
+          predicateVersion: Number(row.predicate_version || 1),
+          passed: row.passed === true,
+          evidenceCount: asArray(row.evidence).length,
+          createdAt: typeof row.created_at === 'string' ? row.created_at : null,
+        });
+        predicatesByTask.set(taskId, list);
+      }
+    }
+
+    const eventsByTask = new Map<string, WorkSocketAuditEvent[]>();
+    if (eventsRes.ok) {
+      for (const row of eventsRes.rows) {
+        const taskId = String(row.task_id || '');
+        if (!taskId) continue;
+        const list = eventsByTask.get(taskId) || [];
+        if (list.length < 6) {
+          list.push({
+            eventType: String(row.event_type || 'event'),
+            message: String(row.message || ''),
+            actorLabel: row.agent_id
+              ? buildOpaqueAgentLabel(row.agent_id, null, null)
+              : null,
+            occurredAt: typeof row.occurred_at === 'string' ? row.occurred_at : null,
+          });
+        }
+        eventsByTask.set(taskId, list);
+      }
+    }
+
+    const tasks: WorkSocketTaskRecord[] = tasksRes.rows
+      .filter((row) => {
+        const id = String(row.id || '');
+        return Boolean(
+          budgetByTask.has(id) ||
+          row.execution_model === 'bounded-v2' ||
+          row.parent_task_id ||
+          row.claimed_session_id ||
+          row.status === 'running' ||
+          row.task_role === 'loop_authoring' ||
+          row.loop_script_status === 'ready'
+        );
+      })
+      .map((row) => {
+        const id = String(row.id || '');
+        const goal = row.goal_id ? goalById.get(String(row.goal_id)) : undefined;
+        const budget = budgetByTask.get(id);
+        const requiredCapabilities = asArray(row.required_capabilities).map(String);
+        const occupancy = deriveOccupancy(row, nowMs);
+        return {
+          id,
+          taskKey: String(row.task_key || id),
+          goalId: row.goal_id ? String(row.goal_id) : null,
+          goalKey: goal ? String(goal.goal_key || '') || null : null,
+          goalName: goal ? String(goal.name || '') || null : null,
+          systemKey: goal?.system_id
+            ? systemKeyById.get(String(goal.system_id)) || null
+            : null,
+          parentTaskId: row.parent_task_id ? String(row.parent_task_id) : null,
+          name: String(row.task_name || row.task_key || 'Untitled task'),
+          description: String(row.description || ''),
+          status: String(row.status || 'queued'),
+          executionModel: String(row.execution_model || 'legacy'),
+          taskRole: String(row.task_role || 'execution'),
+          loopScriptStatus: String(row.loop_script_status || 'missing'),
+          verificationStatus: String(row.verification_status || 'not_started'),
+          requiredCapabilities,
+          occupancy,
+          budget: budget ? {
+            maxInput: Number(budget.max_input || 0),
+            maxOutput: Number(budget.max_output || 0),
+            maxTotal: Number(budget.max_total || 0),
+            inputUsed: Number(budget.input_used || 0),
+            outputUsed: Number(budget.output_used || 0),
+          } : null,
+          authority: authorityByTask.has(id) ? (() => {
+            const authority = authorityByTask.get(id)!;
+            return {
+              parentTaskId: authority.parent_task_id ? String(authority.parent_task_id) : null,
+              allowedSocketCapabilities: asArray(authority.allowed_socket_capabilities).map(String),
+              allowedToolScopes: asArray(authority.allowed_tool_scopes).map(String),
+              repositoryScope: asArray(authority.repository_scope).map(String),
+              resourceScope: asRecord(authority.resource_scope),
+              authorityVersion: Number(authority.authority_version || 1),
+            };
+          })() : null,
+          nextContextOffset: cursorByTask.get(id) || 0,
+          childCount: childCountByParent.get(id) || 0,
+          predicates: predicatesByTask.get(id) || [],
+          events: eventsByTask.get(id) || [],
+          updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+        };
+      })
+      .sort((a, b) => {
+        const priority = (s: string) => s === 'running' ? 0 : s === 'waiting' ? 1 : s === 'queued' ? 2 : 3;
+        return priority(a.status) - priority(b.status) ||
+          String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+      });
+
+    const workers: WorkSocketWorkerRecord[] = [];
+    if (agentsRes.ok) {
+      for (const row of agentsRes.rows) {
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, row.agent_name, row.last_seen_at) || 'Registered agent',
+          name: String(row.agent_name || 'Agent'),
+          role: String(row.agent_type || 'worker'),
+          enabled: row.enabled !== false,
+          capabilities: asArray(row.capabilities).map(String),
+          lastSeenAt: typeof row.last_seen_at === 'string' ? row.last_seen_at : null,
+          expiresAt: null,
+          source: 'agent_registry',
+        });
+      }
+    }
+    if (invocationsRes.ok) {
+      for (const row of invocationsRes.rows) {
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, null, row.registered_at) || 'Socket caller',
+          name: String(row.model_id || 'Authenticated invocation'),
+          role: String(row.role || 'worker'),
+          enabled: Boolean(row.expires_at && Date.parse(String(row.expires_at)) > nowMs),
+          capabilities: [],
+          lastSeenAt: typeof row.registered_at === 'string' ? row.registered_at : null,
+          expiresAt: typeof row.expires_at === 'string' ? row.expires_at : null,
+          source: 'socket_invocation',
+        });
+      }
+    }
+    if (profilesRes.ok) {
+      for (const row of profilesRes.rows) {
+        const affinities = asRecord(row.domain_affinities);
+        workers.push({
+          label: buildOpaqueAgentLabel(row.agent_id, null, row.updated_at) || 'Intelligence profile',
+          name: String(row.display_name || row.agent_id || 'Worker profile'),
+          role: String(row.agent_type || 'mcp-external'),
+          enabled: true,
+          capabilities: asArray(row.declared_capabilities).map(String),
+          lastSeenAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+          expiresAt: null,
+          source: 'intelligence_profile',
+          domainAffinities: Object.fromEntries(
+            Object.entries(affinities).map(([key,value]) => [key, Number(value)])
+              .filter(([,value]) => Number.isFinite(value))
+          ),
+          toolFamiliarity: asArray(row.tool_familiarity).map(String),
+          resourceCapacity: asRecord(row.resource_capacity),
+          modelFamilies: asArray(row.model_families).map(String),
+        });
+      }
+    }
+
+    return { tasks, workers, fetchedAt };
+  }
+
+  async function getWorkSocketSuitability(taskId: string): Promise<Record<string, unknown>> {
+    const normalizedTaskId = String(taskId || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedTaskId)) {
+      throw new Error('A valid task UUID is required for suitability evaluation.');
+    }
+    const result = await resolveApi().callRpc('atax_worker_suitability_v1', {
+      task_id_in: normalizedTaskId,
+      requested_by_actor_in: 'service:atax-dashboard',
+      limit_in: 10,
+    });
+    if (!result.ok) {
+      throw new Error(result.error || 'Unable to evaluate worker suitability.');
+    }
+    const value = result.rows[0]?.value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Suitability RPC returned an invalid response.');
+    }
+    return asRecord(value);
+  }
+
   async function getSkillsCatalog(): Promise<SkillsSubstrateResponse> {
     const api = resolveApi();
     const fetchedAt = new Date().toISOString();
@@ -1267,6 +1530,8 @@ export function createSubstrateService(
   return {
     getSystemsGraph,
     getVisionsGoalsGraph,
+    getWorkSockets,
+    getWorkSocketSuitability,
     getSkillsCatalog,
   };
 }
