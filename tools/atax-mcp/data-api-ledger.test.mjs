@@ -234,14 +234,14 @@ test('Config 1.11: Zero secret leakage in thrown config error messages', () => {
 // 2. ALLOWLIST ENFORCEMENT (assertAllowedRpc & CANONICAL_RPC_ALLOWLIST)
 // ============================================================================
 
-test('Allowlist 2.1: Allowlist contains exactly 37 canonical functions and is frozen', () => {
-  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 37);
+test('Allowlist 2.1: Allowlist contains exactly 38 canonical functions and is frozen', () => {
+  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 38);
   assert.ok(Object.isFrozen(CANONICAL_RPC_ALLOWLIST));
   assert.equal(ALLOWED_RPCS, CANONICAL_RPC_ALLOWLIST);
 });
 
-test('Allowlist 2.2: All 37 canonical ATAX functions are allowed without exception', () => {
-  const expected37 = [
+test('Allowlist 2.2: All 38 canonical ATAX functions are allowed without exception', () => {
+  const expected38 = [
     'agent_context_overview', 'atax_context_snapshot', 'system_improvement_context',
     'goal_ledger_overview', 'goal_ledger_get_by_key', 'goal_ledger_resume_by_key',
     'goal_ledger_blocker_overview', 'goal_ledger_set_priority', 'goal_ledger_add_dependency',
@@ -252,7 +252,7 @@ test('Allowlist 2.2: All 37 canonical ATAX functions are allowed without excepti
     'task_ledger_record_handoff', 'task_ledger_heartbeat_claim', 'task_ledger_record_loop_iteration',
     'task_ledger_submit_result', 'task_ledger_release_claim', 'task_ledger_add_dependency',
     'task_ledger_finalize_loop_script',
-    'record_checkpoint_predicate_result', 'atax_worker_suitability_v1',
+    'record_checkpoint_predicate_result', 'atax_worker_suitability_v1', 'atax_worker_intelligence_profile_upsert_v1',
     'task_ledger_pending_verification', 'task_ledger_claim_verification',
     'task_ledger_claim_verification_for_task', 'task_ledger_verify_result_claimed',
     'atax_socket_execute_v1',
@@ -260,7 +260,7 @@ test('Allowlist 2.2: All 37 canonical ATAX functions are allowed without excepti
     'atax_mcp_runtime_config_v1', 'atax_mcp_socket_config_v1',
   ];
 
-  for (const name of expected37) {
+  for (const name of expected38) {
     assert.ok(CANONICAL_RPC_ALLOWLIST.has(name), `Missing canonical function: ${name}`);
     assert.doesNotThrow(() => assertAllowedRpc(name), `Unexpected rejection of canonical function: ${name}`);
   }
