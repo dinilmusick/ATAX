@@ -62,6 +62,15 @@ jobs:
           set -euo pipefail
           env -u SUPABASE_ACCESS_TOKEN -u SUPABASE_DB_URL supabase db reset
 
+      - name: Run current-head fenced task-claim race before adapter integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SUPABASE_ACCESS_TOKEN:-}"
+          test -z "${SUPABASE_DB_URL:-}"
+          bash supabase/tests/concurrent-claims-fenced.sh
       - name: Run SQL, RLS, RPC and trigger integration tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
@@ -102,6 +111,16 @@ jobs:
           test -z "${SUPABASE_DB_URL:-}"
           psql "$SOCKET_TEST_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f tests/socket-ledger/socket_atomization_integration.sql
           bash tests/socket-ledger/concurrent_claims.sh
+
+      - name: Run current-head fenced task-claim race
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${SUPABASE_ACCESS_TOKEN:-}"
+          test -z "${SUPABASE_DB_URL:-}"
+          bash supabase/tests/concurrent-claims-fenced.sh
 
       - name: Run pinned Socket V1 standalone and adversarial conformance tests
         shell: bash
