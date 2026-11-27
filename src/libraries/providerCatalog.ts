@@ -37,6 +37,28 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     tokenPlaceholder: 'Cloudflare API token...',
     hint: 'Used server-side for Workers & account diagnostics.',
   },
+  {
+    id: 'neon',
+    label: 'Neon',
+    category: 'infra',
+    apiKeyUrl: 'https://console.neon.tech/app/settings/api-keys',
+    apiKeyLinkLabel: 'Get Neon API Key',
+    accountIdLabel: 'Neon Organization ID (optional)',
+    accountIdPlaceholder: 'org-...',
+    tokenPlaceholder: 'napi_...',
+    hint: 'Used server-side to manage Neon projects, branches, databases, roles, and endpoints (not as ATAX backend).',
+  },
+  {
+    id: 'vercel',
+    label: 'Vercel',
+    category: 'infra',
+    apiKeyUrl: 'https://vercel.com/account/tokens',
+    apiKeyLinkLabel: 'Get Vercel Access Token',
+    accountIdLabel: 'Default Team ID (optional)',
+    accountIdPlaceholder: 'team_...',
+    tokenPlaceholder: 'Vercel access token...',
+    hint: 'Used server-side for full Vercel account, project, deployment, env var, and domain management.',
+  },
 
   // Cloud Compute (FRNES)
   {
