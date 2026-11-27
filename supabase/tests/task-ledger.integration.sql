@@ -50,8 +50,9 @@ begin
     'integration-test-actor','Unified Principal','worker',
     array['test-capability']::text[],900
   );
-  if author_claim.id is distinct from task_id then
-    raise exception 'Global queue did not return the loop-authoring task';
+  if author_claim.id is distinct from task_id
+     or author_claim.claimed_session_id is distinct from 'integration-test-actor' then
+    raise exception 'Global queue did not bind the authenticated principal to its socket session';
   end if;
 
   select * into authored from public.task_ledger_finalize_loop_script(
@@ -72,8 +73,9 @@ begin
     array['test-capability']::text[],900
   );
   if claimed.id is distinct from task_id
-     or claimed.loop_author_agent_id is distinct from claimed.claimed_by_agent_id then
-    raise exception 'Same principal did not claim the task it authored';
+     or claimed.loop_author_agent_id is distinct from claimed.claimed_by_agent_id
+     or claimed.claimed_session_id is distinct from 'integration-test-actor' then
+    raise exception 'Same principal did not claim its authored task with a bound socket session';
   end if;
   select * into duplicate_claim from public.task_ledger_claim_next(
     'integration-test-actor-2','Competing Claimant','worker',
@@ -111,6 +113,9 @@ begin
     jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
     'completed'
   );
+  if exists(select 1 from public.tasks where id=task_id and claimed_session_id is not null) then
+    raise exception 'Submitted result retained a live MCP socket session binding';
+  end if;
 
   -- Targeted claims must not pull unrelated pending work from the global
   -- verification queue, including tasks owned by other workspaces.
