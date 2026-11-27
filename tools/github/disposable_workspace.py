@@ -639,7 +639,11 @@ def main() -> int:
     parser.add_argument("--ref", default="", help="Exact target SHA or safe branch/tag to test.")
     parser.add_argument("--event", default="push", choices=("push", "pull_request", "workflow_dispatch"))
     parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
-    parser.add_argument("--mode", choices=("direct", "act", "repair", "artifact"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
+    parser.add_argument("--mode", choices=("direct", "act", "repair", "artifact", "skill"), default="direct", help="Portable exact-SHA CI, legacy nested act, repair, artifact, or executable-skill mode.")
+    parser.add_argument("--command", default="", help="Executable-skill command; only used in skill mode.")
+    parser.add_argument("--install", default="", help="Executable-skill dependency-install command; only used in skill mode.")
+    parser.add_argument("--working-directory", default="", help="Executable-skill working directory relative to target.")
+    parser.add_argument("--output-path", default="", help="Optional executable-skill output artifact path.")
     parser.add_argument("--branch", default="", help="Exact private PR branch for lockfile or artifact repair.")
     args = parser.parse_args()
 
@@ -656,24 +660,36 @@ def main() -> int:
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
     if args.mode in ("repair", "artifact"):
+
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
 
+    if args.mode == "skill":
+        if not args.command or len(args.command) > 2000:
+            raise SystemExit("Skill mode requires a bounded command.")
+        if args.install and len(args.install) > 2000:
+            raise SystemExit("Skill install command is too long.")
+        if args.working_directory and not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.working_directory):
+            raise SystemExit("Unsafe skill working directory.")
+        if args.output_path and not re.fullmatch(r"[A-Za-z0-9_./-]{1,300}", args.output_path):
+            raise SystemExit("Unsafe skill output path.")
     if args.workflow and not re.fullmatch(r"[A-Za-z0-9_.-]+\.ya?ml", args.workflow):
         raise SystemExit("Unsafe workflow file.")
 
     bearer = token()
     clone_token = os.environ.get("PRIVATE_REPO_TOKEN")
-    if not clone_token:
-        raise SystemExit("Missing separate PRIVATE_REPO_TOKEN (read-only source access).")
     secret_writer = secrets_token()
-    source = api(f"/repos/{args.source}", clone_token)
+    source_reader = clone_token or bearer
+    source = api(f"/repos/{args.source}", source_reader)
     if not re.fullmatch(r"[A-Za-z0-9_./-]+", source["default_branch"]):
         raise SystemExit("Unsafe source default branch.")
     target_ref = args.ref
     if not re.fullmatch(r"[0-9a-f]{40}", target_ref):
         raise SystemExit("Exact 40-character commit SHA is required for every private execution.")
-    if not source.get("private", False):
+    source_is_private = bool(source.get("private", False))
+    if source_is_private and not clone_token:
+        raise SystemExit("Private skill execution requires PRIVATE_REPO_TOKEN.")
+    if not source_is_private:
         # Public targets carry no private-source exposure risk; allow the same
         # disposable-bridge exact-SHA execution in direct and repair modes.
         # Fixed-format stderr receipt only; no secrets or private metadata.
@@ -717,7 +733,12 @@ def main() -> int:
              ("FMRL_REPAIR_WRITE_TOKEN", bearer)) if args.mode in ("repair", "artifact") else ()
         )
         for secret_name, secret_value in (
-            ("PRIVATE_REPO_TOKEN", clone_token),
+            ("PRIVATE_REPO_TOKEN", clone_token or ""),
+            ("FMRL_SOURCE_VISIBILITY", "private" if source_is_private else "public"),
+            ("FMRL_SKILL_COMMAND", args.command if args.mode == "skill" else ""),
+            ("FMRL_SKILL_INSTALL", args.install if args.mode == "skill" else ""),
+            ("FMRL_SKILL_WORKDIR", args.working_directory if args.mode == "skill" else ""),
+            ("FMRL_SKILL_OUTPUT", args.output_path if args.mode == "skill" else ""),
             ("FMRL_TARGET_REPOSITORY", args.source),
             ("FMRL_TARGET_REF", target_ref),
             ("FMRL_TARGET_EVENT", args.event),
