@@ -125,3 +125,55 @@ test('ATAX MCP PR merge falls back to branch merge on 403/405', async () => {
   assert.equal(res.result.structuredContent.result.sha, mergeSha);
   assert.equal(res.result.structuredContent.result.fallback, 'branch_merge');
 });
+
+test('ATAX MCP branch merge resolves 409 conflicts with 2-parent Git Data commit', async () => {
+  const baseSha = '1'.repeat(40);
+  const headSha = '2'.repeat(40);
+  const treeSha = '3'.repeat(40);
+  const newTreeSha = '4'.repeat(40);
+  const blobSha = '5'.repeat(40);
+  const mergeSha = '6'.repeat(40);
+  const fetcher = async (url, options = {}) => {
+    if (url === 'https://issuer.example/oauth/jwks') return Response.json({ keys: [pub] });
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/merges' && options.method === 'POST') {
+      return Response.json({ message: 'Merge conflict' }, { status: 409 });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/ref/heads/feat%2Fx') {
+      return Response.json({ ref: 'refs/heads/feat/x', object: { sha: baseSha } });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/ref/heads/main') {
+      return Response.json({ ref: 'refs/heads/main', object: { sha: headSha } });
+    }
+    if (url === `https://api.github.com/repos/dinilmusick/Aiko/git/commits/${baseSha}`) {
+      return Response.json({ sha: baseSha, tree: { sha: treeSha } });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/blobs' && options.method === 'POST') {
+      return Response.json({ sha: blobSha }, { status: 201 });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/trees' && options.method === 'POST') {
+      return Response.json({ sha: newTreeSha }, { status: 201 });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/commits' && options.method === 'POST') {
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.parents, [baseSha, headSha]);
+      return Response.json({ sha: mergeSha }, { status: 201 });
+    }
+    if (url === 'https://api.github.com/repos/dinilmusick/Aiko/git/refs/heads/feat%2Fx' && options.method === 'PATCH') {
+      return Response.json({ ref: 'refs/heads/feat/x', object: { sha: mergeSha } });
+    }
+    throw new Error('Unexpected URL: ' + url);
+  };
+
+  const handler = createRuntimeHandler(fetcher, async (e) => ({ ...e, __ledgerDb: { rpc: async () => ({ ok: true }) } }));
+  const tok = await makeJwt('owner-1');
+  const req = new Request(resource, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'atax_github_branch_merge', arguments: { repository: 'dinilmusick/Aiko', base: 'feat/x', head: 'main', resolved_files: { 'package.json': '{"name":"aiko"}\n' } } } }),
+  });
+  const res = await (await handler(req, env)).json();
+  assert.equal(res.result.isError, undefined);
+  assert.equal(res.result.structuredContent.result.merged, true);
+  assert.equal(res.result.structuredContent.result.sha, mergeSha);
+  assert.deepEqual(res.result.structuredContent.result.parents, [baseSha, headSha]);
+});
