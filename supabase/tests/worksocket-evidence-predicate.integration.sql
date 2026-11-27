@@ -4,6 +4,7 @@ BEGIN;
 DO $test$
 DECLARE
   test_task_id uuid;
+  test_claim_token uuid := gen_random_uuid();
   rejected_missing_evidence boolean := false;
   rejected_contradictory_verdict boolean := false;
   error_text text;
@@ -28,6 +29,19 @@ BEGIN
     RAISE EXCEPTION 'Evidence-gate fixture task was not created';
   END IF;
 
+  -- Establish a bounded test lease. The predicate RPC itself must reject
+  -- unclaimed, expired or mismatched fences before it evaluates evidence.
+  UPDATE public.tasks
+  SET status='running',
+      claimed_by_agent_id='worksocket-evidence-test',
+      claimed_by_agent_name='worksocket-evidence-test',
+      claimed_session_id='worksocket-evidence-test',
+      claimed_at=statement_timestamp(),
+      claim_token=test_claim_token,
+      claim_expires_at=statement_timestamp()+interval '5 minutes',
+      heartbeat_at=statement_timestamp()
+  WHERE id=test_task_id;
+
   -- Valid evidence is accepted when the caller-supplied verdict agrees with
   -- the server-computed builtin.evidence_present result.
   PERFORM public.record_checkpoint_predicate_result(
@@ -35,7 +49,7 @@ BEGIN
     jsonb_build_object('evidence',jsonb_build_array('observed-check')),
     'true'::jsonb,true,
     jsonb_build_array(jsonb_build_object('type','fixture','receipt','evidence-present')),
-    'worksocket-evidence-test',NULL
+    'worksocket-evidence-test',test_claim_token::text
   );
 
   -- The same actor cannot force true with empty evidence.
@@ -44,7 +58,7 @@ BEGIN
       test_task_id,0,'builtin.evidence_present',1,
       jsonb_build_object('evidence','[]'::jsonb),
       'true'::jsonb,true,'[]'::jsonb,
-      'worksocket-evidence-test',NULL
+      'worksocket-evidence-test',test_claim_token::text
     );
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS error_text=MESSAGE_TEXT;
@@ -63,7 +77,7 @@ BEGIN
       jsonb_build_object('evidence',jsonb_build_array('observed-check')),
       'false'::jsonb,false,
       jsonb_build_array(jsonb_build_object('type','fixture','receipt','evidence-present')),
-      'worksocket-evidence-test',NULL
+      'worksocket-evidence-test',test_claim_token::text
     );
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS error_text=MESSAGE_TEXT;
