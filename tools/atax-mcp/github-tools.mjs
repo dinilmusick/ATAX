@@ -88,13 +88,20 @@ async function githubRequest(fetcher, url, token, {method='GET',body, anonymous=
   if (!anonymous) headers.authorization=`Bearer ${token}`;
   if (body!==undefined) headers['content-type']='application/json';
   const res=await fetcher(url,{method,headers,redirect:'manual',...(body===undefined?{}:{body:JSON.stringify(body)})});
-  if (!res.ok) return {status:res.status,ok:false};
+  if (!res.ok) {
+    let message='';
+    try {
+      const errData=await res.json();
+      if (errData&&typeof errData.message==='string') message=errData.message;
+    } catch {}
+    return {status:res.status,ok:false,...(message?{message}:{})};
+  }
   if (res.status===204) return {status:204,ok:true,data:null};
   let data;
   try {data=await res.json();}catch{throw new Error('GitHub returned invalid JSON');}
   return {status:res.status,ok:true,data};
 }
-function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (HTTP ${res.status})`);return res.data;}
+function requireOk(res, context){if(!res.ok)throw new Error(`${context} failed (HTTP ${res.status}${res.message?`: ${res.message}`:''})`);return res.data;}
 async function jobFailureReceipts(fetcher,repo,job,token) {
   const url=`${API}/repos/${repo}/actions/jobs/${job.id}/logs`;
   try{
@@ -437,7 +444,7 @@ async function mergePullRequest(a,_db,p,ctx){
     return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:Boolean(data.merged),sha:data.sha,message:data.message};
   }
   if(res.status!==403&&res.status!==405){
-    throw new Error(`GitHub pull request merge failed (HTTP ${res.status})`);
+    throw new Error(`GitHub pull request merge failed (HTTP ${res.status}${res.message?`: ${res.message}`:''})`);
   }
   const pr=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/pulls/${a.pull_number}`,selected.token),'GitHub pull request lookup');
   if(pr.state!=='open')throw new Error(`Pull request #${a.pull_number} is not open`);
