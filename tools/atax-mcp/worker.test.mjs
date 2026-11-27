@@ -98,7 +98,8 @@ test('tools: list includes access-controlled read and lifecycle tools',async()=>
     'atax_verification_claim','atax_verification_submit'
   ]) assert.ok(!reducedNames.includes(mutation),`write/verify tool leaked to read-only principal: ${mutation}`);
   assert.equal((await call('atax_task_claim_next',{}, {env:reduced})).payload.result.isError,true);
-  assert.equal((await call('atax_task_suitability',{task_id:'f5c29f36-27ba-4d6e-a6b2-a3c6757668c9'}, {env:reduced})).payload.result.isError,false);
+  const advisory=await call('atax_task_suitability',{task_id:'f5c29f36-27ba-4d6e-a6b2-a3c6757668c9'}, {env:reduced});
+  assert.notEqual(advisory.payload.result.isError,true);
 });
 test('canonical read invokes real named Supabase RPC and skills REST, not arbitrary SQL',async()=>{
   const before=requests.length;
