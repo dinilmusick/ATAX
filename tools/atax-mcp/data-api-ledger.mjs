@@ -22,6 +22,8 @@ export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   'agent_context_overview',
   'atax_worker_suitability_v1',
   'atax_worker_intelligence_profile_upsert_v1',
+  'atax_mcp_task_claim_next_v1',
+  'atax_mcp_goal_claim_task_v1',
   'atax_context_snapshot',
   'system_improvement_context',
 
