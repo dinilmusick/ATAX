@@ -80,19 +80,19 @@ jobs:
           # Even Git stderr can contain the private repository URL and SHA.
           # Suppress all raw clone/checkout output to a transient runner-only
           # file; only sanitized step status is allowed in public job logs.
-          if ! git -c credential.helper= \
-            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target \
+          if ! git -c credential.helper= \\
+            clone --no-checkout "https://github.com/$TARGET_REPOSITORY.git" target \\
             >/tmp/fmrl-clone-private.log 2>&1; then
             echo "FMRL private clone failed (details suppressed)" >&2
             exit 1
           fi
-          if ! git -C target -c credential.helper= \
-            fetch --no-tags origin "$TARGET_REF" \
+          if ! git -C target -c credential.helper= \\
+            fetch --no-tags origin "$TARGET_REF" \\
             >>/tmp/fmrl-clone-private.log 2>&1; then
             echo "FMRL exact private SHA fetch failed (details suppressed)" >&2
             exit 1
           fi
-          if ! git -C target checkout --detach FETCH_HEAD \
+          if ! git -C target checkout --detach FETCH_HEAD \\
             >>/tmp/fmrl-clone-private.log 2>&1; then
             echo "FMRL exact private SHA checkout failed (details suppressed)" >&2
             exit 1
@@ -106,7 +106,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 6 --retry-delay 4 --retry-all-errors --connect-timeout 20 --max-time 180 \
+          curl -fsSL --retry 6 --retry-delay 4 --retry-all-errors --connect-timeout 20 --max-time 180 \\
             https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz -o /tmp/act.tar.gz
           echo "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0  /tmp/act.tar.gz" | sha256sum -c -
           tar -xzf /tmp/act.tar.gz -C /tmp act
@@ -126,7 +126,7 @@ jobs:
           # This mount exists only inside the ephemeral runner; no source is committed to FMRL.
           args=("$TARGET_EVENT" "--bind" "--directory" "$PWD" "--platform" "ubuntu-latest=catthehacker/ubuntu:act-latest" "--platform" "ubuntu-24.04=catthehacker/ubuntu:act-latest")
           if [[ -n "$TARGET_WORKFLOW" && "$TARGET_WORKFLOW" != "-" ]]; then
-            [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\.ya?ml$ ]] || exit 2
+            [[ "$TARGET_WORKFLOW" =~ ^[A-Za-z0-9_.-]+\\.ya?ml$ ]] || exit 2
             test -f ".github/workflows/$TARGET_WORKFLOW"
             args+=("-W" ".github/workflows/$TARGET_WORKFLOW")
           fi
@@ -256,7 +256,7 @@ jobs:
                     } catch {}
                     console.log('FMRL Frnes verifier JSON: '+(parseable?'yes':'no'));
                     const matches=String(direct.stderr||'').match(
-                      /\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\b/g
+                      /\\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\\b/g
                     );
                     const fixedTypes=new Set(['FileNotFoundError','ValueError',
                       'KeyError','TypeError','ModuleNotFoundError','ImportError',
@@ -301,9 +301,9 @@ jobs:
                 key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
                 if re.search(pat,output,re.I))
               if codes: summary+=' codes='+','.join(codes[:8])
-              assertions=re.findall(r'(?m)^AssertionError(?: \[ERR_ASSERTION\])?:\s*([^\n]{1,180})',output)
+              assertions=re.findall(r'(?m)^AssertionError(?: \\[ERR_ASSERTION\\])?:\\s*([^\\n]{1,180})',output)
               if assertions:
-                  safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\s+\S+)','[redacted]',assertions[-1])
+                  safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',assertions[-1])
                   summary=(summary+' | assert='+safe_msg) if summary else ('assert='+safe_msg)
               print('FMRL failure categories: '+summary[:250])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
@@ -325,7 +325,7 @@ jobs:
                 output,re.I)))
               print('Safe error identifiers: '+(','.join(codes[:12]) if codes else 'none'))
               # Fixed-format error codes and allowlisted test-script stages only.
-              ts_codes=sorted(set(re.findall(r'\bTS[0-9]{4}\b',output)))
+              ts_codes=sorted(set(re.findall(r'\\bTS[0-9]{4}\\b',output)))
               print('FMRL TypeScript codes: '+(','.join(ts_codes[:12]) if ts_codes else 'none'))
               # Only these audited Skipo invariant codes may leave the
               # private runner; no raw diagnostics, paths, strings or tokens.
@@ -382,7 +382,7 @@ jobs:
                   'SKP-POL-STRUCT-WORKSPACE',
                   'SKP-POL-UNSAFE-PATH',
               }
-              seen=set(re.findall(r'\b(?:SKIPO_[A-Z0-9_-]+|SKP-POL-[A-Z0-9-]+|SEM[0-9]{3})\b',output))
+              seen=set(re.findall(r'\\b(?:SKIPO_[A-Z0-9_-]+|SKP-POL-[A-Z0-9-]+|SEM[0-9]{3})\\b',output))
               safe=sorted(seen.intersection(approved))
               print('FMRL Skipo rule IDs: '+(','.join(safe) if safe else 'none'))
               # Frnes emits only fixed private migration error categories.
@@ -469,7 +469,7 @@ jobs:
               code=errors[-1] if errors and errors[-1] in allowed_errors else 'unknown'
               print('FMRL Frnes exception class: '+code)
               subgates=re.findall(
-                r'(?m)^>\s*[^\n\s]+\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\s|$)',
+                r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
                 output)
               print('FMRL last observed nested script: '+(subgates[-1] if subgates else 'unknown'))
           SAFE
@@ -506,7 +506,7 @@ jobs:
           fi
           if [[ "$status" != 0 ]]; then
             echo 'FMRL lockfile regeneration failed; target output suppressed'
-            grep -Eo 'ERR_PNPM_[A-Z0-9_]+|npm error code [A-Z0-9_]+' /tmp/fmrl-repair-raw.log \
+            grep -Eo 'ERR_PNPM_[A-Z0-9_]+|npm error code [A-Z0-9_]+' /tmp/fmrl-repair-raw.log \\
               | sort -u | head -n 8 | sed 's/^/FMRL safe package error: /' || true
             rm -f /tmp/fmrl-repair-raw.log
             exit 1
@@ -550,7 +550,7 @@ jobs:
           ) >/tmp/fmrl-artifact-raw.log 2>&1 || status=$?
           if [[ "$status" != 0 ]]; then
             echo 'FMRL private artifact build failed; raw logs suppressed'
-            grep -Eo 'TS[0-9]{4}|npm error code [A-Z0-9_]+|ERR_PNPM_[A-Z0-9_]+' /tmp/fmrl-artifact-raw.log \
+            grep -Eo 'TS[0-9]{4}|npm error code [A-Z0-9_]+|ERR_PNPM_[A-Z0-9_]+' /tmp/fmrl-artifact-raw.log \\
               | sort -u | head -n 12 | sed 's/^/FMRL safe build error: /' || true
           fi
           rm -f /tmp/fmrl-artifact-raw.log
