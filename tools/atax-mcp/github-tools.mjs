@@ -399,6 +399,58 @@ async function deleteBranch(a,_db,p,ctx){
   requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'DELETE'}),'GitHub branch deletion');
   return {operation:'branch_delete',account:selected.alias,repository:repo,branch,deleted:true};
 }
+async function mergeBranches(a,_db,p,ctx){
+  const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
+  const repo=String(a.repository||'');
+  if(!FULL_NAME.test(repo))throw new Error('Invalid GitHub repository owner/name');
+  const base=ensureBranchName(a.base);
+  const head=String(a.head||'').trim();
+  if(!head)throw new Error('Head branch or commit SHA is required');
+  const commit_message=(a.message&&String(a.message).trim())||`Merge ${head} into ${base}`;
+  const mergeRes=await githubRequest(ctx.fetcher,`${API}/repos/${repo}/merges`,selected.token,{method:'POST',body:{base,head,commit_message}});
+  if(mergeRes.status===204){
+    return {operation:'branch_merge',account:selected.alias,repository:repo,base,head,merged:true,sha:null,message:'Base branch already contains head'};
+  }
+  if(mergeRes.ok){
+    return {operation:'branch_merge',account:selected.alias,repository:repo,base,head,merged:true,sha:mergeRes.data?.sha||null,message:mergeRes.data?.commit?.message||commit_message};
+  }
+  const resolved=a.resolved_files&&typeof a.resolved_files==='object'&&!Array.isArray(a.resolved_files)?Object.entries(a.resolved_files):[];
+  if(mergeRes.status!==409||resolved.length===0){
+    throw new Error(`GitHub branch merge failed (HTTP ${mergeRes.status}${mergeRes.message?`: ${mergeRes.message}`:''})`);
+  }
+  const baseRef=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(base)}`,selected.token),'GitHub base branch lookup');
+  const baseSha=String(baseRef.object?.sha||'');
+  if(!REF.test(baseSha))throw new Error('Unable to resolve base branch head');
+  let headSha=head;
+  if(!REF.test(headSha)){
+    const headBranch=ensureBranchName(head);
+    const headRef=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/ref/heads/${encodeURIComponent(headBranch)}`,selected.token),'GitHub head branch lookup');
+    headSha=String(headRef.object?.sha||'');
+  }
+  if(!REF.test(headSha))throw new Error('Unable to resolve head commit SHA');
+  const baseCommit=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/commits/${baseSha}`,selected.token),'GitHub base commit lookup');
+  const treeEntries=[];
+  for(const [rawPath,content] of resolved){
+    const path=String(rawPath||'').replace(/^\/+/,'');
+    if(!path||typeof content!=='string')throw new Error('Each resolved_files entry must map a file path to UTF-8 string content');
+    const blob=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/blobs`,selected.token,{method:'POST',body:{
+      content:Buffer.from(content,'utf8').toString('base64'),
+      encoding:'base64',
+    }}),'GitHub blob creation');
+    treeEntries.push({path,mode:'100644',type:'blob',sha:blob.sha});
+  }
+  const treeData=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/trees`,selected.token,{method:'POST',body:{
+    base_tree:baseCommit.tree.sha,
+    tree:treeEntries,
+  }}),'GitHub merge tree creation');
+  const newCommit=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/commits`,selected.token,{method:'POST',body:{
+    message:commit_message,
+    tree:treeData.sha,
+    parents:[baseSha,headSha],
+  }}),'GitHub merge commit creation');
+  const updated=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/git/refs/heads/${encodeURIComponent(base)}`,selected.token,{method:'PATCH',body:{sha:newCommit.sha,force:false}}),'GitHub branch update');
+  return {operation:'branch_merge',account:selected.alias,repository:repo,base,head,merged:true,sha:newCommit.sha,parents:[baseSha,headSha],ref:updated.ref,message:commit_message};
+}
 async function createPullRequest(a,_db,p,ctx){
   const selected=resolveProviderAccount(ctx.env,p,'github',a.account);
   const repo=String(a.repository||'');
@@ -503,6 +555,9 @@ export const githubTools=[
   tool('atax_github_branch_delete',
     'Delete a non-default GitHub feature branch (refuses main/master/default branch).',
     'atax:github:create',one('Delete branch on GitHub',{repository:s('GitHub owner/name repository',205),branch:s('Feature branch name to delete',120),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','branch']),deleteBranch),
+  tool('atax_github_branch_merge',
+    'Merge head branch into base branch on GitHub; if a 409 conflict occurs and resolved_files are supplied, creates a 2-parent merge commit via Git Data API.',
+    'atax:github:create',one('Merge GitHub branches',{repository:s('GitHub owner/name repository',205),base:s('Target branch to merge into',120),head:s('Source branch or commit SHA to merge from',120),message:s('Optional merge commit message',1000),resolved_files:{type:'object',description:'Optional map of file path to resolved UTF-8 content when resolving a 409 conflict'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','base','head']),mergeBranches),
   tool('atax_github_pull_request_create',
     'Open a Pull Request on GitHub for a feature branch to merge into base, recording title, description, and task reference.',
     'atax:github:create',one('Create pull request on GitHub',{repository:s('GitHub owner/name repository',205),title:s('Pull request title',300),head:s('The branch where your changes are implemented',120),base:s('The branch you want changes pulled into (default main)',120),body:s('Pull request body/description',4000),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','title','head']),createPullRequest),
