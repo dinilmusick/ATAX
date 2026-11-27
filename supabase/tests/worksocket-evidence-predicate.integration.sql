@@ -45,7 +45,7 @@ BEGIN
   -- Valid evidence is accepted when the caller-supplied verdict agrees with
   -- the server-computed builtin.evidence_present result.
   PERFORM public.record_checkpoint_predicate_result(
-    test_task_id,0,'builtin.evidence_present',1,
+    test_task_id,0::smallint,'builtin.evidence_present',1,
     jsonb_build_object('evidence',jsonb_build_array('observed-check')),
     'true'::jsonb,true,
     jsonb_build_array(jsonb_build_object('type','fixture','receipt','evidence-present')),
@@ -55,7 +55,7 @@ BEGIN
   -- The same actor cannot force true with empty evidence.
   BEGIN
     PERFORM public.record_checkpoint_predicate_result(
-      test_task_id,0,'builtin.evidence_present',1,
+      test_task_id,0::smallint,'builtin.evidence_present',1,
       jsonb_build_object('evidence','[]'::jsonb),
       'true'::jsonb,true,'[]'::jsonb,
       'worksocket-evidence-test',test_claim_token::text
@@ -73,7 +73,7 @@ BEGIN
   -- computes true from valid evidence.
   BEGIN
     PERFORM public.record_checkpoint_predicate_result(
-      test_task_id,0,'builtin.evidence_present',1,
+      test_task_id,0::smallint,'builtin.evidence_present',1,
       jsonb_build_object('evidence',jsonb_build_array('observed-check')),
       'false'::jsonb,false,
       jsonb_build_array(jsonb_build_object('type','fixture','receipt','evidence-present')),
