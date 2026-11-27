@@ -40,7 +40,7 @@ type SettingsCategoryTab = 'infra' | 'compute' | 'inference';
 function ProviderIcon({provider,className='w-4 h-4'}:{provider:ProviderType;className?:string}){
   if(provider==='github') return <GitBranch className={className}/>;
   if(provider==='cloudflare'||provider==='vercel') return <Cloud className={className}/>;
-  if(provider==='neon') return <Database className={className}/>;
+  if(provider==='neon'||provider==='supabase') return <Database className={className}/>;
   if(COMPUTE_PROVIDERS.some(p=>p.id===provider)) return <Cpu className={className}/>;
   if(INFERENCE_PROVIDERS.some(p=>p.id===provider)) return <Sparkles className={className}/>;
   return <Cloud className={className}/>;
