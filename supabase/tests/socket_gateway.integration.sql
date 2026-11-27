@@ -16,7 +16,7 @@ DECLARE
   session_key text:='test-rpc-session-'||left(gen_random_uuid()::text,8);
   budget jsonb:=jsonb_build_object('modelId','unknown',
     'profileSetVersion','2026-11-22.2','tokenizerId',('utf8-byte-'||'upper-bound-v1'),
-    'overhead',8,'inputLimit',2457,'outputLimit',819,'maxUsableTokens',3276);
+    'overhead',8,'inputLimit',2457,'outputLimit',1600,'maxUsableTokens',4096);
   command jsonb; result1 jsonb; result2 jsonb; notification jsonb;
   wire text:='{"jsonrpc":"2.0","id":1,"result":{}}';
   input text:='{"jsonrpc":"2.0","method":"ping","id":1}';
@@ -42,7 +42,7 @@ BEGIN
       'actions',jsonb_build_array(jsonb_build_object('description','Use one authenticated principal'))))
   RETURNING id INTO mcp_task;
   INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
-    VALUES(mcp_task,1000,800,2000);
+    VALUES(mcp_task,1000,1600,3000);
 
   mcp_command:=jsonb_build_object('transport','mcp',
     'profileSource','atax-mcp-pinned-fallback',
