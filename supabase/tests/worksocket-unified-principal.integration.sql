@@ -107,7 +107,7 @@ BEGIN
   FOR i IN 0..jsonb_array_length(claimed.checkpoints)-1 LOOP
     PERFORM public.record_checkpoint_predicate_result(
       task_id,i::smallint,'builtin.evidence_present',1,
-      jsonb_build_object('task_id',task_id,'checkpoint',i),
+      jsonb_build_object('task_id',task_id,'checkpoint',i,'evidence',jsonb_build_array('checkpoint passed')),
       jsonb_build_object('ok',true,'checkpoint',i),true,
       jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
       caller_id,claimed.claim_token::text
