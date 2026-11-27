@@ -654,6 +654,11 @@ def main() -> int:
     parser.add_argument("--workflow", default="", help="Optional target workflow filename.")
     parser.add_argument("--mode", choices=("direct", "act", "repair", "artifact"), default="direct", help="Portable exact-SHA direct CI or legacy nested act.")
     parser.add_argument("--branch", default="", help="Exact private PR branch for lockfile or artifact repair.")
+    parser.add_argument("--skill-command", default="", help="Bounded command for repository-backed skill execution.")
+    parser.add_argument("--skill-runtime", default="", help="Optional runtime declaration.")
+    parser.add_argument("--skill-install", default="", help="Optional dependency-install command.")
+    parser.add_argument("--skill-workdir", default="", help="Optional repository-relative working directory.")
+    parser.add_argument("--skill-output", default="", help="Optional bounded output declaration.")
     args = parser.parse_args()
 
     if args.source.count("/") != 1 or any(not p for p in args.source.split("/")):
@@ -668,6 +673,13 @@ def main() -> int:
 
     if args.ref and not re.fullmatch(r"[A-Za-z0-9_./-]+", args.ref):
         raise SystemExit("Unsafe target ref.")
+    if args.mode == "skill":
+        if not 1 <= len(args.skill_command) <= 2000 or "\n" in args.skill_command or "\r" in args.skill_command:
+            raise SystemExit("Skill execution requires a bounded single-line command.")
+        if len(args.skill_install) > 1200 or len(args.skill_runtime) > 120 or len(args.skill_output) > 1200:
+            raise SystemExit("Skill execution declaration exceeds its bounded limit.")
+        if args.skill_workdir and (args.skill_workdir.startswith("/") or ".." in args.skill_workdir or len(args.skill_workdir) > 180):
+            raise SystemExit("Unsafe skill working directory.")
     if args.mode in ("repair", "artifact"):
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,180}", args.branch) or ".." in args.branch:
             raise SystemExit("Repair requires a safe exact PR head branch.")
@@ -736,6 +748,11 @@ def main() -> int:
             ("FMRL_TARGET_EVENT", args.event),
             ("FMRL_TARGET_WORKFLOW", args.workflow or "-"),
             ("FMRL_EXECUTION_MODE", args.mode),
+            ("FMRL_SKILL_COMMAND", args.skill_command),
+            ("FMRL_SKILL_RUNTIME", args.skill_runtime),
+            ("FMRL_SKILL_INSTALL", args.skill_install),
+            ("FMRL_SKILL_WORKDIR", args.skill_workdir),
+            ("FMRL_SKILL_OUTPUT", args.skill_output),
         ) + repair_secrets:
           for attempt in range(4):
             try:
@@ -783,7 +800,7 @@ def main() -> int:
             "push_fallback_path": ".fmrl/execute",
             "workflow": "atax-private-ci.yml",
             "execution_mode": args.mode,
-            "coverage": ("lockfile-only repair and frozen install" if args.mode == "repair" else
+            "coverage": ("repository-backed executable skill command in disposable FMRL" if args.mode == "skill" else "lockfile-only repair and frozen install" if args.mode == "repair" else
                          "bounded Worker artifact repair and verified atomic writeback" if args.mode == "artifact" else
                          "portable scripts only; not full workflow parity" if args.mode == "direct" else "nested act"),
             "run": f"gh workflow run atax-private-ci.yml --repo {target}",
