@@ -120,7 +120,7 @@ class FmrlTests(unittest.TestCase):
                          ["PRIVATE_REPO_TOKEN","FMRL_SOURCE_VISIBILITY","FMRL_SKILL_COMMAND","FMRL_SKILL_INSTALL","FMRL_SKILL_WORKDIR","FMRL_SKILL_OUTPUT","FMRL_TARGET_REPOSITORY","FMRL_TARGET_REF",
                           "FMRL_TARGET_EVENT","FMRL_TARGET_WORKFLOW","FMRL_EXECUTION_MODE"])
         self.assertEqual([item.kwargs["input"] for item in run.call_args_list],
-                         ["source-read","public","","","","","dinilmusick/KONE","a"*40,"push","-","direct"])
+                         ["source-read","private","","","","","dinilmusick/KONE","a"*40,"push","-","direct"])
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "secret-writer")
         self.assertNotEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "management")
         self.assertNotIn("CODING_REPO_TOKEN", run.call_args.kwargs["env"])
