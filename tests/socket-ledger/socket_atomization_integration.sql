@@ -279,9 +279,27 @@ BEGIN
     rejected:=position('original fenced overflow report' IN msg)>0;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'FAIL: stale stopped-parent fence accepted'; END IF;
+  -- Attempt to raise the child's input budget by one token above the parent.
+  -- The database must reject the entire split before any child or atomization
+  -- row is committed.
+  bad:=jsonb_set(definition,'{0,budget}',jsonb_build_object('input',51),true);
+  rejected:=false;
+  BEGIN
+    PERFORM public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,
+      fence,'budget-escalation-attempt',bad,jsonb_build_object('checkpoint','must-rollback'));
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS msg=MESSAGE_TEXT;
+    rejected:=position('budget exceeds or invalidates its parent budget' IN msg)>0;
+  END;
+  IF NOT rejected THEN RAISE EXCEPTION 'FAIL: child budget escalation was accepted'; END IF;
+  IF EXISTS(SELECT 1 FROM public.socket_atomizations WHERE parent_task_id=p)
+     OR EXISTS(SELECT 1 FROM public.socket_atomization_children WHERE parent_task_id=p) THEN
+    RAISE EXCEPTION 'FAIL: rejected child budget escalation left partial atomization state';
+  END IF;
+
   -- Any authenticated invocation holding the original overflow fence may
   -- atomise the stopped parent; author/worker identity is not an eligibility gate.
-  
+
   -- Freeze, provenance, typed edges, and atomic child registration.
   split_result:=public.socket_atomize_task(p,inv_unrelated_worker.id,inv_unrelated_worker.secret,fence,
     'test-split-key',definition,jsonb_build_object('checkpoint','persisted'));
