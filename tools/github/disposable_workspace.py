@@ -256,7 +256,7 @@ jobs:
                     } catch {}
                     console.log('FMRL Frnes verifier JSON: '+(parseable?'yes':'no'));
                     const matches=String(direct.stderr||'').match(
-                      /\\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\\b/g
+                      /\b(?:FileNotFoundError|ValueError|KeyError|TypeError|ModuleNotFoundError|ImportError|PermissionError|RuntimeError|JSONDecodeError)\b/g
                     );
                     const fixedTypes=new Set(['FileNotFoundError','ValueError',
                       'KeyError','TypeError','ModuleNotFoundError','ImportError',
@@ -301,6 +301,10 @@ jobs:
                 key+'='+str(len(re.findall(pat,output,re.I))) for key,pat in categories.items()
                 if re.search(pat,output,re.I))
               if codes: summary+=' codes='+','.join(codes[:8])
+              assertions=re.findall(r'(?m)^AssertionError(?: \[ERR_ASSERTION\])?:\s*([^\n]{1,180})',output)
+              if assertions:
+                  safe_msg=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\s+\S+)','[redacted]',assertions[-1])
+                  summary=(summary+' | assert='+safe_msg) if summary else ('assert='+safe_msg)
               print('FMRL failure categories: '+summary[:250])
               failed=re.search(r'Direct CI failed: ([A-Za-z0-9:._-]+) exit=([0-9]+)',output)
               print('FMRL failing gate: '+(failed.group(1) if failed else 'frozen-install-or-setup'))
@@ -321,7 +325,7 @@ jobs:
                 output,re.I)))
               print('Safe error identifiers: '+(','.join(codes[:12]) if codes else 'none'))
               # Fixed-format error codes and allowlisted test-script stages only.
-              ts_codes=sorted(set(re.findall(r'\\bTS[0-9]{4}\\b',output)))
+              ts_codes=sorted(set(re.findall(r'\bTS[0-9]{4}\b',output)))
               print('FMRL TypeScript codes: '+(','.join(ts_codes[:12]) if ts_codes else 'none'))
               # Only these audited Skipo invariant codes may leave the
               # private runner; no raw diagnostics, paths, strings or tokens.
@@ -378,7 +382,7 @@ jobs:
                   'SKP-POL-STRUCT-WORKSPACE',
                   'SKP-POL-UNSAFE-PATH',
               }
-              seen=set(re.findall(r'\\b(?:SKIPO_[A-Z0-9_-]+|SKP-POL-[A-Z0-9-]+|SEM[0-9]{3})\\b',output))
+              seen=set(re.findall(r'\b(?:SKIPO_[A-Z0-9_-]+|SKP-POL-[A-Z0-9-]+|SEM[0-9]{3})\b',output))
               safe=sorted(seen.intersection(approved))
               print('FMRL Skipo rule IDs: '+(','.join(safe) if safe else 'none'))
               # Frnes emits only fixed private migration error categories.
@@ -465,7 +469,7 @@ jobs:
               code=errors[-1] if errors and errors[-1] in allowed_errors else 'unknown'
               print('FMRL Frnes exception class: '+code)
               subgates=re.findall(
-                r'(?m)^>\\s*[^\\n\\s]+\\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\\s|$)',
+                r'(?m)^>\s*[^\n\s]+\s+(test:(?:google-sdk-boundary|integration|system-env|architecture|ecosystem-hardening)|verify:ecosystem-package-chain)(?:\s|$)',
                 output)
               print('FMRL last observed nested script: '+(subgates[-1] if subgates else 'unknown'))
           SAFE
