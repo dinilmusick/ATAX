@@ -174,7 +174,7 @@ BEGIN
       'actions',jsonb_build_array(jsonb_build_object('description','Pull bounded context'))))
   RETURNING id INTO cursor_task;
   INSERT INTO public.socket_task_budgets(task_id,max_input,max_output,max_total)
-    VALUES(cursor_task,1000,800,2000);
+    VALUES(cursor_task,1000,1600,3000);
   INSERT INTO public.socket_gateway_capabilities(invocation_id,task_id,capability,enabled,expires_at)
     VALUES(inv.id,cursor_task,'socket:context:read',true,now()+interval '1 hour');
   input:='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"atax_socket_context_pull"}}';
