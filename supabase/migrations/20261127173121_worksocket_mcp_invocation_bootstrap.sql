@@ -50,7 +50,7 @@ BEGIN
 
   old_fragment := $old$  SELECT * INTO v_inv FROM public.socket_invocations
    WHERE agent_id=v_principal AND authenticated_subject=v_principal
-     AND session_id=v_session AND role IN ('worker','executor')
+     AND session_id=v_session AND role IN ('worker','atomizer','executor','verifier')
      AND expires_at>statement_timestamp()
      AND model_id=v_model->>'modelId'
      AND model_profile_version=v_model->>'profileSetVersion';
