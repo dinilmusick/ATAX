@@ -14,6 +14,7 @@ DECLARE
   verifier public.tasks;
   result_task public.tasks;
   stale_denied boolean := false;
+  goal_key_value text;
   i integer;
 BEGIN
   created := public.goal_ledger_create_with_tasks(
@@ -78,17 +79,13 @@ BEGIN
   END IF;
 
   -- Goal-scoped claims now allow the same caller to execute its authored task.
+  SELECT g.goal_key INTO goal_key_value
+  FROM public.goals g WHERE g.id=authored.goal_id;
+  IF goal_key_value IS NULL THEN RAISE EXCEPTION 'Created goal key not found'; END IF;
   SELECT * INTO claimed FROM public.atax_goal_claim_safe(
-    authored.task_definition->>'goal_key',
+    goal_key_value,
     caller_id,'Same Principal','orchestrator',ARRAY[]::text[],session_id,120
   );
-  -- Existing task_definitions may carry no goal_key; use the canonical goal key
-  -- from the created result when present, otherwise resolve via the stored task.
-  IF claimed.id IS NULL THEN
-    SELECT * INTO claimed FROM public.goal_ledger_claim_task(
-      goal_name,caller_id,'Same Principal','orchestrator',ARRAY[]::text[],session_id,120
-    );
-  END IF;
   IF claimed.id IS DISTINCT FROM task_id
      OR claimed.claimed_by_agent_id IS DISTINCT FROM caller_id
      OR claimed.claim_token IS NULL THEN
