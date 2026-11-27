@@ -48,6 +48,22 @@ const ATAX_INTRO_DOCUMENTATION = {
 const TOOLS = [...computeTools, ...inferenceTools,
 
   tool('atax_intro_documentation', 'Read the concise ATAX operating manual for agents. Use this to understand the strategic graph, planning workflow, on-demand preemptive guidance and private-repository FMRL CI policy.', 'atax:read', one('intro', {}), () => ATAX_INTRO_DOCUMENTATION),
+  tool('atax_strategy_resolve', 'Preferred strategic entry point for substantive objectives. Resolve the request against the live System → Vision/Target → Goal graph and return compact candidate work before any task creation or claim.', 'atax:read', one('strategy resolve',{objective:S.text('Natural-language user objective',4000),system_key:{type:'string',maxLength:120,description:'Optional known canonical System key'}},['objective']), async (a,db) => {
+    const context=await db.rpc('agent_context_overview',{});
+    const objective=String(a.objective||'').toLowerCase();
+    const tokens=new Set((objective.match(/[a-z0-9][a-z0-9_-]{2,}/g)||[]).filter(x=>!['the','and','for','with','from','that','this','into','need','want','make','implement','fix','build'].includes(x)));
+    const systems=(context?.systems||[]).map(s=>{
+      const hay=String([s.system_key,s.name,s.system_type].join(' ')).toLowerCase();
+      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
+      return {system_key:s.system_key,name:s.name,status:s.status,work_priority:s.work_priority,score};
+    }).filter(x=>!a.system_key||x.system_key===a.system_key).sort((x,y)=>y.score-x.score||Number(y.work_priority||0)-Number(x.work_priority||0)).slice(0,8);
+    const goals=(context?.goals||[]).map(g=>{
+      const hay=String([g.goal_key,g.name,g.status].join(' ')).toLowerCase();
+      const score=[...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);
+      return {goal_key:g.goal_key,name:g.name,status:g.status,system_id:g.system_id,user_priority:g.user_priority,score};
+    }).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||Number(y.user_priority||0)-Number(x.user_priority||0)).slice(0,8);
+    return {objective:a.objective,recommended_workflow:['Resolve/reuse System','Reuse or create Vision/Target','Reuse or create Goal','Attach dependencies','Decompose into 1–4 action tasks','Claim one eligible task','Execute externally','Submit evidence','Independently verify','Reassess graph'],candidate_systems:systems,candidate_goals:goals,planning_rule:'Do not create a new task merely because the user phrased a new request. First determine whether the request advances an existing strategic node.',next:'If the correct strategic location is still unclear, call atax_preemptive_guidance_get; otherwise reuse the best matching graph node and continue through the canonical lifecycle.'};
+  }),
   tool('atax_preemptive_guidance_get', 'Retrieve current durable preemptive guidance on demand. Guidance is updated after tool actions and intentionally omitted from ordinary tool responses to avoid context bloat.', 'atax:read', one('guidance', {}), (_,db,p) => db.rpc('atax_mcp_preemptive_guidance_get_v1',{owner_subject_in:p.id})),
     tool('atax_context', 'Live canonical ATAX universe, systems, goals, tasks, maintenance and priorities', 'atax:read', one('context', {}), (_,db) => db.rpc('agent_context_overview', {})),
   tool('atax_system_context', 'Live canonical context snapshot for one system key', 'atax:read', one('system', {system_key:S.text('Canonical system key')}, ['system_key']), (a,db) => db.rpc('atax_context_snapshot', {system_key_in:a.system_key})),
