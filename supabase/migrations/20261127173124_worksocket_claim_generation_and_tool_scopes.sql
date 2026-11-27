@@ -100,13 +100,18 @@ BEGIN
   IF fn IS NULL THEN RAISE EXCEPTION 'Canonical socket execution RPC is missing'; END IF;
   SELECT pg_get_functiondef(fn) INTO source_definition;
 
-  old_fragment:=$old$      ON CONFLICT(invocation_id,task_id,capability) DO UPDATE
+  old_fragment:=$old$INSERT INTO public.socket_gateway_capabilities
+      (invocation_id,task_id,capability,enabled,expires_at)
+    VALUES
+      (v_inv.id,v_task_id,v_capability,true,
+       least(v_inv.expires_at,v_task.claim_expires_at))
+    ON CONFLICT(invocation_id,task_id,capability) DO UPDATE
       SET enabled=true,expires_at=EXCLUDED.expires_at;$old$;
-  new_fragment:=$new$      ,claim_generation
-    ) VALUES (
-      v_inv.id,v_task_id,v_capability,true,
-      least(v_inv.expires_at,v_task.claim_expires_at),v_task.claim_generation
-    )
+  new_fragment:=$new$INSERT INTO public.socket_gateway_capabilities
+      (invocation_id,task_id,capability,enabled,expires_at,claim_generation)
+    VALUES
+      (v_inv.id,v_task_id,v_capability,true,
+       least(v_inv.expires_at,v_task.claim_expires_at),v_task.claim_generation)
     ON CONFLICT(invocation_id,task_id,capability) DO UPDATE
       SET enabled=true,expires_at=EXCLUDED.expires_at,
           claim_generation=EXCLUDED.claim_generation;$new$;
