@@ -26,10 +26,11 @@ BEGIN
       (
         to_regprocedure('public.task_ledger_verify_result(uuid,text,boolean,jsonb)'),
         $old$  if not exists(
-    select 1 from public.tasks t join public.goals g on g.id=t.goal_id
+    select 1 from public.tasks t
+    left join public.goals g on g.id=t.goal_id
     where t.id=task_id_in and (
-      (auth.uid() is not null and g.owner_user_id=auth.uid())
-      or (auth.uid() is null and g.owner_user_id is null)
+      (g.id is not null and auth.uid() is not null and g.owner_user_id=auth.uid())
+      or (g.id is not null and auth.uid() is null and g.owner_user_id is null)
       or exists(select 1 from public.tasks p where p.id=t.parent_task_id and p.agent_id=verifier_agent_id_in)
       or exists(select 1 from public.agent_registry a where a.agent_id=verifier_agent_id_in
         and a.enabled and a.agent_type in ('verifier','orchestrator','supervisor'))
