@@ -164,20 +164,27 @@ function safeAccounts(env,principal){
   };
 }
 async function providerGet(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'\n  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
+    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane'
+  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   let body;
   try{body=await res.json();}catch{throw new Error('Provider returned invalid JSON');}
   return body;
 }
 async function providerRequest(fetcher,url,token,{method='GET',body}={}) {
-  const res=await fetcher(url,{method,redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane',\n    ...(body===undefined?{}:{'content-type':'application/json'}),\n  },...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetcher(url,{method,redirect:'manual',headers:{
+    authorization:'Bearer '+token,accept:'application/json','user-agent':'atax-mcp-control-plane',
+    ...(body===undefined?{}:{'content-type':'application/json'}),
+  },...(body===undefined?{}:{body:JSON.stringify(body)})});
   let parsed=null;
   try{parsed=await res.json();}catch{}
   return {status:res.status,ok:res.ok,data:parsed};
 }
 async function providerGetTextOrJson(fetcher,url,token) {
-  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{\n    authorization:'Bearer '+token,accept:'application/json, text/plain;q=0.9','user-agent':'atax-mcp-control-plane'\n  }});
+  const res=await fetcher(url,{method:'GET',redirect:'manual',headers:{
+    authorization:'Bearer '+token,accept:'application/json, text/plain;q=0.9','user-agent':'atax-mcp-control-plane'
+  }});
   if(!res.ok)throw new Error('Provider request failed (HTTP '+res.status+')');
   const raw=await res.text();
   try{return {kind:'json',data:JSON.parse(raw)};}catch{return {kind:'text',data:raw};}
@@ -378,4 +385,12 @@ async function cloudflarePagesGet(a,_db,p,ctx) {
     }:null,
   };
 }
-export const providerTools=[\n  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),\n  tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),\n  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),\n  tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),\n  tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs),\n  tool('atax_cloudflare_pages_deploy','Create (if missing) a GitHub-connected Cloudflare Pages project and trigger a production deployment.','atax:github:create',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},repository:{type:'string',minLength:3,maxLength:205},production_branch:{type:'string',minLength:1,maxLength:120},build_command:{type:'string',maxLength:256},destination_dir:{type:'string',maxLength:256}},['project_name','repository']),cloudflarePagesDeploy),\n  tool('atax_cloudflare_pages_get','Inspect a Cloudflare Pages project and its latest deployment status and URL.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},deployment_id:{type:'string',maxLength:128}},['project_name']),cloudflarePagesGet)\n];
+export const providerTools=[
+  tool('atax_provider_accounts_list','List configured owner-only GitHub, Cloudflare, compute, and AI inference aliases, never credentials.','atax:read',schema(),(_a,_db,p,ctx)=>safeAccounts(ctx.env,p)),
+  tool('atax_cloudflare_accounts_list','Read Cloudflare accounts accessible to a selected owner secret.','atax:cloudflare:read',accountSchema(),cloudflareAccounts),
+  tool('atax_cloudflare_workers_list','List Cloudflare Worker scripts with selected owner secret and account ID.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128}}),cloudflareWorkers),
+  tool('atax_cloudflare_worker_builds_list','List Cloudflare Workers Builds for a Worker tag or script_id.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},worker_tag:{type:'string',maxLength:128},script_id:{type:'string',maxLength:128},limit:{type:'integer',minimum:1,maximum:50}}),cloudflareWorkerBuilds),
+  tool('atax_cloudflare_build_logs_get','Read bounded Cloudflare Workers Build logs for a build_uuid.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},build_uuid:{type:'string',maxLength:128},tail_lines:{type:'integer',minimum:1,maximum:500}},['build_uuid']),cloudflareBuildLogs),
+  tool('atax_cloudflare_pages_deploy','Create (if missing) a GitHub-connected Cloudflare Pages project and trigger a production deployment.','atax:github:create',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},repository:{type:'string',minLength:3,maxLength:205},production_branch:{type:'string',minLength:1,maxLength:120},build_command:{type:'string',maxLength:256},destination_dir:{type:'string',maxLength:256}},['project_name','repository']),cloudflarePagesDeploy),
+  tool('atax_cloudflare_pages_get','Inspect a Cloudflare Pages project and its latest deployment status and URL.','atax:cloudflare:read',accountSchema({account_id:{type:'string',maxLength:128},project_name:{type:'string',minLength:2,maxLength:58},deployment_id:{type:'string',maxLength:128}},['project_name']),cloudflarePagesGet)
+];
