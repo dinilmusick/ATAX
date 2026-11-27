@@ -16,6 +16,7 @@ async function substrateResponse(path: string, env: Record<string, unknown>) {
   try {
     if (path === '/api/substrate/systems') return json(await service.getSystemsGraph());
     if (path === '/api/substrate/visions-goals') return json(await service.getVisionsGoalsGraph());
+    if (path === '/api/substrate/worksockets') return json(await service.getWorkSockets());
     if (path === '/api/substrate/skills') return json(await service.getSkillsCatalog());
     return json({ error: 'Not found' }, 404);
   } catch (error) {
