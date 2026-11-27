@@ -18,7 +18,7 @@ BEGIN
       'general_pattern','input → evaluate evidence → persist predicate receipt',
       'actions',jsonb_build_array(jsonb_build_object('description','Evaluate evidence presence')),
       'completion_parameters',jsonb_build_array(
-        jsonb_build_object('id','evidence','description','Nonempty evidence receipt')
+        jsonb_build_object('id','cp-1','description','Nonempty evidence receipt')
       )
     ),
     NULL,
