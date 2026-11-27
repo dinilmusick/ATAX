@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS public.agent_routing_evaluations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
   requested_by_actor text NOT NULL,
-  candidate_agent_id text REFERENCES public.agent_registry(agent_id) ON DELETE SET NULL,
+  candidate_agent_id text CHECK(candidate_agent_id IS NULL OR length(btrim(candidate_agent_id)) BETWEEN 3 AND 120),
   result_kind text NOT NULL CHECK (result_kind IN ('candidate','no_candidates')),
   suitability_score numeric(6,5),
   capability_complete boolean,
