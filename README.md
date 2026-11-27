@@ -128,6 +128,18 @@ WHERE id = true;
 - **Connected with 0 tools**: Check `MCP_ATAX_OWNER_JWT_SUBJECT` in `atax_private.mcp_server_settings` — ensure it matches the exact UUID in **Authentication → Users** with no `< >` brackets.
 - **Inspecting live Worker errors**: Run `npx wrangler tail --config wrangler.toml --format pretty` while clicking **Connect**.
 
+## Agent strategy-first workflow
+
+The remote MCP server is intentionally strategy-first. For substantive or ambiguous user objectives, agents should first call atax_intro_documentation, then atax_strategy_resolve to locate the request in the live System → Vision → Target → Goal → Task graph. Reuse existing strategic nodes whenever possible; only create missing Vision/Target/Goal structure when the objective is genuinely new. Decompose substantive goals into bounded 1–4 action tasks, execute externally, persist evidence, independently verify, and reassess the graph.
+
+### Preemptive documentation without context bloat
+
+ATAX maintains preemptive strategic guidance as durable state. State-changing MCP actions refresh the guidance, but ordinary tool responses do not include the guidance payload. They only advertise atax_preemptive_guidance_get. Agents should retrieve it when the next strategic move is unclear. The same guidance is also exposed as atax://guidance/preemptive and the atax-introduction MCP prompt.
+
+### Private-repository CI
+
+For private repositories, agents must prefer the disposable FMRL System inside ATAX rather than dispatching or rerunning private GitHub Actions. Direct private-repository workflow dispatch/rerun is blocked by the MCP gateway. Use atax_fmrl_create_run_dispose, poll atax_fmrl_get_status to terminal state, and require independent cleanup verification before accepting CI evidence.
+
 ## Resume or create work
 
 For an unfinished goal, ask a new chat to **“Start finishing an unfinished goal.”** The Universal Task Router loads the unfinished-goal list and resumes by readable goal key.
@@ -141,9 +153,8 @@ For a new objective, describe the outcome normally. The orchestrator creates a t
 ATAX is **only the control plane and tool source**, never a checkout workspace or GitHub Actions runner for target code. No target/private checkout, installation, build, test, `act` invocation, or coding commands may run in `dinilmusick/ATAX` Actions. The historical ATAX-as-workspace and Agent-Workspace-1 patterns are forbidden.
 
 Execution priority:
-1. For private-repository CI/build/test evidence, **prefer the ATAX FMRL system**. It uses a disposable public bridge and transiently checks out the private target inside the isolated runner, avoiding consumption of the target repository's private GitHub Actions quota.
-2. Use the agent's own container/runtime for repository editing and local development checks. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
-3. If FMRL is unavailable or local execution is sufficient and no remote CI evidence is needed, use the agent container. For remote private CI, never dispatch the target repository's GitHub Actions directly; use `atax_fmrl_create_run_dispose` and poll `atax_fmrl_get_status`.
+1. Use the agent's own container/runtime; clone the **target repository** directly there (if authorized), edit and test locally. ATAX tools may be downloaded as tooling, but the ATAX repository must not become the target checkout or runner.
+2. If local execution is unavailable, inaccessible, insufficient, or remote public Actions evidence is required, provision an **FMRL-prefixed, one-job disposable public repository** through `tools/github/disposable_workspace.py` or ATAX's control-plane workflow. This is the **only** remote GitHub compute location for private targets.
 3. The FMRL public repository contains only bridge workflow code. Authorized private source is checked out **only inside its transient runner** and never pushed, artifacted, cached, or committed to the public repository. The checkout token is used only by the clone step; target commands receive no repository token.
 4. Run and inspect checks, record evidence, obtain independent verification, **delete FMRL**, and independently confirm the repository returns 404. Deletion is mandatory on failure as well as success; failed cleanup is a blocker, not completion.
 5. If FMRL cannot be provisioned, report the blocker and preserve work in the ledger. **Never fall back to ATAX or private-repository Actions execution.**
