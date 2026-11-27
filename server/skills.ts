@@ -123,7 +123,7 @@ export function createSkillService(
   const callRpc = makeApi(env, fetcher);
 
   async function search(query: string) {
-    return callRpc('atax_mcp_skills_search_v1', { query_in: query });
+    return callRpc('atax_mcp_skills_search_v2', { query_in: query });
   }
 
   async function get(slug: string) {
