@@ -16,7 +16,7 @@ function harness(){
     async skills(){return []},
     async skill(){return {}},
   };
-  const principal={id:'owner',authMethod:'test',scopes:new Set(['atax:read','atax:write','atax:verify','atax:github:read','atax:github:create','atax:fmrl:execute'])};
+  const principal={id:'owner',authMethod:'jwt',scopes:new Set(['atax:read','atax:write','atax:verify','atax:github:read','atax:github:create','atax:fmrl:execute'])};
   const env={__ledgerDb:db,MCP_ATAX_OWNER_JWT_SUBJECT:'owner',MCP_AUTH_OWNER_SCOPES:'atax:read atax:write atax:verify atax:github:read atax:github:create atax:fmrl:execute'};
   return {db,calls,principal,env};
 }
