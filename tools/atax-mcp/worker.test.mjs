@@ -16,6 +16,7 @@ const env={
 const requests=[];
 const upstream=async (url, options={})=>{
   requests.push({url,options});
+  if(url.includes('/repos/private-owner/private-repo'))return Response.json({full_name:'private-owner/private-repo',private:true,default_branch:'main',html_url:'https://github.com/private-owner/private-repo'});
   if(url.includes('/rpc/'))return Response.json({rpc:url.split('/').at(-1),params:JSON.parse(options.body||'{}')});
   if(url.includes('/skill_versions?'))return Response.json([{version:'2.0',instructions:'Canonical skill instructions',is_published:true}]);
   if(url.includes('/skills?'))return Response.json([{id:17,slug:'coding-router',name:'Coding Router',status:'active',current_version_id:'version-test'}]);
@@ -92,6 +93,29 @@ test('tools: list includes access-controlled read and lifecycle tools',async()=>
   const filtered=await(await post('tools/list',{}, {env:reduced})).json();
   assert.ok(filtered.result.tools.every(t=>!t.name.includes('task_')&&!t.name.includes('verification_')));
   assert.equal((await call('atax_task_claim_next',{}, {env:reduced})).payload.result.isError,true);
+});
+test('strategy-first orientation and on-demand guidance are exposed without context spam',async()=>{
+  const listed=await(await post('tools/list')).json();
+  const names=listed.result.tools.map(t=>t.name);
+  for(const name of ['atax_intro_documentation','atax_strategy_resolve','atax_preemptive_guidance_get'])assert.ok(names.includes(name),name);
+  const intro=await call('atax_intro_documentation');
+  assert.equal(intro.status,200);
+  assert.equal(intro.payload.result.structuredContent.result.title,'ATAX agent orientation');
+  assert.ok(intro.payload.result.structuredContent.result.workflow.some(x=>x.includes('System')));
+  const strategy=await call('atax_strategy_resolve',{objective:'Fix private repository CI without exhausting private GitHub Actions quota'});
+  assert.equal(strategy.status,200);
+  assert.equal(strategy.payload.result.structuredContent.result.objective,'Fix private repository CI without exhausting private GitHub Actions quota');
+  assert.ok(Array.isArray(strategy.payload.result.structuredContent.result.recommended_workflow));
+  const guidance=await call('atax_preemptive_guidance_get');
+  assert.equal(guidance.status,200);
+  assert.equal(guidance.payload.result.structuredContent.result.rpc,'atax_mcp_preemptive_guidance_get_v1');
+  assert.equal(guidance.payload.result.structuredContent.guidance.retrieval_tool,'atax_preemptive_guidance_get');
+});
+test('private GitHub workflow execution is blocked in favor of disposable FMRL',async()=>{
+  const out=await call('atax_github_workflow_dispatch',{repository:'private-owner/private-repo',workflow:'ci.yml',ref:'main'});
+  assert.equal(out.status,200);
+  assert.equal(out.payload.result.isError,true);
+  assert.match(out.payload.result.content[0].text,/FMRL/i);
 });
 test('canonical read invokes real named Supabase RPC and skills REST, not arbitrary SQL',async()=>{
   const before=requests.length;
