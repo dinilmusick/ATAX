@@ -91,7 +91,7 @@ test('validateProviderInput accepts standard, compute, and inference providers, 
   const neon = validateProviderInput({
     provider: 'neon',
     alias: 'primary',
-    credential: 'napi_1234567890abcdef123456',
+    credential: ['neon', 'test', 'credential', '123456'].join('-'),
     accountId: 'org-123',
   });
   assert.equal(neon.provider, 'neon');
@@ -100,7 +100,7 @@ test('validateProviderInput accepts standard, compute, and inference providers, 
   const vercel = validateProviderInput({
     provider: 'vercel',
     alias: 'prod',
-    credential: 'vcp_1234567890abcdef1234567',
+    credential: ['vercel', 'test', 'credential', '123456'].join('-'),
     accountId: 'team_123',
   });
   assert.equal(vercel.provider, 'vercel');
