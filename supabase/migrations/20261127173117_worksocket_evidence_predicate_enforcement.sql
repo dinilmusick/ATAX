@@ -25,8 +25,17 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_verify_result(uuid,text,boolean,jsonb)'),
-        $old$  ) then raise exception 'independent verifier is not authorized for this workspace'; end if;$old$,
-        $new$  ) then raise exception 'verification caller is not authorized for this workspace'; end if;
+        $old$  if not exists(
+    select 1 from public.tasks t join public.goals g on g.id=t.goal_id
+    where t.id=task_id_in and (
+      (auth.uid() is not null and g.owner_user_id=auth.uid())
+      or (auth.uid() is null and g.owner_user_id is null)
+      or exists(select 1 from public.tasks p where p.id=t.parent_task_id and p.agent_id=verifier_agent_id_in)
+      or exists(select 1 from public.agent_registry a where a.agent_id=verifier_agent_id_in
+        and a.enabled and a.agent_type in ('verifier','orchestrator','supervisor'))
+    )
+  ) then raise exception 'independent verifier is not authorized for this workspace'; end if;$old$,
+        $new$  -- A live verification claim, validated by the wrapper, is the authorization capability.
   IF verified_in THEN
     IF jsonb_typeof(verification_report_in) IS DISTINCT FROM 'object'
        OR jsonb_typeof(verification_report_in->'evidence') IS DISTINCT FROM 'array'
@@ -103,6 +112,39 @@ BEGIN
       END IF;
     END IF;
   END IF;$new$
+      ),
+      (
+        to_regprocedure('public.task_ledger_verify_result_claimed(uuid,text,uuid,boolean,jsonb)'),
+        $old$declare task_out public.tasks; begin update public.tasks set verification_claimed_by_agent_id=null,verification_claim_token=null,verification_claim_expires_at=null where id=task_id_in and verification_status='pending' and verification_claimed_by_agent_id=verifier_agent_id_in and verification_claim_token=verification_claim_token_in and verification_claim_expires_at>now(); if not found then raise exception 'verification claim missing, expired, or owned by another verifier'; end if; return public.task_ledger_verify_result(task_id_in,verifier_agent_id_in,verified_in,coalesce(verification_report_in,'{}'::jsonb)); end; $old$,
+        $new$declare task_out public.tasks;
+begin
+  PERFORM 1 FROM public.tasks
+  WHERE id=task_id_in AND verification_status='pending'
+    AND verification_claimed_by_agent_id=verifier_agent_id_in
+    AND verification_claim_token=verification_claim_token_in
+    AND verification_claim_expires_at>statement_timestamp()
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'verification claim missing, expired, or owned by another verifier';
+  END IF;
+  RETURN public.task_ledger_verify_result(
+    task_id_in,verifier_agent_id_in,verified_in,coalesce(verification_report_in,'{}'::jsonb)
+  );
+END;$new$
+      ),
+      (
+        to_regprocedure('public.task_ledger_verify_result(uuid,text,boolean,jsonb)'),
+        $old$verified_by_agent_id=verifier_agent_id_in,verified_at=now(),$old$,
+        $new$verified_by_agent_id=verifier_agent_id_in,verified_at=now(),
+    verification_claimed_by_agent_id=null,verification_claim_token=null,verification_claim_expires_at=null,$new$
+      ),
+      (
+        to_regprocedure('public.task_ledger_verify_result(uuid,text,boolean,jsonb)'),
+        $old$where t.id=task_id_in and t.status='completed' and t.verification_status='pending' and (t.verification_claim_token is null or t.verification_claim_expires_at<=statement_timestamp());$old$,
+        $new$where t.id=task_id_in and t.status='completed' and t.verification_status='pending'
+    and t.verification_claimed_by_agent_id=verifier_agent_id_in
+    and t.verification_claim_token is not null
+    and t.verification_claim_expires_at>statement_timestamp();$new$
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
