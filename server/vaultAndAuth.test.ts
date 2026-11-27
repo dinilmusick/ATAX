@@ -88,6 +88,24 @@ test('validateProviderInput accepts standard, compute, and inference providers, 
   assert.equal(cf.provider, 'cloudflare');
   assert.equal(cf.alias, 'WORK');
 
+  const neon = validateProviderInput({
+    provider: 'neon',
+    alias: 'primary',
+    credential: 'napi_1234567890abcdef123456',
+    accountId: 'org-123',
+  });
+  assert.equal(neon.provider, 'neon');
+  assert.equal(neon.alias, 'PRIMARY');
+
+  const vercel = validateProviderInput({
+    provider: 'vercel',
+    alias: 'prod',
+    credential: 'vcp_1234567890abcdef1234567',
+    accountId: 'team_123',
+  });
+  assert.equal(vercel.provider, 'vercel');
+  assert.equal(vercel.alias, 'PROD');
+
   const groq = validateProviderInput({
     provider: 'groq',
     alias: 'TEAM_ALPHA',
@@ -147,6 +165,16 @@ test('createVaultService calls singleton instance owner and PostgREST Vault RPCs
             alias: 'PERSONAL',
             token: 'synthetic-github-credential-value',
           },
+          {
+            provider: 'neon',
+            alias: 'PRIMARY',
+            token: 'synthetic-neon-credential-value',
+          },
+          {
+            provider: 'vercel',
+            alias: 'PROD',
+            token: 'synthetic-vercel-credential-value',
+          },
         ],
       });
     }
@@ -183,6 +211,12 @@ test('createVaultService calls singleton instance owner and PostgREST Vault RPCs
     }
     if (url === 'https://api.github.com/user') {
       return Response.json({ login: 'dinilmusick' });
+    }
+    if (url === 'https://console.neon.tech/api/v2/users/me') {
+      return Response.json({ id: 'neon-u1', email: 'dev@neon.example' });
+    }
+    if (url === 'https://api.vercel.com/v2/user') {
+      return Response.json({ user: { id: 'vercel-u1', username: 'dinil-vercel' } });
     }
     return new Response('Not found', { status: 404 });
   }) as typeof fetch;
@@ -240,6 +274,18 @@ test('createVaultService calls singleton instance owner and PostgREST Vault RPCs
   assert.equal(probe.summary, 'Verified GitHub account @dinilmusick');
   assert.equal(auditedTest, true);
   assert.equal(JSON.stringify(probe).includes('synthetic-github-credential-value'), false);
+
+  const neonProbe = await vault.testAccountConnection('dinilmusick', 'neon', 'PRIMARY');
+  assert.equal(neonProbe.ok, true);
+  assert.equal(neonProbe.authVerified, true);
+  assert.equal(neonProbe.summary, 'Verified Neon account (dev@neon.example).');
+  assert.equal(JSON.stringify(neonProbe).includes('synthetic-neon-credential-value'), false);
+
+  const vercelProbe = await vault.testAccountConnection('dinilmusick', 'vercel', 'PROD');
+  assert.equal(vercelProbe.ok, true);
+  assert.equal(vercelProbe.authVerified, true);
+  assert.equal(vercelProbe.summary, 'Verified Vercel account @dinil-vercel.');
+  assert.equal(JSON.stringify(vercelProbe).includes('synthetic-vercel-credential-value'), false);
 });
 
 test('provider-specific compute probes validate authenticated payloads and distinguish reachability vs auth vs compute support', async () => {
