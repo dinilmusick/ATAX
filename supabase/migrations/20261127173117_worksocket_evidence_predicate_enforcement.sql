@@ -116,7 +116,14 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_verify_result_claimed(uuid,text,uuid,boolean,jsonb)'),
-        $old$declare task_out public.tasks; begin update public.tasks set verification_claimed_by_agent_id=null,verification_claim_token=null,verification_claim_expires_at=null where id=task_id_in and verification_status='pending' and verification_claimed_by_agent_id=verifier_agent_id_in and verification_claim_token=verification_claim_token_in and verification_claim_expires_at>now(); if not found then raise exception 'verification claim missing, expired, or owned by another verifier'; end if; return public.task_ledger_verify_result(task_id_in,verifier_agent_id_in,verified_in,coalesce(verification_report_in,'{}'::jsonb)); end; $old$,
+        $old$declare task_out public.tasks;
+begin
+ update public.tasks set verification_claimed_by_agent_id=null,verification_claim_token=null,verification_claim_expires_at=null
+ where id=task_id_in and verification_status='pending' and verification_claimed_by_agent_id=verifier_agent_id_in
+ and verification_claim_token=verification_claim_token_in and verification_claim_expires_at>now();
+ if not found then raise exception 'verification claim missing, expired, or owned by another verifier'; end if;
+ return public.task_ledger_verify_result(task_id_in,verifier_agent_id_in,verified_in,coalesce(verification_report_in,'{}'::jsonb));
+end;$old$,
         $new$declare task_out public.tasks;
 begin
   PERFORM 1 FROM public.tasks
