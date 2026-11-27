@@ -56,6 +56,21 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_goal_get', 'Read a canonical goal by readable key', 'atax:read', one('get goal', {goal_key:S.text('Goal key')}, ['goal_key']), (a,db) => db.rpc('goal_ledger_get_by_key',{goal_key_in:a.goal_key})),
   tool('atax_goal_resume', 'Return persisted goal state, dependencies, task checkpoints and progress by key', 'atax:read', one('resume goal', {goal_key:S.text('Canonical goal key')}, ['goal_key']), (a,db)=>db.rpc('goal_ledger_resume_by_key',{goal_key_in:a.goal_key})),
   tool('atax_task_suitability', 'Return deterministic, explainable worker suitability for a task; suitability never authorizes a claim', 'atax:read', one('task suitability',{task_id:S.text('Task UUID',36),limit:S.int('Maximum candidates',1,30)},['task_id']), (a,db,p)=>db.rpc('atax_worker_suitability_v1',{task_id_in:a.task_id,requested_by_actor_in:p.id,limit_in:a.limit??10})),
+  tool('atax_worker_intelligence_profile_set', 'Upsert the authenticated principal suitability profile; self-reported signals never grant authority', 'atax:write', one('worker intelligence profile',{
+    display_name:S.text('Display name',160),
+    agent_type:S.text('Profile role label',80),
+    declared_capabilities:{type:'array',items:S.text('Suitability capability',80),maxItems:50},
+    domain_affinities:{type:'object'},
+    tool_familiarity:{type:'array',items:S.text('Tool familiarity',120),maxItems:100},
+    resource_capacity:{type:'object'},
+    model_families:{type:'array',items:S.text('Model family',100),maxItems:50},
+    notes:{type:'object'}
+  }), (a,db,p)=>db.rpc('atax_worker_intelligence_profile_upsert_v1',{
+    actor_id_in:p.id,display_name_in:a.display_name??null,agent_type_in:a.agent_type??'mcp-external',
+    declared_capabilities_in:a.declared_capabilities??[],domain_affinities_in:a.domain_affinities??{},
+    tool_familiarity_in:a.tool_familiarity??[],resource_capacity_in:a.resource_capacity??{},
+    model_families_in:a.model_families??[],notes_in:a.notes??{}
+  })),
   tool('atax_goal_blockers', 'Return active checkpoint blockers for a goal', 'atax:read', one('goal blockers',{goal_key:S.text('Goal key')},['goal_key']), (a,db)=>db.rpc('goal_ledger_blocker_overview',{goal_key_in:a.goal_key})),
   tool('atax_system_improvement', 'Inspect ATAX system self-improvement context without creating a resident agent', 'atax:read', one('improvement',{system_id:S.text('System UUID',36)},['system_id']), (a,db)=>db.rpc('system_improvement_context',{system_id_in:a.system_id})),
   tool('atax_goal_create_bounded', 'Create a governed bounded goal and 1-4 finite tasks using the canonical Supabase transaction', 'atax:write', one('create bounded goal',{system_key:S.text('Canonical System key',120),title:S.text('Goal title',200),description:S.text('Description',4000),context:{type:'object'},instructions:S.text('Execution instructions',4000),acceptance_criteria:{type:'array',items:S.text('Acceptance criterion',800),minItems:1,maxItems:4},tags:{type:'array',items:S.text('Tag',80),maxItems:20},goal_loop_definition:{type:'object'},task_definitions:{type:'array',items:{type:'object'},minItems:1,maxItems:4},metadata:{type:'object'}},['system_key','title','description','acceptance_criteria','goal_loop_definition','task_definitions']), (a,db,p)=>db.rpc('atax_goal_create_system_bounded',{system_key_in:a.system_key,title_in:a.title,description_in:a.description,context_in:a.context??{},instructions_in:a.instructions??'',acceptance_criteria_in:a.acceptance_criteria,tags_in:a.tags??[],goal_loop_definition_in:a.goal_loop_definition,task_definitions_in:a.task_definitions,created_by_agent_id_in:p.id,metadata_in:{...(a.metadata??{}),request_mode:'work',work_modality:'feature'}})),
