@@ -55,11 +55,12 @@ const TOOLS = [...computeTools, ...inferenceTools,
     const scoreMatch=(parts)=>{const hay=String(parts.filter(Boolean).join(' ')).toLowerCase();return [...tokens].reduce((n,t)=>n+(hay.includes(t)?1:0),0);};
     const systems=(context?.systems||[]).map(s=>({...s,score:scoreMatch([s.system_key,s.name,s.system_type])})).filter(x=>!a.system_key||x.system_key===a.system_key).sort((x,y)=>y.score-x.score||Number(y.work_priority||0)-Number(x.work_priority||0)).slice(0,8);
     const goals=(context?.goals||[]).map(g=>({...g,score:scoreMatch([g.goal_key,g.name,g.status])})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||Number(y.user_priority||0)-Number(x.user_priority||0)).slice(0,8);
+    const safeRequest=async (query)=>{try{return await db.request(query);}catch(e){console.warn('[mcp:strategy:graph-read]',e instanceof Error?e.message:String(e));return [];}};
     const [visions,targets,edges,tasks]=await Promise.all([
-      db.request('visions?select=id,vision_key,title,description,status,updated_at&order=updated_at.desc&limit=40'),
-      db.request('vision_targets?select=id,vision_id,parent_target_id,label,target,created_at&order=created_at.desc&limit=80'),
-      db.request('vision_target_goals?select=vision_target_id,goal_id,created_at&limit=160'),
-      db.request('tasks?select=id,task_key,goal_id,task_name,status,priority,verification_status,updated_at&order=updated_at.desc&limit=120')
+      safeRequest('visions?select=id,vision_key,title,description,status,updated_at&order=updated_at.desc&limit=40'),
+      safeRequest('vision_targets?select=id,vision_id,parent_target_id,label,target,created_at&order=created_at.desc&limit=80'),
+      safeRequest('vision_target_goals?select=vision_target_id,goal_id,created_at&limit=160'),
+      safeRequest('tasks?select=id,task_key,goal_id,task_name,status,priority,verification_status,updated_at&order=updated_at.desc&limit=120')
     ]);
     const candidateVisions=(visions||[]).map(v=>({...v,score:scoreMatch([v.vision_key,v.title,v.description])})).filter(v=>v.score>0).sort((x,y)=>y.score-x.score).slice(0,8);
     const candidateTargets=(targets||[]).filter(t=>candidateVisions.some(v=>v.id===t.vision_id)||scoreMatch([t.label,JSON.stringify(t.target)])>0).slice(0,12);
