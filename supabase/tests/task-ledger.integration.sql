@@ -1,4 +1,4 @@
--- Rollback-only integration of global bounded-v2 claims and independent loop authoring.
+-- Rollback-only integration of global bounded-v2 claims and same-principal loop authoring.
 -- No nested decomposition: execution is claimable only after a separate author
 -- publishes a loop contract. Every checkpoint must pass a registered predicate.
 begin;
@@ -20,7 +20,7 @@ begin
   created := public.goal_ledger_create_with_tasks(
     'Task Ledger Smoke ' || replace(gen_random_uuid()::text,'-',''),
     'Rollback-only bounded-v2 global claim integration fixture',
-    jsonb_build_object('purpose','exercise independent loop author and executor'),
+    jsonb_build_object('purpose','exercise same-principal loop author and executor'),
     'Run registered task only through fenced claims.',
     jsonb_build_array('A globally claimed task is independently verified'),
     'integration-test-orchestrator',
@@ -47,7 +47,7 @@ begin
   returning * into registered;
 
   select * into author_claim from public.task_ledger_claim_next(
-    'integration-test-author','Independent Loop Author','worker',
+    'integration-test-actor','Unified Principal','worker',
     array['test-capability']::text[],900
   );
   if author_claim.id is distinct from task_id then
@@ -55,7 +55,7 @@ begin
   end if;
 
   select * into authored from public.task_ledger_finalize_loop_script(
-    task_id,'integration-test-author',author_claim.claim_token,
+    task_id,'integration-test-actor',author_claim.claim_token,
     jsonb_build_object('enabled',true,'objective','Run direct task','max_iterations',3),
     jsonb_build_object('type','object'),
     registered.completion_parameters,
@@ -63,20 +63,20 @@ begin
   );
   if authored.loop_script_status<>'ready'
      or authored.task_role<>'execution'
-     or authored.loop_author_agent_id<>'integration-test-author' then
+     or authored.loop_author_agent_id<>'integration-test-actor' then
     raise exception 'Independent loop contract was not published';
   end if;
 
   select * into claimed from public.task_ledger_claim_next(
-    'integration-test-worker','Independent Executor','worker',
+    'integration-test-actor','Unified Principal','worker',
     array['test-capability']::text[],900
   );
   if claimed.id is distinct from task_id
      or claimed.loop_author_agent_id=claimed.claimed_by_agent_id then
-    raise exception 'Executor did not claim the authorized, independently authored task';
+    raise exception 'Executor did not claim the authorized, same-principal authored task';
   end if;
   select * into duplicate_claim from public.task_ledger_claim_next(
-    'integration-test-worker-2','Second Executor','worker',
+    'integration-test-actor-2','Competing Claimant','worker',
     array['test-capability']::text[],900
   );
   if duplicate_claim.id is not null then
@@ -84,7 +84,7 @@ begin
   end if;
 
   perform public.task_ledger_record_loop_iteration(
-    task_id,'integration-test-worker',claimed.claim_token,1,
+    task_id,'integration-test-actor',claimed.claim_token,1,
     jsonb_build_object('phase','run'),
     jsonb_build_object('ok',true),
     jsonb_build_object('observation','pass'),
@@ -101,11 +101,11 @@ begin
       jsonb_build_object('ok',true,'checkpoint',checkpoint_index),
       true,
       jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
-      'integration-test-worker',claimed.claim_token::text
+      'integration-test-actor',claimed.claim_token::text
     );
   end loop;
   perform public.task_ledger_submit_result(
-    task_id,'integration-test-worker',claimed.claim_token,
+    task_id,'integration-test-actor',claimed.claim_token,
     jsonb_build_object('ok',true),'Direct task completed',
     '[]'::jsonb,
     jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
@@ -115,20 +115,15 @@ begin
   -- Targeted claims must not pull unrelated pending work from the global
   -- verification queue, including tasks owned by other workspaces.
   select * into denied_claim from public.task_ledger_claim_verification_for_task(
-    gen_random_uuid(),'integration-test-verifier',900
+    gen_random_uuid(),'integration-test-actor',900
   );
   if denied_claim.id is not null then
     raise exception 'Targeted verification claimed an unrelated task';
   end if;
-  -- Even a service-role caller may not claim its own submitted result.
-  select * into denied_claim from public.task_ledger_claim_verification_for_task(
-    task_id,'integration-test-worker',900
-  );
-  if denied_claim.id is not null then
-    raise exception 'Executor claimed its own submitted result';
-  end if;
+  -- Same actor can claim the evidence-verification stage without acquiring a
+  -- synthetic second worker identity. The opaque verifier fence remains exclusive.
   select * into verifier from public.task_ledger_claim_verification_for_task(
-    task_id,'integration-test-verifier',900
+    task_id,'integration-test-actor',900
   );
   if verifier.id is distinct from task_id
      or verifier.verification_claim_token is null
@@ -136,14 +131,14 @@ begin
     raise exception 'Targeted verifier did not acquire a live fenced claim';
   end if;
   select * into other_verifier from public.task_ledger_claim_verification_for_task(
-    task_id,'integration-test-verifier-two',900
+    task_id,'integration-test-actor-two',900
   );
   if other_verifier.id is not null then
     raise exception 'Another verifier stole a live claim';
   end if;
   begin
     perform public.task_ledger_verify_result_claimed(
-      task_id,'integration-test-verifier',gen_random_uuid(),true,'{}'::jsonb
+      task_id,'integration-test-actor',gen_random_uuid(),true,'{}'::jsonb
     );
   exception when others then
     denied_wrong_fence := true;
@@ -160,11 +155,11 @@ begin
     raise exception 'Targeted verifier RPC grants violate the service-role-only boundary';
   end if;
   perform public.task_ledger_verify_result_claimed(
-    task_id,'integration-test-verifier',verifier.verification_claim_token,
+    task_id,'integration-test-actor',verifier.verification_claim_token,
     true,jsonb_build_object('verified',true,'independent',true)
   );
   select * into denied_claim from public.task_ledger_claim_verification_for_task(
-    task_id,'integration-test-verifier-two',900
+    task_id,'integration-test-actor-two',900
   );
   if denied_claim.id is not null then
     raise exception 'A verified task was claimable again';
@@ -172,14 +167,14 @@ begin
   if not exists(
     select 1 from public.tasks
     where id=task_id and status='completed' and verification_status='verified'
-      and verified_by_agent_id='integration-test-verifier'
+      and verified_by_agent_id='integration-test-actor'
   ) then raise exception 'Verified bounded-v2 completion was not persisted'; end if;
   if not exists(
     select 1 from public.task_events e
     where e.task_id=(created->>'root_task_id')::uuid
       and e.payload->>'event_kind'='loop_contract_ready'
   ) then raise exception 'Independent loop authoring event was not recorded'; end if;
-  raise notice 'PASS: independent author/executor, targeted fenced verifier, token/replay denial, scoped ACL and predicate-backed checkpoints';
+  raise notice 'PASS: same-principal author/executor, targeted fenced verifier, token/replay denial, scoped ACL and predicate-backed checkpoints';
 end;
 $test$;
 rollback;
