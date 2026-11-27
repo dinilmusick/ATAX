@@ -113,6 +113,11 @@ BEGIN
       ),
       (
         to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
+        $old$if t.status='running' and (t.claim_token is null or t.claim_expires_at<=statement_timestamp() or t.claimed_by_agent_id is distinct from executor_id_in or t.claim_token::text is distinct from fencing_token_in) then raise exception 'Active task socket requires valid checkpoint predicate fencing'; end if;$old$,
+        $new$if t.status<>'running' or t.claim_token is null or t.claim_expires_at<=statement_timestamp() or t.claimed_by_agent_id is distinct from executor_id_in or t.claim_token::text is distinct from fencing_token_in then raise exception 'Active task claim required to record a checkpoint predicate'; end if;$new$
+      ),
+      (
+        to_regprocedure('public.record_checkpoint_predicate_result(uuid,smallint,text,integer,jsonb,jsonb,boolean,jsonb,text,text)'),
         $old$  if not exists (
     select 1 from public.completion_predicates
     where predicate_key=predicate_key_in and version=predicate_version_in
