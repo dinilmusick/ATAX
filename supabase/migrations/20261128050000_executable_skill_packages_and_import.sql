@@ -157,7 +157,7 @@ as $function$
   limit 1;
 $function$;
 
-create or replace function public.atax_mcp_skills_search_v1(query_in text)
+create or replace function public.atax_mcp_skills_search_v2(query_in text)
 returns setof jsonb
 language sql
 stable
