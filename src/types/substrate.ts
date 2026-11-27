@@ -323,6 +323,15 @@ export interface WorkSocketAuditEvent {
   occurredAt: string | null;
 }
 
+export interface WorkSocketAuthoritySummary {
+  parentTaskId: string | null;
+  allowedSocketCapabilities: string[];
+  allowedToolScopes: string[];
+  repositoryScope: string[];
+  resourceScope: Record<string, unknown>;
+  authorityVersion: number;
+}
+
 export interface WorkSocketTaskRecord {
   id: string;
   taskKey: string;
@@ -341,6 +350,7 @@ export interface WorkSocketTaskRecord {
   requiredCapabilities: string[];
   occupancy: TaskOccupancyInfo;
   budget: WorkSocketBudgetSummary | null;
+  authority: WorkSocketAuthoritySummary | null;
   nextContextOffset: number;
   childCount: number;
   predicates: WorkSocketPredicateReceipt[];
