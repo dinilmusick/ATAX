@@ -109,6 +109,7 @@ export interface SettingsStatusResponse {
     cloudflare: boolean;
     neon: boolean;
     vercel: boolean;
+    supabase: boolean;
   };
 }
 
