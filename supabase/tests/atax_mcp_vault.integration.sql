@@ -63,17 +63,17 @@ BEGIN
     'synthetic_admin');
   ident:=public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','github','PRIMARY','synthetic-github-primary-123456',
-    'synthetic_admin',NULL,true);
+    'synthetic_owner',NULL,true);
   IF ident IS NULL THEN RAISE EXCEPTION 'Vault credential insert failed'; END IF;
   PERFORM public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','github','WORK','synthetic-github-work-123456',
-    'synthetic_admin','work-org',true);
+    'synthetic_owner','work-org',true);
   PERFORM public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','cloudflare','PRIMARY','synthetic-cloudflare-primary-123456',
-    'synthetic_admin','cf-primary',true);
+    'synthetic_owner','cf-primary',true);
   PERFORM public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','cloudflare','WORK','synthetic-cloudflare-work-123456',
-    'synthetic_admin','cf-work',true);
+    'synthetic_owner','cf-work',true);
 
   SELECT public.atax_mcp_provider_summary_v1('synthetic_owner') INTO obj;
   IF jsonb_array_length(obj)<>4 OR NOT (obj @> '[{"provider":"github","alias":"PRIMARY"},{"provider":"github","alias":"WORK"},{"provider":"cloudflare","alias":"PRIMARY"},{"provider":"cloudflare","alias":"WORK"}]'::jsonb) THEN
@@ -94,7 +94,7 @@ BEGIN
   THEN RAISE EXCEPTION 'Socket policy leaked maintainer credentials'; END IF;
   PERFORM public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','github','PRIMARY','rotated-synthetic-token-1234567890',
-    'synthetic_admin',NULL,true);
+    'synthetic_owner',NULL,true);
   SELECT public.atax_mcp_runtime_config_v1() INTO obj;
   IF NOT (obj->'accounts' @> '[{"provider":"github","alias":"PRIMARY","token":"rotated-synthetic-token-1234567890"}]'::jsonb)
   THEN RAISE EXCEPTION 'Vault rotation not effective'; END IF;
@@ -110,11 +110,24 @@ BEGIN
 
   PERFORM public.atax_mcp_upsert_provider_v1(
     'synthetic_owner','github','WORK','rotated-github-work-123456',
-    'synthetic_admin','work-org',true);
+    'synthetic_owner','work-org',true);
   SELECT public.atax_mcp_runtime_config_v1() INTO obj;
   IF NOT (obj->'accounts' @> '[{"provider":"github","alias":"WORK","token":"rotated-github-work-123456"}]'::jsonb) THEN
     RAISE EXCEPTION 'GitHub WORK rotation/reenable failed';
   END IF;
+
+  PERFORM public.atax_mcp_upsert_provider_v1(
+    'synthetic_owner','neon','PRIMARY','synthetic-neon-token-123456',
+    'synthetic_owner','org-123',true);
+  PERFORM public.atax_mcp_upsert_provider_v1(
+    'synthetic_owner','vercel','PRIMARY','synthetic-vercel-token-123456',
+    'synthetic_owner','team_123',true);
+  PERFORM public.atax_mcp_set_provider_enabled_v1(
+    'synthetic_owner','neon','PRIMARY',false,'synthetic_owner');
+  PERFORM public.atax_mcp_delete_provider_v1(
+    'synthetic_owner','neon','PRIMARY','synthetic_owner');
+  PERFORM public.atax_mcp_delete_provider_v1(
+    'synthetic_owner','vercel','PRIMARY','synthetic_owner');
 
   BEGIN
     PERFORM public.atax_mcp_provider_summary_v1('attacker_owner');
@@ -135,7 +148,7 @@ BEGIN
   BEGIN
     PERFORM public.atax_mcp_upsert_provider_v1(
       'synthetic_owner','INVALID PROVIDER','PRIMARY','synthetic-invalid-token-123456',
-      'synthetic_admin',NULL,true);
+      'synthetic_owner',NULL,true);
     RAISE EXCEPTION 'Invalid provider format was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM='Invalid provider format was accepted' THEN RAISE; END IF;
