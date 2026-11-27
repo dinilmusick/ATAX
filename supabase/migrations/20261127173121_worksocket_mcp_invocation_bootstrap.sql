@@ -36,8 +36,10 @@ BEGIN
   END IF;
   SELECT pg_get_functiondef(fn) INTO source_definition;
 
-  old_fragment := $old$v_page integer; v_limit integer; v_idx text;$old$;
+  old_fragment := $old$v_page integer; v_limit integer; v_idx text;
+  v_context_cursor public.socket_context_cursors%ROWTYPE;$old$;
   new_fragment := $new$v_page integer; v_limit integer; v_idx text;
+  v_context_cursor public.socket_context_cursors%ROWTYPE;
   v_mcp_transport boolean; v_inv_created boolean:=false;$new$;
   matches := (length(source_definition)-length(replace(source_definition,old_fragment,''))) /
     greatest(length(old_fragment),1);
