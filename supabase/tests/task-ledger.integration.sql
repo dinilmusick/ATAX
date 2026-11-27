@@ -179,7 +179,67 @@ begin
     where e.task_id=(created->>'root_task_id')::uuid
       and e.payload->>'event_kind'='loop_contract_ready'
   ) then raise exception 'Independent loop authoring event was not recorded'; end if;
-  raise notice 'PASS: independent author/executor, targeted fenced verifier, token/replay denial, scoped ACL and predicate-backed checkpoints';
+
+  -- Legacy rows can sit in status='waiting' with a submitted result and a
+  -- pending verification (socket submit paths). The verifier claim queue
+  -- serves them, so the verify guard must accept them too.
+  created := public.goal_ledger_create_with_tasks(
+    'Task Ledger Waiting Verify ' || replace(gen_random_uuid()::text,'-',''),
+    'Rollback-only fixture for verification of submitted waiting tasks',
+    jsonb_build_object('purpose','exercise verify guard on waiting status'),
+    'Verify a waiting task whose result was submitted.',
+    jsonb_build_array('A submitted waiting task is verifiable'),
+    'integration-test-orchestrator',
+    jsonb_build_object(
+      'name','integration-test-waiting-task',
+      'description','Flat task submitted in waiting state',
+      'actions',jsonb_build_array(jsonb_build_object('description','Produce partial result')),
+      'general_pattern','claim → submit waiting → verify',
+      'required_capabilities',jsonb_build_array('test-capability'),
+      'acceptance_criteria',jsonb_build_array('Waiting submitted result is judged')
+    ),
+    null,'{}'::jsonb
+  );
+  task_id := (created->>'root_task_id')::uuid;
+  if task_id is null then raise exception 'Missing waiting task id'; end if;
+  update public.tasks set task_role='execution', loop_script_status='ready' where id=task_id;
+  select * into claimed from public.task_ledger_claim_next(
+    'integration-test-worker','Waiting Executor','worker',
+    array['test-capability']::text[],900
+  );
+  if claimed.id is distinct from task_id then
+    raise exception 'Waiting-state fixture task was not claimable';
+  end if;
+  perform public.task_ledger_submit_result(
+    task_id,'integration-test-worker',claimed.claim_token,
+    jsonb_build_object('ok',true),'Waiting partial submission',
+    '[]'::jsonb,
+    jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
+    'waiting'
+  );
+  if not exists(
+    select 1 from public.tasks
+    where id=task_id and status='waiting' and verification_status='not_started'
+  ) then raise exception 'Waiting submission did not persist the waiting state'; end if;
+  -- Simulate the legacy socket-submit path that marks a waiting task as
+  -- pending verification while leaving its status in waiting.
+  update public.tasks set verification_status='pending' where id=task_id;
+  select * into verifier from public.task_ledger_claim_verification_for_task(
+    task_id,'integration-test-verifier',900
+  );
+  if verifier.id is distinct from task_id then
+    raise exception 'Submitted waiting task was not claimable for verification';
+  end if;
+  perform public.task_ledger_verify_result_claimed(
+    task_id,'integration-test-verifier',verifier.verification_claim_token,
+    true,jsonb_build_object('verified',true,'waiting_path',true)
+  );
+  if not exists(
+    select 1 from public.tasks
+    where id=task_id and status='completed' and verification_status='verified'
+      and verified_by_agent_id='integration-test-verifier'
+  ) then raise exception 'Verified waiting submission was not finalized'; end if;
+  raise notice 'PASS: independent author/executor, targeted fenced verifier, token/replay denial, scoped ACL, predicate-backed checkpoints and submitted-waiting verification';
 end;
 $test$;
 rollback;
