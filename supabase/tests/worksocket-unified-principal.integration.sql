@@ -116,7 +116,8 @@ BEGIN
 
   result_task := public.task_ledger_submit_result(
     task_id,caller_id,claimed.claim_token,
-    jsonb_build_object('ok',true),'Same-principal result submitted',
+    jsonb_build_object('ok',true,'parameter_values',jsonb_build_object('evidence',jsonb_build_array('sql-test-evidence'))),
+    'Same-principal result submitted',
     '[]'::jsonb,
     jsonb_build_array(jsonb_build_object('type','sql-test','result','passed')),
     'completed'
