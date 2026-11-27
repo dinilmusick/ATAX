@@ -90,8 +90,15 @@ test('tools: list includes access-controlled read and lifecycle tools',async()=>
   for(const name of ['atax_context','atax_skill_get','atax_task_claim_next','atax_task_heartbeat','atax_task_record_checkpoint_predicate','atax_task_suitability','atax_task_submit','atax_verification_claim','atax_verification_submit'])assert.ok(names.includes(name),name);
   const reduced={...env,MCP_SHARED_SCOPES:'atax:read'};
   const filtered=await(await post('tools/list',{}, {env:reduced})).json();
-  assert.ok(filtered.result.tools.every(t=>!t.name.includes('task_')&&!t.name.includes('verification_')));
+  const reducedNames=filtered.result.tools.map(t=>t.name);
+  assert.ok(reducedNames.includes('atax_task_suitability'),'read-only suitability remains available');
+  for(const mutation of [
+    'atax_task_claim_next','atax_task_heartbeat','atax_task_record_loop',
+    'atax_task_record_checkpoint_predicate','atax_task_submit','atax_task_release',
+    'atax_verification_claim','atax_verification_submit'
+  ]) assert.ok(!reducedNames.includes(mutation),`write/verify tool leaked to read-only principal: ${mutation}`);
   assert.equal((await call('atax_task_claim_next',{}, {env:reduced})).payload.result.isError,true);
+  assert.equal((await call('atax_task_suitability',{task_id:'f5c29f36-27ba-4d6e-a6b2-a3c6757668c9'}, {env:reduced})).payload.result.isError,false);
 });
 test('canonical read invokes real named Supabase RPC and skills REST, not arbitrary SQL',async()=>{
   const before=requests.length;
