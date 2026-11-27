@@ -1,5 +1,5 @@
 -- Rollback-only integration test of the current flat bounded-v2 goal lifecycle.
--- Preserve exclusive claiming, loop evidence, independent verification, finalization and resume.
+-- Preserve exclusive claiming, loop evidence, evidence verification, finalization and resume.
 begin;
 do $test$
 declare
@@ -18,18 +18,18 @@ begin
     goal_name,'Rollback-only end-to-end direct-task goal test',
     jsonb_build_object('purpose','validate resumable bounded-v2 goal flow'),
     'Execute only the persisted direct-task contract.',
-    jsonb_build_array('One direct task is independently verified'),
+    jsonb_build_array('One direct task is evidence verified'),
     'smoke-orchestrator',
     jsonb_build_object(
       'name','Smoke direct task',
-      'description','One independently claimable bounded-v2 task',
+      'description','One evidence-basedly claimable bounded-v2 task',
       'actions',jsonb_build_array(
         jsonb_build_object('description','Run the smoke check'),
         jsonb_build_object('description','Capture reproducible test evidence')
       ),
-      'general_pattern','claim → run → observe → submit → independently verify',
+      'general_pattern','claim → run → observe → submit → evidence-basedly verify',
       'acceptance_criteria',jsonb_build_array('Smoke check passes'),
-      'verification',jsonb_build_object('required',true,'method','independent'),
+      'verification',jsonb_build_object('required',true,'method','evidence-based'),
       'loop',jsonb_build_object(
         'enabled',true,
         'objective','Pass the smoke check',
@@ -78,13 +78,13 @@ begin
     'pass','Smoke check passed'
   );
   -- Bounded-v2 completion additionally requires every registered checkpoint
-  -- to pass its own predicate with independently traceable evidence.
+  -- to pass its own predicate with evidence-basedly traceable evidence.
   for checkpoint_index in 0..jsonb_array_length(claimed.checkpoints)-1 loop
     perform public.record_checkpoint_predicate_result(
       claimed.id,
       checkpoint_index::smallint,
       'builtin.evidence_present',1,
-      jsonb_build_object('task_id',claimed.id,'checkpoint',checkpoint_index),
+      jsonb_build_object('task_id',claimed.id,'checkpoint',checkpoint_index,'evidence',jsonb_build_array('checkpoint passed')),
       jsonb_build_object('ok',true,'checkpoint',checkpoint_index),
       true,
       jsonb_build_array(jsonb_build_object(
@@ -104,13 +104,13 @@ begin
     'completed'
   );
 
-  select * into verifier from public.task_ledger_claim_verification('smoke-independent-verifier',900);
+  select * into verifier from public.task_ledger_claim_verification('smoke-worker',900);
   if verifier.id is distinct from claimed.id then
     raise exception 'Independent verifier did not claim submitted direct task';
   end if;
   perform public.task_ledger_verify_result_claimed(
-    verifier.id,'smoke-independent-verifier',verifier.verification_claim_token,
-    true,jsonb_build_object('independent',true,'method','SQL integration assertion')
+    verifier.id,'smoke-evidence-based-verifier',verifier.verification_claim_token,
+    true,jsonb_build_object('method','SQL integration assertion','evidence',jsonb_build_array('passing loop iteration','all checkpoint predicate receipts'))
   );
   if not exists(select 1 from public.tasks where id=direct_task_id
                 and status='completed' and verification_status='verified') then
@@ -125,7 +125,7 @@ begin
   if resumed->'summary'->'tasks'->>'completed'<>'1' then
     raise exception 'Resume summary incorrect: %',resumed;
   end if;
-  raise notice 'PASS: bounded-v2 goal, exclusive claim, passing loop, submission, independent verifier and finalization';
+  raise notice 'PASS: bounded-v2 goal, exclusive claim, passing loop, submission, verification caller and finalization';
 end;
 $test$;
 rollback;
