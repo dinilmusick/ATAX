@@ -73,7 +73,7 @@ For private repositories, use the agent container first and always use a disposa
 
 Required evidence flow:
 
-request → clone → validate workflows → act → tests/typecheck/build → capture evidence → independent verification → cleanup
+request → clone → validate workflows → act → tests/typecheck/build → capture evidence → evidence/predicate verification → cleanup
 
 Do not stop at private CI unavailable. Do not expose CODING_REPO_TOKEN or DEPLOYMENT_TOKEN to target workflow code.
 
@@ -83,13 +83,13 @@ When the request is explicitly an implementation push or implementation pass, do
 
 Required execution pattern:
 
-`whole-codebase re-analysis → completeness audit → reproduce/diagnose → implement/fix → rewire → focused verification → integration/runtime/E2E verification → independent verification → fresh re-analysis`
+`whole-codebase re-analysis → completeness audit → reproduce/diagnose → implement/fix → rewire → focused verification → integration/runtime/E2E verification → evidence/predicate verification → fresh re-analysis`
 
 The pass must search for and address bugs, stubs, placeholders, TODO-like incomplete behavior, disconnected interfaces, partial implementations, dead paths, broken contracts, missing error handling, missing persistence, and systems that are present in source but unreachable in the real execution flow. Continue the loop until no known implementable incompleteness remains. A report of findings without implementing the available fixes is not an implementation push completion.
 
 ## Deterministic execution bootstrap
 
-For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone the target directly; if local execution cannot satisfy the request, provision and run a disposable FMRL public repository through ATAX tools. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require independent verification before completion.
+For any substantive repository task, establish the execution substrate before editing: use a usable local container/runtime first; clone the target directly; if local execution cannot satisfy the request, provision and run a disposable FMRL public repository through ATAX tools. Discover and run all repository-defined build, test, typecheck, lint and custom build scripts that participate in the real build. Use GitHub Actions only when local execution is unavailable, insufficient for the target environment, or remote evidence is explicitly required. Capture command results as evidence and require evidence/predicate verification before completion.
 
 The canonical local preflight is `python tools/agent-bootstrap/bootstrap.py plan`; use `prepare` to establish the workspace and target checkout. Never place credentials in source, logs or task metadata.
 
@@ -110,6 +110,18 @@ Global continue/proceed is safe to send to all workers. Each worker must reread 
 ## SUBSTRATE_PROTOCOL_V3
 All agents are ephemeral workers. Supabase is canonical coordination state; chat is not durable state. Before acting, load the current Task Ledger and the narrowest applicable specialist skill. Persist every meaningful checkpoint: current_step, activity, progress, discoveries, blockers, evidence and next_action.
 WORKER=discover->resolve->route->plan->persist->claim->execute->evidence->independentVerify->finalize. Claims MUST use the atomic ledger claim path. HEARTBEAT~2m->checkpoint+renew lease. OWNERSHIP_CHECK~5m->if fence is lost: append final handoff note, stop immediately, and never overwrite the new owner. Recovery is allowed after heartbeat silence>=5m; the new worker reads the task row, checkpoint and task events before continuing. Use fenced release for queued/blocked/abandoned work.
-LOOPS=separateAuthor->readyContract->independentExecutor. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
+LOOPS=readyContract->samePrincipalMayExecute. A loop-authoring worker defines and validates success parameters/checkpoints, persists the loop contract, then releases/requeues the task. It MUST NOT execute the resulting task. An execution worker may claim only a ready contract authored by another agent and MUST execute against those persisted parameters. No worker may redefine its own success conditions. Verification is independent.
 CODING=GitHubIssueCanonicalExecutionState; one independent coding task->one worker->one Issue->one PR. ASYNC=started->wait/poll->inspect->repair/retry->poll->verify; never stop while a started/pollable process remains. OBSTACLE=normalize->semanticSearch->reuseOrCreate->record->resolve->verify. Never keep essential context only in chat or secrets in task records/logs.
 SKILL TIMING: use this skill when its trigger matches; load supporting skills before their required action, not after. Prefer the narrowest specialist skill plus only necessary support skills. If the substrate changes, update the canonical Supabase skill and repository copy, then independently verify parity.
+
+
+## WorkSocket unified-principal policy — 2026-11-27 (supersedes older identity-separation text)
+
+- The authenticated ATAX principal may act as orchestrator, loop author, executor, atomizer, verifier and finalizer. These are lifecycle roles, not mutually exclusive identities.
+- Do not require a second worker ID, agent ID, chat, session, model or tool caller merely to claim/execute/verify work. Do not fabricate agent identities or add caller-supplied identity overrides.
+- Claim eligibility is based on goal/System scope, task state, dependencies, declared capabilities and required ready loop contracts. The same principal that created the goal or authored the loop may claim the task after the contract is ready.
+- Actor/session values remain authenticated attribution and fencing inputs. Preserve the live task claim token, lease expiry, task generation, exact task/resource binding, MCP tool scopes, capability grants, budgets, context quota and append-only audit.
+- A child inherits a subset of parent authority: resource/repository scope, capabilities, tool grants, context and every budget. Reject any child request that widens these values.
+- Verification is an evidence/acceptance stage, not an agent-separation rule. The same principal may enter it. A bare caller boolean or self-assertion is insufficient: use server-evaluated registered predicates, durable task/loop evidence, exact artifact/CI receipts where applicable, and live verification fencing.
+- A distinct external CI run, reproducible artifact or automated predicate may provide additional evidence, but it is not represented as a fabricated worker identity.
+- Context exhaustion stops ordinary execution and requires canonical atomization or terminal failure. Stale cursors, expired claims and replayed mutations remain rejected.
