@@ -24,13 +24,15 @@ BEGIN
       ),
       (
         to_regprocedure('public.task_ledger_release_claim(uuid,text,uuid,text,text)'),
-        $old$status=release_status_in,claimed_by_agent_id=null,claimed_by_agent_name=null,claim_token=null$old$,
-        $new$status=release_status_in,claimed_by_agent_id=null,claimed_by_agent_name=null,claimed_session_id=null,claim_token=null$new$
+        $old$status=release_status_in, claimed_by_agent_id=null, claimed_by_agent_name=null,
+      claim_token=null$old$,
+        $new$status=release_status_in, claimed_by_agent_id=null, claimed_by_agent_name=null,
+      claimed_session_id=null, claim_token=null$new$
       ),
       (
         to_regprocedure('public.task_ledger_submit_result(uuid,text,uuid,jsonb,text,jsonb,jsonb,text)'),
-        $old$claim_expires_at=null,claim_token=null$old$,
-        $new$claimed_session_id=null,claim_expires_at=null,claim_token=null$new$
+        $old$claim_expires_at=NULL,claim_token=NULL$old$,
+        $new$claimed_session_id=NULL,claim_expires_at=NULL,claim_token=NULL$new$
       )
     ) AS changes(signature,old_fragment,new_fragment)
   LOOP
@@ -55,4 +57,3 @@ $migration$;
 
 COMMENT ON FUNCTION public.task_ledger_claim_next(text,text,text,text[],integer) IS
 'Atomic global task claim for authenticated ATAX callers. claimed_session_id is bound to the authenticated principal used by the MCP socket gateway; no separate worker identity is required.';
-
