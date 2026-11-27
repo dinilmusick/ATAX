@@ -406,6 +406,8 @@ export function createVaultService(
     const probeSpecs: Record<string, { url: string; method: 'GET' | 'POST'; body?: string; authStyle?: 'bearer' | 'goog' | 'anthropic' }> = {
       github: { url: 'https://api.github.com/user', method: 'GET' },
       cloudflare: { url: 'https://api.cloudflare.com/client/v4/user/tokens/verify', method: 'GET' },
+      neon: { url: 'https://console.neon.tech/api/v2/users/me', method: 'GET' },
+      vercel: { url: 'https://api.vercel.com/v2/user', method: 'GET' },
       fly: { url: 'https://api.machines.dev/v1/apps?org_slug=personal', method: 'GET' },
       northflank: { url: 'https://api.northflank.com/v1/projects', method: 'GET' },
       koyeb: { url: 'https://app.koyeb.com/v1/apps', method: 'GET' },
@@ -515,6 +517,34 @@ export function createVaultService(
           checkedAt: new Date().toISOString(),
           apiReachable: true,
           authVerified: cfStatus === 'active',
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'neon' && data && (typeof (data as Record<string, unknown>).id === 'string' || typeof (data as Record<string, unknown>).email === 'string')) {
+        const label = String((data as Record<string, unknown>).email || (data as Record<string, unknown>).login || (data as Record<string, unknown>).id);
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Neon account (${label}).`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
+          computeSupported,
+          inferenceSupported,
+        };
+      } else if (provider === 'vercel' && data && typeof ((data as Record<string, any>).user?.username ?? (data as Record<string, any>).user?.email ?? (data as Record<string, any>).username) === 'string') {
+        const u = (data as Record<string, any>).user ?? (data as Record<string, any>);
+        result = {
+          ok: true,
+          provider,
+          alias,
+          statusCode: res.status,
+          summary: `Verified Vercel account @${String(u.username || u.email || u.id)}.`,
+          checkedAt: new Date().toISOString(),
+          apiReachable: true,
+          authVerified: true,
           computeSupported,
           inferenceSupported,
         };
