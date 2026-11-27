@@ -431,8 +431,27 @@ async function mergePullRequest(a,_db,p,ctx){
     ...(a.sha?{sha:String(a.sha).trim()}:{}),
   };
   const url=`${API}/repos/${repo}/pulls/${a.pull_number}/merge`;
-  const data=requireOk(await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body}),'GitHub pull request merge');
-  return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:Boolean(data.merged),sha:data.sha,message:data.message};
+  const res=await githubRequest(ctx.fetcher,url,selected.token,{method:'PUT',body});
+  if(res.ok){
+    const data=res.data||{};
+    return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:Boolean(data.merged),sha:data.sha,message:data.message};
+  }
+  if(res.status!==403&&res.status!==405){
+    throw new Error(`GitHub pull request merge failed (HTTP ${res.status})`);
+  }
+  const pr=requireOk(await githubRequest(ctx.fetcher,`${API}/repos/${repo}/pulls/${a.pull_number}`,selected.token),'GitHub pull request lookup');
+  if(pr.state!=='open')throw new Error(`Pull request #${a.pull_number} is not open`);
+  if(a.sha&&pr.head?.sha!==String(a.sha).trim())throw new Error('Pull request head SHA mismatch');
+  const base=String(pr.base?.ref||'').trim();
+  const head=String(pr.head?.sha||pr.head?.ref||'').trim();
+  if(!base||!head)throw new Error('Pull request missing base or head ref');
+  const commit_message=a.commit_title?String(a.commit_title).trim():`${pr.title||`Merge pull request #${a.pull_number}`} (#${a.pull_number})`;
+  const mergeRes=await githubRequest(ctx.fetcher,`${API}/repos/${repo}/merges`,selected.token,{method:'POST',body:{base,head,commit_message}});
+  if(mergeRes.status===204){
+    return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:true,sha:pr.head?.sha||null,message:'Base branch already contains pull request head',fallback:'branch_merge'};
+  }
+  const mergeData=requireOk(mergeRes,'GitHub branch merge fallback');
+  return {operation:'pull_request_merge',account:selected.alias,repository:repo,pull_number:a.pull_number,merged:true,sha:mergeData.sha,message:mergeData.commit?.message||commit_message,fallback:'branch_merge'};
 }
 export const githubTools=[
   tool('atax_github_workflows_guide',
@@ -484,6 +503,6 @@ export const githubTools=[
     'List Pull Requests on a GitHub repository filtered by state (open, closed, or all).',
     'atax:github:read',one('List pull requests on GitHub',{repository:s('GitHub owner/name repository',205),state:{type:'string',enum:['open','closed','all'],description:'PR state filter (default open)'},account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository']),listPullRequests),
   tool('atax_github_pull_request_merge',
-    'Merge an open Pull Request on GitHub using squash, merge, or rebase.',
+    'Merge an open Pull Request on GitHub using squash, merge, or rebase (falls back to branch merge when PAT lacks Pull requests: write).',
     'atax:github:create',one('Merge pull request on GitHub',{repository:s('GitHub owner/name repository',205),pull_number:{type:'integer',minimum:1,maximum:9007199254740991,description:'Pull request number'},merge_method:{type:'string',enum:['squash','merge','rebase'],description:'Merge method (default squash)'},commit_title:s('Optional merge commit title',300),sha:s('Optional expected head SHA for safe merge',40),account:{type:'string',maxLength:48,description:'Named GH_KEY_<ALIAS> credential'}},['repository','pull_number']),mergePullRequest),
 ];
