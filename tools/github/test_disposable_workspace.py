@@ -370,6 +370,15 @@ class FmrlTests(unittest.TestCase):
         self.assertIn("state=receipts[-1] if receipts", runner)
         self.assertIn("throw new Error('Direct CI failed: '+name+' exit='+r.status)", runner)
 
+    def test_typescript_location_receipts_are_fixed_format_redacted_and_bounded(self):
+        runner = (ROOT / "disposable_workspace.py").read_text()
+        controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()
+        self.assertIn("FMRL TypeScript locations:", runner)
+        self.assertIn("FMRL TypeScript locations:", controller)
+        self.assertIn("(TS[0-9]{4}) (.{1,180})$", runner)
+        self.assertIn("len(relayed)>=8", runner)
+        self.assertIn("'[redacted]'", runner)
+
     def test_frnes_verifier_exception_class_receipt_is_closed_enum(self):
         runner = (ROOT / "disposable_workspace.py").read_text()
         controller = (ROOT.parent.parent / ".github/workflows/private-repo-ci.yml").read_text()

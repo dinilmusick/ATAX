@@ -277,9 +277,13 @@ jobs:
                           summary="$(sed -E 's/^[^ ]*Z //' "$safe_log" \
                             | grep -E '^(FMRL coverage:|FMRL direct suite:|FMRL failure categories:|FMRL failing gate:|FMRL TypeScript codes:|FMRL TypeScript locations:|FMRL Skipo rule IDs:|FMRL Skipo migration categories:|FMRL dependency migration categories:|FMRL lockfile parse cause:|FMRL Frnes diagnostic state:|FMRL Frnes verifier JSON:|FMRL Frnes exception class:|FMRL last observed nested script:|Nested failure categories:|Safe error identifiers:)' \
                             | tail -n 16 || true)"
-                          if grep -Eq '\\.(tsx?|mts|cts):[0-9]+:[0-9]+.*TS(2322|2367)' "$safe_log"; then
-                            locations="$(grep -E '\\.(tsx?|mts|cts):[0-9]+:[0-9]+.*TS(2322|2367)' "$safe_log" \
-                              | sed -E 's/.*([^ ]+\\.(tsx?|mts|cts)):[0-9]+:([0-9]+).*TS(2322|2367).*/\\1:\\3 TS\\4/' \
+                          ts_loc_res='([^ ]+[.](tsx?|mts|cts)):([0-9]+):[0-9]+:?.*TS(2304|2305|2307|2322|2339|2367)'
+                          ts_loc_paren='([^ ]+[.](tsx?|mts|cts))[(]([0-9]+),[0-9]+[)]:?.*TS(2304|2305|2307|2322|2339|2367)'
+                          if grep -Eq "$ts_loc_res|$ts_loc_paren" "$safe_log"; then
+                            locations="$( { grep -E "$ts_loc_res" "$safe_log" \
+                              | sed -E -n -e 's/^[^ ]*Z //' -e 's/^([^ ]+[.](tsx?|mts|cts)):([0-9]+):[0-9]+:?.*TS(2304|2305|2307|2322|2339|2367).*/\1:\3 TS\4/p'; \
+                              grep -E "$ts_loc_paren" "$safe_log" \
+                              | sed -E -n -e 's/^[^ ]*Z //' -e 's/^([^ ]+[.](tsx?|mts|cts))[(]([0-9]+),[0-9]+[)]:?.*TS(2304|2305|2307|2322|2339|2367).*/\1:\3 TS\4/p'; } \
                               | head -n 8 | sed 's/^/FMRL TypeScript locations: /' || true)"
                             summary="$(printf '%s\\n%s' "$summary" "$locations" | sed '/^$/d' | tail -n 16)"
                           fi

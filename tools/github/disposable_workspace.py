@@ -363,6 +363,17 @@ jobs:
               ts_codes=sorted(set(re.findall(r'TS[0-9]{4}',output)))
               if ts_codes:
                   print('FMRL TypeScript codes: '+','.join(ts_codes[:12]))
+              locs=re.findall(
+                  r'(?m)^FMRL TypeScript locations: ([A-Za-z0-9_./@\\-]+\\.(?:tsx?|mts|cts)):([0-9]{1,5}):([0-9]{1,5}) (TS[0-9]{4}) (.{1,180})$',output)
+              relayed=set()
+              for path,line,col,ts_code,reason in locs:
+                  if (path,line,ts_code) in relayed:
+                      continue
+                  relayed.add((path,line,ts_code))
+                  safe_reason=re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|Bearer\\s+\\S+)','[redacted]',reason)
+                  print('FMRL TypeScript locations: '+path+':'+line+':'+col+' '+ts_code+' '+safe_reason)
+                  if len(relayed)>=8:
+                      break
               nested=re.findall(
                   r'^> .{1,120} (test:[A-Za-z0-9:_-]+|verify:[A-Za-z0-9:_-]+|check:[A-Za-z0-9:_-]+|build(?::[A-Za-z0-9:_-]+)?|typecheck) *$',
                   output,re.M)
