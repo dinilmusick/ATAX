@@ -60,10 +60,12 @@ export const CANONICAL_RPC_ALLOWLIST = Object.freeze(new Set([
   // Restricted Socket Gateway Transaction (1)
   'atax_socket_execute_v1',
 
-  // Skills Registry & Runtime Configuration (5)
+  // Skills Registry & Runtime Configuration (7)
   'atax_mcp_skills_search_v1',
   'atax_mcp_skill_get_v1',
   'atax_mcp_skills_catalog_v1',
+  'atax_mcp_skill_executable_spec_v2',
+  'atax_mcp_skill_register_v1',
   'atax_mcp_runtime_config_v1',
   'atax_mcp_socket_config_v1',
 ]));

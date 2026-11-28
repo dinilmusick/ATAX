@@ -234,14 +234,14 @@ test('Config 1.11: Zero secret leakage in thrown config error messages', () => {
 // 2. ALLOWLIST ENFORCEMENT (assertAllowedRpc & CANONICAL_RPC_ALLOWLIST)
 // ============================================================================
 
-test('Allowlist 2.1: Allowlist contains exactly 35 canonical functions and is frozen', () => {
-  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 35);
+test('Allowlist 2.1: Allowlist contains exactly 37 canonical functions and is frozen', () => {
+  assert.equal(CANONICAL_RPC_ALLOWLIST.size, 37);
   assert.ok(Object.isFrozen(CANONICAL_RPC_ALLOWLIST));
   assert.equal(ALLOWED_RPCS, CANONICAL_RPC_ALLOWLIST);
 });
 
-test('Allowlist 2.2: All 35 canonical ATAX functions are allowed without exception', () => {
-  const expected35 = [
+test('Allowlist 2.2: All 37 canonical ATAX functions are allowed without exception', () => {
+  const expected37 = [
     'agent_context_overview', 'atax_context_snapshot', 'system_improvement_context',
     'goal_ledger_overview', 'goal_ledger_get_by_key', 'goal_ledger_resume_by_key',
     'goal_ledger_blocker_overview', 'goal_ledger_set_priority', 'goal_ledger_add_dependency',
@@ -256,10 +256,11 @@ test('Allowlist 2.2: All 35 canonical ATAX functions are allowed without excepti
     'task_ledger_claim_verification_for_task', 'task_ledger_verify_result_claimed',
     'atax_socket_execute_v1',
     'atax_mcp_skills_search_v1', 'atax_mcp_skill_get_v1', 'atax_mcp_skills_catalog_v1',
+    'atax_mcp_skill_executable_spec_v2', 'atax_mcp_skill_register_v1',
     'atax_mcp_runtime_config_v1', 'atax_mcp_socket_config_v1',
   ];
 
-  for (const name of expected35) {
+  for (const name of expected37) {
     assert.ok(CANONICAL_RPC_ALLOWLIST.has(name), `Missing canonical function: ${name}`);
     assert.doesNotThrow(() => assertAllowedRpc(name), `Unexpected rejection of canonical function: ${name}`);
   }

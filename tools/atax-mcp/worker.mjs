@@ -28,6 +28,35 @@ const S = {
   bool: description => ({ type: 'boolean', description }),
 };
 const tool = (name, description, scope, inputSchema, invoke) => ({name, description, scope, inputSchema, invoke});
+const SKILL_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const compact = obj => Object.fromEntries(Object.entries(obj).filter(([,v]) => v !== undefined));
+const sha256Hex = async text => {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
+  return [...digest].map(b => b.toString(16).padStart(2, '0')).join('');
+};
+async function fetchSkillAsset(repository, revision, path, fetcher) {
+  if (typeof path !== 'string' || !path || path.length > 1000 || path.startsWith('/') || path.includes('..')) throw new Error('Invalid skill asset path: ' + path);
+  const url = `https://raw.githubusercontent.com/${repository}/${revision}/${path}`;
+  const response = await fetcher(url, {signal: AbortSignal.timeout(15000)});
+  if (!response.ok) throw new Error('Unable to fetch GitHub skill asset: ' + path);
+  const content = await response.text();
+  if (content.length > 5000000) throw new Error('Skill asset exceeds 5 MB: ' + path);
+  return {path, content, source_uri: url};
+}
+const skillAsset = async asset => {
+  if (!isObj(asset) || typeof asset.path !== 'string' || !asset.path || asset.path.length > 1000 || asset.path.startsWith('/') || asset.path.includes('..')) throw new Error('Invalid skill asset path.');
+  const content = typeof asset.content === 'string' ? asset.content : '';
+  if (content.length > 5000000) throw new Error('Skill asset exceeds 5 MB.');
+  return compact({
+    path: asset.path,
+    asset_type: typeof asset.asset_type === 'string' ? asset.asset_type : undefined,
+    executable: asset.executable === true,
+    mode: typeof asset.mode === 'string' ? asset.mode : undefined,
+    content,
+    source_uri: typeof asset.source_uri === 'string' ? asset.source_uri : undefined,
+    source_sha256: typeof asset.source_sha256 === 'string' ? asset.source_sha256 : await sha256Hex(content),
+  });
+};
 const ATAX_INTRO_DOCUMENTATION = {
   title: 'ATAX agent orientation',
   version: 1,
@@ -88,385 +117,28 @@ const TOOLS = [...computeTools, ...inferenceTools,
   tool('atax_verification_pending', 'List tasks awaiting independent verification', 'atax:verify', one('pending',{}), (_,db)=>db.rpc('task_ledger_pending_verification',{})),
   tool('atax_skills_search', 'Search live canonical skill registry by term', 'atax:read', one('find skills',{query:S.text('Skill name or slug',120)}, ['query']), (a,db) => db.skills(a.query)),
   tool('atax_skill_get', 'Fetch the current published canonical instructions of a skill', 'atax:read', one('read skill',{slug:S.text('Skill slug',120)}, ['slug']), (a,db) => db.skill(a.slug)),
-  tool('atax_task_claim_next', 'Atomically claim the next eligible task using caller identity', 'atax:write', one('claim task',{capabilities:{type:'array',items:S.text('Agent capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)}), (a,db,p) => db.rpc('task_ledger_claim_next',{agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],lease_seconds_in:a.lease_seconds??300})),
-  tool('atax_goal_claim_task', 'Atomically claim an eligible task within a specific goal', 'atax:write', one('claim from goal',{goal_key:S.text('Goal key'),capabilities:{type:'array',items:S.text('Capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)},['goal_key']), (a,db,p)=>db.rpc('atax_goal_claim_safe',{goal_key_in:a.goal_key,agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],session_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
-  tool('atax_task_check_claim', 'Check claim ownership and fencing token', 'atax:write', one('check claim',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('task_ledger_check_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token})),
-  tool('atax_task_handoff', 'After losing/expiring a socket lease, append a bounded, non-mutating completion/handoff note, then discover and claim other available work. This never restores the old lease.', 'atax:write', one('forfeited socket note',{task_id:S.text('Previously claimed task UUID',36),claim_token:S.text('Old fencing token UUID',36),note:S.text('What was attempted, observed results and unfinished work',3000),context:{type:'object',description:'Evidence, partial results and safe next steps; do not include secrets'}},['task_id','claim_token','note']), (a,db,p)=>db.rpc('task_ledger_record_handoff',{task_id_in:a.task_id,previous_agent_id_in:p.id,previous_claim_token_in:a.claim_token,handoff_note_in:a.note,context_in:a.context??{}})),
-  tool('atax_task_heartbeat', 'Renew a fenced task lease and record progress', 'atax:write', one('heartbeat',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),current_step:S.text('Current step',1200),lease_seconds:S.int('Lease length',60,900),heartbeat_context:{type:'object',description:'Structured progress, blockers, discoveries, next action'}},['task_id','claim_token','current_step']), (a,db,p)=>db.rpc('task_ledger_heartbeat_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,current_step_in:a.current_step,lease_seconds_in:a.lease_seconds??300,heartbeat_context_in:a.heartbeat_context??{}})),
-  tool('atax_task_record_loop', 'Persist one fenced Omni Loop iteration, observations and evidence', 'atax:write', one('loop',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),iteration_no:S.int('Iteration number',1,1000000),input_payload:S.json('Applied input'),output_payload:S.json('Observed output'),observation:S.json('Observation'),criterion_results:S.json('Criterion outcomes'),loop_state:S.json('Loop state'),tools_used:S.json('Tool evidence'),evidence:S.json('Evidence'),verdict:S.text('Verdict',120),next_action:S.text('Next action',1200)},['task_id','claim_token','iteration_no','verdict','next_action']), (a,db,p)=>db.rpc('task_ledger_record_loop_iteration',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,iteration_no_in:a.iteration_no,input_payload_in:a.input_payload??{},output_payload_in:a.output_payload??{},observation_in:a.observation??{},criterion_results_in:a.criterion_results??{},loop_state_in:a.loop_state??{},tools_used_in:a.tools_used??{},evidence_in:a.evidence??{},verdict_in:a.verdict,next_action_in:a.next_action})),
-  tool('atax_task_submit', 'Submit result and evidence for independent verification; never self-verify', 'atax:write', one('submit',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),result:S.json('Result object'),summary:S.text('Result summary',2000),tools_used:S.json('Used tools'),evidence:S.json('Verification evidence'),status:S.text('Result status',80)},['task_id','claim_token','summary']), (a,db,p)=>db.rpc('task_ledger_submit_result',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,result_in:a.result??{},result_summary_in:a.summary,tools_used_in:a.tools_used??[],evidence_in:a.evidence??[],status_in:a.status??'completed'})),
-  tool('atax_task_release', 'Release caller-owned fenced task to a valid nonterminal state', 'atax:write', one('release',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36),release_status:{type:'string',enum:['queued','blocked','abandoned']},reason:S.text('Release reason',1200)},['task_id','claim_token','release_status','reason']), (a,db,p)=>db.rpc('task_ledger_release_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token,release_status_in:a.release_status,reason_in:a.reason})),
-  tool('atax_verification_claim', 'Claim the next task pending independent verification', 'atax:verify', one('verification claim',{lease_seconds:S.int('Lease length',60,900)}), (a,db,p)=>db.rpc('task_ledger_claim_verification',{verifier_agent_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
-  tool('atax_verification_submit', 'Independently verify a submitted result under a verification claim', 'atax:verify', one('verification',{task_id:S.text('Task UUID',36),verification_claim_token:S.text('Verification claim UUID',36),verified:S.bool('Whether evidence passes'),report:{type:'object',description:'Structured independent verification evidence'}},['task_id','verification_claim_token','verified','report']), (a,db,p)=>db.rpc('task_ledger_verify_result_claimed',{task_id_in:a.task_id,verifier_agent_id_in:p.id,verification_claim_token_in:a.verification_claim_token,verified_in:a.verified,verification_report_in:a.report})),
-  tool('atax_goal_finalize', 'Finalize an independently verified goal through the guarded database RPC', 'atax:verify', one('finalize',{goal_key:S.text('Goal key'),verification_report:{type:'object',description:'Independent acceptance evidence'}},['goal_key','verification_report']), (a,db,p)=>db.rpc('goal_ledger_finalize_by_key',{goal_key_in:a.goal_key,finalized_by_agent_id_in:p.id,verification_report_in:a.verification_report})),
-  tool('atax_verification_claim_for_task', 'Claim a specific task pending independent verification by task UUID', 'atax:verify', one('claim verification for task',{task_id:S.text('Task UUID',36),lease_seconds:S.int('Lease length',60,900)},['task_id']), (a,db,p)=>db.rpc('task_ledger_claim_verification_for_task',{task_id_in:a.task_id,verifier_agent_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
-  tool('atax_socket_context_pull', 'Retrieve one bounded canonical context page for the claimed task', 'atax:write', one('context pull',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),cursor:S.text('Cursor',256),limit:S.int('Limit',1,16)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'context_pull',capability:'socket:context:read',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{cursor:a.cursor,limit:a.limit??16},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_output_submit', 'Persist bounded task output only; cannot edit a repository or any external resource', 'atax:write', one('output submit',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),output:{type:'object'},partial:S.bool('Partial output')},['task_id','claim_token','output']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'output_submit',capability:'socket:output:submit',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{output:a.output,partial:a.partial??false},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_atomisation_request', 'Request stop and fenced atomisation with a bounded partial-progress note', 'atax:write', one('atomisation request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),reason:S.text('Reason',512),partial_progress:S.text('Partial progress',3000)},['task_id','claim_token','reason']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'atomisation_request',capability:'socket:atomise:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{reason:a.reason,partial_progress:a.partial_progress??''},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_workflow_request', 'Submit a preauthorised workflow intent to the canonical transaction outbox', 'atax:write', one('workflow request',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36),workflow_key:S.text('Workflow key',64),inputs:{type:'object'}},['task_id','claim_token','workflow_key','inputs']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'workflow_request',capability:'socket:workflow:request',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{workflow_key:a.workflow_key,inputs:a.inputs},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-  tool('atax_socket_task_status', 'Retrieve minimal task state and remaining quota', 'atax:write', one('task status',{task_id:S.text('Canonical task UUID',36),claim_token:S.text('Current fenced claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('atax_socket_execute_v1',{command_in:{operation:'task_status',capability:'socket:task:status',principalId:p.id,sessionId:p.id,taskId:a.task_id,claimToken:a.claim_token,payload:{},requestWire:JSON.stringify(a),inboundTokens:Math.max(1,Math.ceil(JSON.stringify(a).length/4)),replyId:'1',maxReplyBytes:8192,budgetProfile:{modelId:'unified-mcp'}}})),
-];
-TOOLS.push(...githubTools,...providerTools,...neonTools,...vercelTools,...supabaseTools,...browserTools,...verificationTools,...visualTools);
-const byName = new Map(TOOLS.map(t=>[t.name,t]));
-const resourceDefs = [
-  {uri:'atax://documentation/intro',name:'ATAX agent introduction',mimeType:'application/json',description:'Concise strategy-first operating manual for agents'},
-  {uri:'atax://guidance/preemptive',name:'ATAX preemptive guidance',mimeType:'application/json',description:'On-demand current strategic guidance; intentionally not injected into ordinary tool responses'},
-  {uri:'atax://context/overview',name:'Canonical ATAX context',mimeType:'application/json',description:'Live Supabase context and current work'},
-  {uri:'atax://goals/overview',name:'Goal and task ledger',mimeType:'application/json',description:'Live canonical goal/task graph'},
-  {uri:'atax://skills/catalog',name:'Active skills catalogue',mimeType:'application/json',description:'Canonical Supabase skills registry'},
-  {uri:'atax://guides/github-workflows',name:'ATAX GitHub repository and disposable FMRL workflows',mimeType:'application/json',description:'Choose permanent repositories or auto-disposed FMRL control-plane dispatch; security and verification rules'},
-];
-const safeHeaders = {'cache-control':'no-store','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'"};
-function json(value,status=200,extra={}) { return new Response(JSON.stringify(value),{status,headers:{...safeHeaders,'content-type':'application/json; charset=utf-8',...extra}}); }
-const err=(id,code,message,data)=>({jsonrpc:'2.0',id,error:{code,message,...(data?{data}: {})}});
-const ok=(id,result)=>({jsonrpc:'2.0',id,result});
-const timingEq=(a,b)=>{if(a.length!==b.length)return false;let v=0;for(let i=0;i<a.length;i++)v|=a[i]^b[i];return v===0};
-const bytesFromB64Url=value=>{if(!/^[\w-]+$/.test(value))throw new Error('Invalid base64url');const raw=value.replace(/-/g,'+').replace(/_/g,'/');return Uint8Array.from(atob(raw.padEnd(Math.ceil(raw.length/4)*4,'=')),c=>c.charCodeAt(0));};
-const jwtBody=value=>JSON.parse(new TextDecoder().decode(bytesFromB64Url(value)));
-function audienceIncludes(aud, expected){
-  const expectedList=String(expected||'').split(/[\s,]+/).filter(Boolean);
-  if(!expectedList.length)return false;
-  if(typeof aud==='string')return expectedList.includes(aud);
-  return Array.isArray(aud)&&aud.some(item=>typeof item==='string'&&expectedList.includes(item));
-}
-function findMatchingJwk(jwks, head){
-  return Array.isArray(jwks?.keys)?jwks.keys.find(k=>k.kid===head.kid&&(!k.alg||k.alg===head.alg)&&(!k.use||k.use==='sig')&&(
-    (head.alg==='RS256'&&k.kty==='RSA')||
-    (head.alg==='EdDSA'&&k.kty==='OKP'&&k.crv==='Ed25519')||
-    (head.alg==='ES256'&&k.kty==='EC'&&k.crv==='P-256')
-  )):null;
-}
-async function resolveJwk(jwksUrl, head, fetcher, jwksCache){
-  const cacheKey=jwksUrl.toString();
-  const cached=jwksCache?.get(cacheKey);
-  if(cached && (Date.now()-cached.fetchedAt)<JWKS_CACHE_TTL_MS){
-    const hit=findMatchingJwk(cached.jwks,head);
-    if(hit)return hit;
-  }
-  const response=await fetcher(cacheKey,{redirect:'manual',headers:{accept:'application/json'}});
-  if(!response.ok)return null;
-  const jwks=await response.json();
-  if(jwksCache && Array.isArray(jwks?.keys)){
-    jwksCache.set(cacheKey,{jwks,fetchedAt:Date.now()});
-  }
-  return findMatchingJwk(jwks,head);
-}
-function scrubSecrets(text, env){
-  let clean=String(text);
-  for(const [key,val] of Object.entries(env||{})){
-    if(typeof val!=='string'||val.length<12)continue;
-    if(key==='FRNES_COMPUTE_ACCOUNTS_JSON'||key==='AI_INFERENCE_ACCOUNTS_JSON'){
-      try{
-        const parsed=JSON.parse(val);
-        if(Array.isArray(parsed)){
-          for(const item of parsed){
-            if(item&&typeof item.token==='string'&&item.token.length>=12){
-              clean=clean.split(item.token).join('[REDACTED]');
-            }
-          }
-        }
-      }catch{}
-      continue;
+  tool('atax_skill_executable_spec', 'Fetch the bounded executable spec of a published skill (manifest, resolved command and asset metadata) without the full instruction body', 'atax:read', one('skill executable spec',{slug:S.text('Skill slug',120)}, ['slug']), (a,db) => db.rpc('atax_mcp_skill_executable_spec_v2',{slug_in:a.slug})),
+  tool('atax_skill_register', 'Register or update a canonical skill package with provenance, manifest and hashed assets', 'atax:write', one('register skill',{name:S.text('Skill name',200),slug:S.text('Skill slug',120),instructions:S.text('Canonical skill instructions',200000),description:S.text('Description',2000),version:S.text('Version',40),source:{type:'object'},manifest:{type:'object'},assets:{type:'array',items:{type:'object'},maxItems:16},changelog:S.text('Changelog',4000),metadata:{type:'object'}},['name','slug','instructions']), async (a,db) => {
+    if(!SKILL_SLUG_RE.test(a.slug))throw new Error('Invalid skill slug.');
+    const assets=[];
+    for(const asset of a.assets??[])assets.push(await skillAsset(asset));
+    return db.rpc('atax_mcp_skill_register_v1',{payload:{name:a.name,slug:a.slug,instructions:a.instructions,...compact({description:a.description,version:a.version,source:a.source,manifest:a.manifest,changelog:a.changelog,metadata:a.metadata}),assets}});
+  }),
+  tool('atax_skill_import_github', 'Import a skill from an immutable GitHub commit: fetch SKILL.md and declared assets from raw.githubusercontent.com and register them with provenance', 'atax:write', one('import skill from github',{repository:S.text('GitHub owner/name repository',200),revision:S.text('Immutable 40-character commit SHA',40),name:S.text('Skill name',200),slug:S.text('Skill slug',120),description:S.text('Description',2000),version:S.text('Version',40),skill_path:S.text('Skill entry path',1000),license:S.text('License identifier',120),manifest:{type:'object'},asset_paths:{type:'array',items:{type:'object'},maxItems:16}},['repository','revision','name','slug']), async (a,db,_p,ctx) => {
+    if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(a.repository))throw new Error('Invalid GitHub repository.');
+    if(!/^[0-9a-f]{40}$/.test(a.revision))throw new Error('GitHub imports require an immutable 40-character commit SHA.');
+    if(!SKILL_SLUG_RE.test(a.slug))throw new Error('Invalid skill slug.');
+    const fetcher=ctx?.fetcher??fetch;
+    const skillPath=a.skill_path??'SKILL.md';
+    const skill=await fetchSkillAsset(a.repository,a.revision,skillPath,fetcher);
+    const assets=[await skillAsset({path:skill.path,asset_type:'instruction',content:skill.content,source_uri:skill.source_uri})];
+    for(const spec of a.asset_paths??[]){
+      if(!isObj(spec))throw new Error('Invalid asset path entry.');
+      const fetched=await fetchSkillAsset(a.repository,a.revision,spec.path,fetcher);
+      assets.push(await skillAsset({path:fetched.path,asset_type:spec.asset_type??'code',executable:spec.executable===true,mode:spec.mode,content:fetched.content,source_uri:fetched.source_uri}));
     }
-    if(key.startsWith('GH_KEY_')||key.startsWith('GH_TOKEN_')||key.startsWith('CF_KEY_')||key.startsWith('CLOUDFLARE_TOKEN_')||
-       key.startsWith('NEON_KEY_')||key.startsWith('NEON_TOKEN_')||key.startsWith('VERCEL_KEY_')||key.startsWith('VERCEL_TOKEN_')||
-       key.startsWith('SUPABASE_KEY_')||key.startsWith('SUPABASE_ACCESS_TOKEN_')||
-       key.startsWith('FRNES_KEY_')||key.startsWith('AI_KEY_')||key==='FRNES_SERVICE_TOKEN'||
-       key==='ATAX_SUPABASE_SECRET_KEY'||key==='SUPABASE_SERVICE_ROLE_KEY'||key==='SUPABASE_SECRET_KEY'||key==='MCP_SHARED_TOKEN_SHA256'){
-      clean=clean.split(val).join('[REDACTED]');
-    }
-  }
-  return clean;
-}
-async function authenticate(request,env, fetcher=fetch, jwksCache=null){
-  const header=request.headers.get('authorization')||'';
-  if(!/^Bearer [\x21-\x7E]{12,8192}$/.test(header))return null;
-  const token=header.slice(7);
-  if(env.MCP_SHARED_TOKEN_SHA256){
-    const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(token)));
-    const target=String(env.MCP_SHARED_TOKEN_SHA256).toLowerCase();
-    if(/^[a-f0-9]{64}$/.test(target)&&timingEq(digest,Uint8Array.from(target.match(/../g),x=>parseInt(x,16)))){
-      const id=String(env.MCP_SHARED_SUBJECT||'atax-mcp-operator');
-      if(!/^[\w.@:-]{3,120}$/.test(id))throw new Error('Invalid configured subject');
-      return {id,authMethod:'shared',scopes:new Set(String(env.MCP_SHARED_SCOPES||'atax:read').split(/\s+/))};
-    }
-  }
-  if(!env.MCP_AUTH_JWKS_URL||!env.MCP_AUTH_ISSUER||!env.MCP_AUTH_AUDIENCE)return null;
-  const parts=token.split('.'); if(parts.length!==3)return null;
-  let head,claims;
-  try {head=jwtBody(parts[0]);claims=jwtBody(parts[1]);}catch{return null;}
-  // Phase 2: Accept RFC 9068 at+jwt tokens as well as standard Supabase OAuth 2.1 JWT access tokens (typ='JWT').
-  // azp / client_id are validated when present; Supabase OAuth uses client_id and may omit azp.
-  if(!isObj(head)||!isObj(claims)||(head.typ!==undefined&&!/^(at\+)?jwt$/i.test(String(head.typ)))||!['RS256','EdDSA','ES256'].includes(head.alg)||typeof head.kid!=='string'){console.warn('[mcp:auth] bad_header',{typ:head?.typ,alg:head?.alg,hasKid:typeof head?.kid});return null;}
-  if(claims.azp!==undefined&&(typeof claims.azp!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.azp))){console.warn('[mcp:auth] bad_azp');return null;}
-  if(claims.client_id!==undefined&&(typeof claims.client_id!=='string'||!/^[A-Za-z0-9_.:-]{3,160}$/.test(claims.client_id))){console.warn('[mcp:auth] bad_client_id');return null;}
-  const now=Math.floor(Date.now()/1000);
-  const resourceUrl=new URL('/mcp',request.url).toString();
-  // Phase 2: MCP_AUTH_AUDIENCE may be 'authenticated' (Supabase OAuth default), the MCP endpoint URL,
-  // or a space/comma-separated list of accepted audiences. Also accept the RFC 8707 resource URL.
-  if(claims.iss!==env.MCP_AUTH_ISSUER){console.warn('[mcp:auth] iss_mismatch',{iss:claims.iss,expected:env.MCP_AUTH_ISSUER});return null;}
-  if(!audienceIncludes(claims.aud,env.MCP_AUTH_AUDIENCE)&&!audienceIncludes(claims.aud,resourceUrl)){console.warn('[mcp:auth] aud_mismatch',{aud:claims.aud,expected:env.MCP_AUTH_AUDIENCE,resourceUrl});return null;}
-  if(!Number.isFinite(claims.exp)||claims.exp<=now){console.warn('[mcp:auth] expired');return null;}
-  if(claims.nbf!==undefined&&(!Number.isFinite(claims.nbf)||claims.nbf>now+30)){console.warn('[mcp:auth] nbf_future');return null;}
-  if(typeof claims.sub!=='string'||!/^[\w.@:-]{3,120}$/.test(claims.sub)){console.warn('[mcp:auth] bad_sub');return null;}
-  const jwksUrl=new URL(env.MCP_AUTH_JWKS_URL);
-  if(jwksUrl.protocol!=='https:'||!jwksUrl.hostname||jwksUrl.username||jwksUrl.password)return null;
-  const issuer=new URL(env.MCP_AUTH_ISSUER);if(issuer.protocol!=='https:')return null;
-  const jwk=await resolveJwk(jwksUrl,head,fetcher,jwksCache);
-  if(!jwk){console.warn('[mcp:auth] jwk_not_found',{kid:head.kid,alg:head.alg});return null;}
-  try{
-    const algorithm=head.alg==='RS256'?{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'}:
-      head.alg==='EdDSA'?{name:'Ed25519'}:{name:'ECDSA',namedCurve:'P-256'};
-    const verifyParams=head.alg==='ES256'?{name:'ECDSA',hash:'SHA-256'}:algorithm;
-    const key=await crypto.subtle.importKey('jwk',jwk,algorithm,false,['verify']);
-    const valid=await crypto.subtle.verify(verifyParams,key,bytesFromB64Url(parts[2]),encoder.encode(parts[0]+'.'+parts[1]));
-    if(!valid){console.warn('[mcp:auth] sig_invalid',{kid:head.kid,alg:head.alg});return null;}
-  }catch(e){console.warn('[mcp:auth] verify_err',e instanceof Error?e.message:'err');return null;}
-  const scopes=new Set(String(claims.scope||'').split(/\s+/).filter(Boolean));
-  // OAuth server scopes (openid/profile/offline_access) are not ATAX capabilities.
-  // Only a pinned OAuth owner subject may receive capabilities defined by server policy.
-  // Never map all authenticated issuer accounts to the owner or verifier role.
-  if(claims.sub===String(env.MCP_ATAX_OWNER_JWT_SUBJECT||'') &&
-     typeof env.MCP_ATAX_OWNER_JWT_SUBJECT==='string' &&
-     env.MCP_ATAX_OWNER_JWT_SUBJECT.length>=3 &&
-     env.MCP_AUTH_OWNER_SCOPES) {
-    for(const scope of String(env.MCP_AUTH_OWNER_SCOPES).split(/\s+/)) {
-      if(/^atax:(read|write|verify|github:read|github:create|cloudflare:read|neon:read|neon:write|vercel:read|vercel:write|supabase:read|supabase:write|fmrl:execute)$/.test(scope))scopes.add(scope);
-    }
-  }
-  // ATAX cares about authorized work, not which app supplies the external agent.
-  // Per-task claim tokens enforce ownership without naming Claude or Gemini.
-  return {id:claims.sub,authMethod:'jwt',scopes};
-}
-function allowedOrigin(req, env){
-  const origin=req.headers.get('origin'); if(!origin)return true;
-  const allowed=String(env.MCP_ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
-  return allowed.includes(origin);
-}
-function allowedScope(principal,scope){return principal.scopes.has(scope)||principal.scopes.has('atax:admin');}
-const canonicalOwner=(principal,env)=>isOwnerPrincipal(env,principal);
-function toolAllowed(principal,env,tool){
-  // This personal server never delegates provider secrets or privileged ledger RPCs.
-  return canonicalOwner(principal,env) && allowedScope(principal,tool.scope);
-}
-function supabase(env){
-  if(!env?.__ledgerDb)throw Error('Canonical Supabase ledger unavailable');
-  return env.__ledgerDb;
-}
-async function runCall(name,args,principal,env,fetcher){
-  const match=byName.get(name);
-  if(!match)return {isError:true,content:[{type:'text',text:'Unknown tool'}]};
-  if(!toolAllowed(principal,env,match))return {isError:true,content:[{type:'text',text:'Principal or scope not authorized for this tool'}]};
-  if(!isObj(args))return {isError:true,content:[{type:'text',text:'Tool arguments must be an object'}]};
-  const schema=match.inputSchema;
-  for(const field of schema.required||[]){if(args[field]===undefined)return {isError:true,content:[{type:'text',text:'Missing required argument: '+field}]};}
-  for(const [key,val] of Object.entries(args)){
-    const spec=schema.properties[key]; if(!spec)return {isError:true,content:[{type:'text',text:'Unexpected argument: '+key}]};
-    if(spec.type==='string'&&(typeof val!=='string'||val.length<(spec.minLength??0)||val.length>(spec.maxLength??Infinity)))return {isError:true,content:[{type:'text',text:'Invalid string: '+key}]};
-    if(spec.type==='integer'&&(!Number.isInteger(val)||val<(spec.minimum??-Infinity)||val>(spec.maximum??Infinity)))return {isError:true,content:[{type:'text',text:'Invalid integer: '+key}]};
-    if(spec.type==='number'&&(typeof val!=='number'||!Number.isFinite(val)||val<(spec.minimum??-Infinity)||val>(spec.maximum??Infinity)))return {isError:true,content:[{type:'text',text:'Invalid number: '+key}]};
-    if(spec.type==='boolean'&&typeof val!=='boolean')return {isError:true,content:[{type:'text',text:'Invalid boolean: '+key}]};
-    if(spec.type==='array'&&(!Array.isArray(val)||val.length>(spec.maxItems??Infinity)||val.length<(spec.minItems??0)||val.some(x=>(spec.items?.type==='string'&&(typeof x!=='string'||x.length<(spec.items.minLength??0)||x.length>(spec.items.maxLength??Infinity)))||(spec.items?.type==='object'&&!isObj(x)))))return {isError:true,content:[{type:'text',text:'Invalid array: '+key}]};
-    if(spec.type==='object'&&!isObj(val))return {isError:true,content:[{type:'text',text:'Invalid object: '+key}]};
-    if(spec.enum&&!spec.enum.includes(val))return {isError:true,content:[{type:'text',text:'Unsupported value: '+key}]};
-  }
-  try{
-    const db=supabase(env,fetcher);
-    const result=await match.invoke(args,db,principal,{env,fetcher});
-    let guidanceMeta={guidance_available:true,retrieval_tool:'atax_preemptive_guidance_get'};
-    if(fetcher===fetch&&name!=='atax_preemptive_guidance_get'&&name!=='atax_intro_documentation'){
-      try{
-        const summary=JSON.stringify(result).slice(0,1000);
-        await db.rpc('atax_mcp_preemptive_guidance_update_v1',{
-          owner_subject_in:principal.id,
-          tool_name_in:name,
-          action_summary_in:summary,
-          context_in:{scope:match.scope}
-        });
-      }catch(e){
-        console.warn('[mcp:guidance:update]',e instanceof Error?e.message:String(e));
-      }
-    }
-    const rawText=JSON.stringify(result);
-    const safeText=scrubSecrets(rawText,env);
-    const safeResult=safeText===rawText?result:JSON.parse(safeText);
-    return {content:[{type:'text',text:safeText}],structuredContent:{result:safeResult,guidance:guidanceMeta}};
-  }
-  catch(err){
-    const rawMessage=err instanceof Error?err.message:String(err||'Canonical operation denied or unavailable');
-    const safeMessage=scrubSecrets(rawMessage,env).slice(0,500)||'Canonical operation denied or unavailable';
-    if(fetcher===fetch&&name!=='atax_preemptive_guidance_get'&&name!=='atax_intro_documentation'){
-      try{await db.rpc('atax_mcp_preemptive_guidance_update_v1',{owner_subject_in:principal.id,tool_name_in:name,action_summary_in:'FAILED: '+safeMessage,context_in:{scope:match.scope,error:true}});}catch(e){console.warn('[mcp:guidance:error-update]',e instanceof Error?e.message:String(e));}
-    }
-    return {isError:true,content:[{type:'text',text:safeMessage}]};
-  }
-}
-async function routeRpc(msg,principal,env,fetcher){
-  if(!isObj(msg)||msg.jsonrpc!=='2.0'||(msg.id!==undefined && !(typeof msg.id==='number'||typeof msg.id==='string'||msg.id===null)))return err(null,-32600,'Invalid request');
-  const id=msg.id??null;
-  if(typeof msg.method!=='string')return err(id,-32600,'Invalid method');
-  if(msg.method.startsWith('notifications/'))return undefined;
-  if(msg.id===undefined)return undefined;
-  const params=msg.params??{};
-  if(!isObj(params))return err(id,-32602,'Params must be an object');
-  if(msg.method==='initialize'){
-    const negotiated=typeof params.protocolVersion==='string'&&SUPPORTED.has(params.protocolVersion)?params.protocolVersion:PROTOCOL;
-    return ok(id,{protocolVersion:negotiated,capabilities:{tools:{listChanged:false},resources:{listChanged:false},prompts:{listChanged:false}},serverInfo:{name:'atax-mcp',version:'1.0.0'},instructions:'ATAX is a durable strategic substrate for externally created transient agents. First orient with atax_intro_documentation, then hydrate canonical context and skills before meaningful work. Resolve System → Vision → Target → Goal → Task before execution; reuse existing strategic nodes and create missing planning structure only when necessary. Use dependencies to express strategy. Substantive goals decompose into 1–4-action tasks, then claim → execute externally → evidence → independent verification → reassess. Preemptive guidance is durable state: tool actions refresh it, ordinary responses do not include it, and atax_preemptive_guidance_get retrieves it on demand. ATAX never spawns or schedules agents. Heartbeat and check claims regularly; on lost claim, stop writing the old socket, hand off with the old token, then claim another free socket. For private-repository remote CI, prefer disposable FMRL rather than consuming private GitHub Actions quota; read atax_github_workflows_guide and poll atax_fmrl_get_status until execution and independent cleanup verification are complete.'});
-  }
-  if(msg.method==='ping')return ok(id,{});
-  if(msg.method==='tools/list')return ok(id,{tools:TOOLS.filter(t=>toolAllowed(principal,env,t)).map(({name,description,inputSchema})=>({name,description,inputSchema}))});
-  if(msg.method==='tools/call'){
-    if(typeof params.name!=='string')return err(id,-32602,'Missing tool name');
-    return ok(id,await runCall(params.name,params.arguments??{},principal,env,fetcher));
-  }
-  if(msg.method==='resources/list')return ok(id,{resources:canonicalOwner(principal,env)?resourceDefs:[]});
-  if(msg.method==='resources/templates/list')return ok(id,{resourceTemplates:canonicalOwner(principal,env)?[{uriTemplate:'atax://skills/{slug}',name:'Canonical skill instructions',description:'Current published Supabase skill version',mimeType:'application/json'}]:[]});
-  if(msg.method==='resources/read'){
-    if(typeof params.uri!=='string')return err(id,-32602,'Resource URI required');
-    if(!canonicalOwner(principal,env)||!allowedScope(principal,'atax:read'))return err(id,-32003,'Canonical ATAX owner and read scope required');
-    try {
-      const db=supabase(env,fetcher);
-      let result;
-      if(params.uri==='atax://context/overview')result=await db.rpc('agent_context_overview',{});
-      else if(params.uri==='atax://goals/overview')result=await db.rpc('goal_ledger_overview',{tags_in:null});
-      else if(params.uri==='atax://documentation/intro')result=ATAX_INTRO_DOCUMENTATION;
-      else if(params.uri==='atax://guidance/preemptive')result=await db.rpc('atax_mcp_preemptive_guidance_get_v1',{owner_subject_in:principal.id});
-      else if(params.uri==='atax://guides/github-workflows')result=githubGuide;
-      else if(params.uri==='atax://skills/catalog')result=await db.request('skills?select=id,slug,name,description,status,current_version_id&status=eq.active&limit=200');
-      else if(params.uri==='atax://visual/state')result=getVisualState();
-      else if(params.uri==='atax://visual/summary'){
-        const vState=getVisualState();
-        result={
-          updatedAt:vState.updatedAt,
-          stickyNotesCount:vState.stickyNotes.length,
-          groupBoxesCount:vState.groupBoxes.length,
-          branchingNodesCount:vState.branchingNodes.length,
-          customEdgesCount:vState.customEdges.length,
-          customDomainNodesCount:vState.customDomainNodes.length,
-          positionedNodesCount:Object.values(vState.savedPositions).reduce((acc,scope)=>acc+Object.keys(scope).length,0),
-        };
-      }
-      else if(/^atax:\/\/skills\/[a-z0-9-]+$/.test(params.uri))result=await db.skill(params.uri.slice('atax://skills/'.length));
-      else return err(id,-32002,'Unknown resource URI');
-      return ok(id,{contents:[{uri:params.uri,mimeType:'application/json',text:JSON.stringify(result)}]});
-    }catch{return err(id,-32001,'Canonical resource denied or unavailable');}
-  }
-  if(msg.method==='prompts/list')return ok(id,{prompts:canonicalOwner(principal,env)?[
-    {name:'atax-introduction',description:'Orient an agent to ATAX strategic planning, graph navigation and on-demand preemptive guidance',arguments:[]},
-    {name:'atax-github-workflow',description:'Guide for permanent GitHub repository creation and disposable FMRL private CI',arguments:[]}
-  ]:[]});
-  if(msg.method==='prompts/get'){
-    if(!canonicalOwner(principal,env))return err(id,-32003,'Canonical ATAX owner required');
-    if(params.name==='atax-introduction')return ok(id,{description:ATAX_INTRO_DOCUMENTATION.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(ATAX_INTRO_DOCUMENTATION)}}]});
-    if(params.name!=='atax-github-workflow')return err(id,-32602,'Unknown prompt');
-    return ok(id,{description:githubGuide.title,messages:[{role:'user',content:{type:'text',text:JSON.stringify(githubGuide)}}]});
-  }
-  return err(id,-32601,'Method not found');
-}
-export function createHandler(fetcher=(u,i)=>fetch(u,i),configLoader=loadMcpRuntimeConfig){
-  const jwksCache=new Map();
-  async function dispatch(req,env={}){
-    const url=new URL(req.url);
-    if(url.pathname==='/health'&&req.method==='GET')return json({service:'atax-mcp',status:'ok',protocol:PROTOCOL,databaseTransport:'supabase-data-api'});
-    // Claude/Gemini connector discovery: HEAD /mcp -> 200 (server reachability probe)
-    if(url.pathname==='/mcp'&&req.method==='HEAD')return new Response(null,{status:200,headers:{...safeHeaders,'allow':'POST, GET, HEAD, OPTIONS'}});
-    if((url.pathname==='/.well-known/oauth-protected-resource'||url.pathname==='/.well-known/oauth-protected-resource/mcp')&&(req.method==='GET'||req.method==='HEAD')){
-      const resource=new URL('/mcp',req.url).toString();
-      const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      const metadata={
-        resource,
-        authorization_servers:server?[server]:[],
-        bearer_methods_supported:['header'],
-        scopes_supported:['openid','profile','email','offline_access'],
-        resource_documentation:new URL('/health',req.url).toString(),
-      };
-      if(server){
-        try{
-          const issuerUrl=new URL(server);
-          if(issuerUrl.protocol==='https:'){
-            const basePath=issuerUrl.pathname.replace(/\/+$/,'');
-            metadata.registration_endpoint=new URL(`${basePath}/oauth/clients/register`,issuerUrl.origin).toString();
-          }
-        }catch{/* invalid server URL — omit registration_endpoint */}
-      }
-      if(req.method==='HEAD')return new Response(null,{status:200,headers:safeHeaders});
-      return json(metadata);
-    }
-    if((url.pathname==='/.well-known/oauth-authorization-server'||url.pathname==='/.well-known/oauth-authorization-server/mcp'||url.pathname==='/.well-known/openid-configuration')&&(req.method==='GET'||req.method==='HEAD')){
-      const server=String(env.MCP_AUTH_AUTHORIZATION_SERVER||env.MCP_AUTH_ISSUER||'').trim();
-      if(!server)return json({error:'Authorization server not configured'},404);
-      if(req.method==='HEAD')return new Response(null,{status:200,headers:safeHeaders});
-      try{
-        const issuerUrl=new URL(server);
-        if(issuerUrl.protocol!=='https:')return json({error:'Authorization server must be HTTPS'},400);
-        const basePath=issuerUrl.pathname.replace(/\/+$/,'');
-        const candidates=[
-          new URL(`${basePath}/.well-known/openid-configuration`,issuerUrl.origin).toString(),
-          ...(basePath?[
-            new URL(`${basePath}/.well-known/oauth-authorization-server`,issuerUrl.origin).toString(),
-            new URL('/.well-known/openid-configuration',issuerUrl.origin).toString(),
-          ]:[]),
-        ];
-        for(const discoveryUrl of candidates){
-          try{
-            const disc=await fetcher(discoveryUrl,{redirect:'follow',headers:{accept:'application/json'}});
-            if(disc.ok){
-              const data=await disc.json();
-              return json(data);
-            }
-          }catch{/* try next discovery URL candidate */}
-        }
-        return json({error:'Authorization server discovery unavailable'},502);
-      }catch{return json({error:'Authorization server discovery failed'},502);}
-    }
-    if(url.pathname==='/socket'){
-      if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, OPTIONS'}});
-      if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
-      const socketWorker=createConfiguredSocketWorker(env,fetcher);
-      return socketWorker.fetch(req);
-    }
-    if(url.pathname!=='/mcp')return json({error:'Not found'},404);
-    if(!allowedOrigin(req,env))return json({error:'Origin forbidden'},403);
-    if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...safeHeaders,allow:'POST, GET, HEAD, OPTIONS'}});
-    if(!['POST','GET','DELETE'].includes(req.method))return json({error:'Method not allowed'},405,{allow:'POST, GET, HEAD'});
-    if(!env.__ledgerDb||!(env.MCP_SHARED_TOKEN_SHA256||env.MCP_AUTH_JWKS_URL))return json({error:'ATAX MCP not configured'},503);
-    let principal;try{principal=await authenticate(req,env,fetcher,jwksCache);}catch(e){console.error('[mcp:auth:exception]',e instanceof Error?e.message:String(e));return json({error:'Authentication unavailable'},503);}
-    if(!principal)return json({error:'Unauthorized'},401,{'www-authenticate':'Bearer resource_metadata="'+new URL('/.well-known/oauth-protected-resource/mcp',req.url).toString()+'"'});
-    if(req.method==='GET')return json({error:'Stateless MCP endpoint does not support standalone SSE'},405,{allow:'POST'});
-    if(req.method==='DELETE')return json({error:'No sessions to terminate'},405,{allow:'POST'});
-    if(!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))return json({error:'Content-Type must be application/json'},415);
-    const length=Number(req.headers.get('content-length')||0);if(length>MAX_BODY_BYTES)return json({error:'Request too large'},413);
-    let body;try{const source=await req.text();if(encoder.encode(source).length>MAX_BODY_BYTES)return json({error:'Request too large'},413);body=JSON.parse(source);}catch{return json(err(null,-32700,'Parse error'),400);}
-    if(Array.isArray(body)&&body.length===0)return json(err(null,-32600,'Empty JSON-RPC batch'),400);
-    const batch=Array.isArray(body)?body:[body];if(batch.length>30)return json(err(null,-32600,'Too many batch requests'),400);
-    const results=[];for(const msg of batch){const reply=await routeRpc(msg,principal,env,fetcher);if(reply!==undefined)results.push(reply);}
-    if(!results.length)return new Response(null,{status:202,headers:safeHeaders});
-    return json(Array.isArray(body)?results:results[0]);
-  }
-  return async (req,bootstrapEnv={})=>{
-    const path=new URL(req.url).pathname;
-    let env={};
-    if(path==='/mcp'||path==='/socket'||path==='/.well-known/oauth-protected-resource'||
-       path==='/.well-known/oauth-protected-resource/mcp'||path==='/.well-known/oauth-authorization-server'||
-       path==='/.well-known/oauth-authorization-server/mcp'||path==='/.well-known/openid-configuration'){
-      try{env=await configLoader(bootstrapEnv);}
-      catch(err){console.error('[worker:configLoader]', err);return json({error:'ATAX MCP not configured'},503);}
-    }
-    const response=await dispatch(req,env);
-    console.log('[mcp:req]',req.method,path,response.status);
-    const origin=req.headers.get('origin');
-    if(!origin||!allowedOrigin(req,env))return response;
-    const headers=new Headers(response.headers);
-    headers.set('Access-Control-Allow-Origin',origin);
-    headers.set('Access-Control-Allow-Methods','POST, GET, OPTIONS');
-    headers.set('Access-Control-Allow-Headers','Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id');
-    headers.set('Access-Control-Max-Age','600');
-    headers.set('Vary','Origin');
-    return new Response(response.body,{status:response.status,headers});
-  };
-}
-export { routeRpc, authenticate, TOOLS, byName };
-export default {fetch:createHandler()};
+    return db.rpc('atax_mcp_skill_register_v1',{payload:{name:a.name,slug:a.slug,version:a.version??'1.0.0',instructions:skill.content,source:{source_type:'github',name:a.name,repository:a.repository,owner:a.repository.split('/')[0],uri:`https://github.com/${a.repository}/tree/${a.revision}/${skillPath}`,license:a.license??'unknown',metadata:{immutable_revision:a.revision}},manifest:{...(a.manifest??{}),source:{repository:a.repository,revision:a.revision,skill_path:skillPath}},assets,metadata:{imported_from_github:true,immutable_revision:a.revision},...compact({description:a.description})}});
+  }),
   tool('atax_task_claim_next', 'Atomically claim the next eligible task using caller identity', 'atax:write', one('claim task',{capabilities:{type:'array',items:S.text('Agent capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)}), (a,db,p) => db.rpc('task_ledger_claim_next',{agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],lease_seconds_in:a.lease_seconds??300})),
   tool('atax_goal_claim_task', 'Atomically claim an eligible task within a specific goal', 'atax:write', one('claim from goal',{goal_key:S.text('Goal key'),capabilities:{type:'array',items:S.text('Capability',80),maxItems:30},lease_seconds:S.int('Lease length',60,900)},['goal_key']), (a,db,p)=>db.rpc('atax_goal_claim_safe',{goal_key_in:a.goal_key,agent_id_in:p.id,agent_name_in:p.id,agent_type_in:'mcp-external',capabilities_in:a.capabilities??[],session_id_in:p.id,lease_seconds_in:a.lease_seconds??300})),
   tool('atax_task_check_claim', 'Check claim ownership and fencing token', 'atax:write', one('check claim',{task_id:S.text('Task UUID',36),claim_token:S.text('Claim UUID',36)},['task_id','claim_token']), (a,db,p)=>db.rpc('task_ledger_check_claim',{task_id_in:a.task_id,agent_id_in:p.id,claim_token_in:a.claim_token})),
